@@ -1,0 +1,243 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; max-width: 800px; margin: 0 auto; }
+        .test { margin: 20px 0; padding: 10px; border: 1px solid #ccc; }
+        .pass { background: #90EE90; }
+        .fail { background: #FFB6C1; }
+        pre { background: #f4f4f4; padding: 10px; overflow-x: auto; }
+        button { padding: 10px 20px; margin: 5px; }
+        #results { margin-top: 20px; }
+    </style>
+</head>
+<body>
+    <h1>ZigHermes UI Test</h1>
+    
+    <div class="test">
+        <h3>Test 1: Server Health</h3>
+        <button onclick="testHealth()">Run</button>
+        <pre id="test1-result">Click Run to execute</pre>
+    </div>
+    
+    <div class="test">
+        <h3>Test 2: API Config</h3>
+        <button onclick="testConfig()">Run</button>
+        <pre id="test2-result">Click Run to execute</pre>
+    </div>
+    
+    <div class="test">
+        <h3>Test 3: Tools API</h3>
+        <button onclick="testTools()">Run</button>
+        <pre id="test3-result">Click Run to execute</pre>
+    </div>
+    
+    <div class="test">
+        <h3>Test 4: Non-Streaming Chat</h3>
+        <button onclick="testChatNoStream()">Run</button>
+        <pre id="test4-result">Click Run to execute</pre>
+    </div>
+    
+    <div class="test">
+        <h3>Test 5: Streaming Chat (stream:true)</h3>
+        <button onclick="testChatStream()">Run</button>
+        <pre id="test5-result">Click Run to execute</pre>
+    </div>
+    
+    <div class="test">
+        <h3>Test 6: Full UI Simulation</h3>
+        <button onclick="testFullUI()">Run</button>
+        <pre id="test6-result">Click Run to execute</pre>
+    </div>
+    
+    <div id="results"></div>
+
+    <script>
+        const API_BASE = 'http://localhost:5175';
+        
+        function log(testId, message, isError = false) {
+            const el = document.getElementById(testId);
+            el.textContent = message;
+            el.style.background = isError ? '#FFB6C1' : '#90EE90';
+            console.log(`[${testId}]`, message);
+        }
+        
+        async function testHealth() {
+            try {
+                const res = await fetch(`${API_BASE}/health`);
+                const data = await res.json();
+                log('test1-result', `✓ Health OK\n${JSON.stringify(data, null, 2)}`);
+            } catch (e) {
+                log('test1-result', `✗ Health Failed: ${e.message}`, true);
+            }
+        }
+        
+        async function testConfig() {
+            try {
+                const res = await fetch(`${API_BASE}/api/config`);
+                const data = await res.json();
+                log('test2-result', `✓ Config OK\n${JSON.stringify(data, null, 2)}`);
+            } catch (e) {
+                log('test2-result', `✗ Config Failed: ${e.message}`, true);
+            }
+        }
+        
+        async function testTools() {
+            try {
+                const res = await fetch(`${API_BASE}/api/tools`);
+                const data = await res.json();
+                log('test3-result', `✓ Tools OK\nCount: ${data.count}\nFirst tool: ${data.tools?.[0]?.name || 'none'}`);
+            } catch (e) {
+                log('test3-result', `✗ Tools Failed: ${e.message}`, true);
+            }
+        }
+        
+        async function testChatNoStream() {
+            try {
+                const res = await fetch(`${API_BASE}/v1/chat/completions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: 'MiniMax-M2.7',
+                        messages: [{ role: 'user', content: 'Hi' }],
+                        stream: false
+                    })
+                });
+                
+                const text = await res.text();
+                
+                // Try to parse as JSON
+                try {
+                    const data = JSON.parse(text);
+                    const content = data.choices?.[0]?.message?.content || 'no content';
+                    log('test4-result', `✓ Non-Stream OK\nContent: ${content.slice(0, 100)}...`);
+                } catch {
+                    log('test4-result', `✗ Parse Failed\nRaw: ${text.slice(0, 200)}`, true);
+                }
+            } catch (e) {
+                log('test4-result', `✗ Request Failed: ${e.message}`, true);
+            }
+        }
+        
+        async function testChatStream() {
+            try {
+                const res = await fetch(`${API_BASE}/v1/chat/completions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: 'MiniMax-M2.7',
+                        messages: [{ role: 'user', content: 'Hello' }],
+                        stream: true
+                    })
+                });
+                
+                const text = await res.text();
+                
+                // Analyze response format
+                const lines = text.split('\n');
+                let hasDataPrefix = false;
+                let hasDone = false;
+                let jsonCount = 0;
+                let content = '';
+                
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) hasDataPrefix = true;
+                    if (line.includes('[DONE]')) hasDone = true;
+                    if (line.startsWith('data: ') && !line.includes('[DONE]')) {
+                        try {
+                            const data = JSON.parse(line.slice(6));
+                            jsonCount++;
+                            content += data.choices?.[0]?.delta?.content || '';
+                        } catch {}
+                    }
+                }
+                
+                // Try parsing as regular JSON too
+                try {
+                    const data = JSON.parse(text);
+                    if (data.choices?.[0]?.message?.content) {
+                        content = data.choices[0].message.content;
+                        log('test5-result', `✓ Stream Response (as JSON)\nContent: ${content.slice(0, 100)}...`);
+                        return;
+                    }
+                } catch {}
+                
+                if (hasDataPrefix) {
+                    log('test5-result', `✓ SSE Format\nData lines: ${jsonCount}\nContent: ${content.slice(0, 100)}...`);
+                } else if (content) {
+                    log('test5-result', `✓ Content extracted\n${content.slice(0, 100)}...`);
+                } else {
+                    log('test5-result', `✗ Unknown format\nRaw: ${text.slice(0, 300)}`, true);
+                }
+            } catch (e) {
+                log('test5-result', `✗ Request Failed: ${e.message}`, true);
+            }
+        }
+        
+        async function testFullUI() {
+            // Simulate what the UI does
+            const messages = [];
+            
+            try {
+                // 1. Add user message
+                messages.push({ role: 'user', content: 'What is 1+1?' });
+                
+                // 2. Send request
+                const res = await fetch(`${API_BASE}/v1/chat/completions`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: 'MiniMax-M2.7',
+                        messages: messages,
+                        stream: true
+                    })
+                });
+                
+                const text = await res.text();
+                
+                // 3. Parse response (what UI should do)
+                let assistantContent = '';
+                
+                // Try SSE format first
+                const lines = text.split('\n');
+                let isSSE = false;
+                
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        isSSE = true;
+                        const data = line.slice(6);
+                        if (data === '[DONE]') continue;
+                        try {
+                            const parsed = JSON.parse(data);
+                            const content = parsed.choices?.[0]?.delta?.content || '';
+                            if (content) assistantContent += content;
+                        } catch {}
+                    }
+                }
+                
+                // If not SSE or no content, try regular JSON
+                if (!isSSE || !assistantContent) {
+                    try {
+                        const parsed = JSON.parse(text);
+                        assistantContent = parsed.choices?.[0]?.message?.content ||
+                                         parsed.choices?.[0]?.text ||
+                                         parsed.content || '';
+                    } catch {
+                        assistantContent = text;
+                    }
+                }
+                
+                // 4. Add assistant message
+                messages.push({ role: 'assistant', content: assistantContent });
+                
+                log('test6-result', `✓ Full UI Flow OK\nMessages:\n${messages.map(m => `${m.role}: ${m.content.slice(0, 50)}...`).join('\n')}`);
+            } catch (e) {
+                log('test6-result', `✗ Full UI Failed: ${e.message}`, true);
+            }
+        }
+    </script>
+</body>
+</html>

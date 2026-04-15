@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat Test - Simple</title>
+    <style>
+        body { font-family: system-ui, sans-serif; max-width: 600px; margin: 40px auto; padding: 20px; }
+        .messages { border: 1px solid #ccc; padding: 10px; min-height: 300px; margin-bottom: 10px; }
+        .message { padding: 8px 12px; margin: 5px 0; border-radius: 8px; }
+        .user { background: #007bff; color: white; text-align: right; }
+        .assistant { background: #e9ecef; }
+        .error { background: #f8d7da; color: #721c24; }
+        .input-row { display: flex; gap: 10px; }
+        input { flex: 1; padding: 10px; font-size: 16px; }
+        button { padding: 10px 20px; font-size: 16px; }
+        .status { color: #666; font-size: 12px; margin-top: 5px; }
+    </style>
+</head>
+<body>
+    <h1>ZigHermes Chat</h1>
+    
+    <div class="messages" id="messages">
+        <div class="assistant message">你好！发送消息开始对话。</div>
+    </div>
+    
+    <div class="input-row">
+        <input type="text" id="input" placeholder="输入消息..." onkeydown="if(event.key==='Enter')send()">
+        <button onclick="send()">发送</button>
+    </div>
+    
+    <div class="status" id="status">就绪</div>
+
+    <script>
+        const messages = [];
+        
+        function addMessage(role, content) {
+            messages.push({ role, content });
+            const div = document.createElement('div');
+            div.className = `message ${role}`;
+            div.textContent = content;
+            document.getElementById('messages').appendChild(div);
+            document.getElementById('messages').scrollTop = document.getElementById('messages').scrollHeight;
+        }
+        
+        function setStatus(text) {
+            document.getElementById('status').textContent = text;
+        }
+        
+        async function send() {
+            const input = document.getElementById('input');
+            const text = input.value.trim();
+            if (!text) return;
+            
+            input.value = '';
+            addMessage('user', text);
+            setStatus('发送中...');
+            
+            try {
+                const res = await fetch('/v1/chat/completions', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        model: 'MiniMax-M2.7',
+                        messages: messages.map(m => ({ role: m.role, content: m.content })),
+                        stream: true
+                    })
+                });
+                
+                if (!res.ok) {
+                    throw new Error('HTTP ' + res.status);
+                }
+                
+                // Read as text
+                const text = await res.text();
+                setStatus('解析响应...');
+                
+                // Parse SSE
+                let content = '';
+                const lines = text.split('\n');
+                
+                for (const line of lines) {
+                    if (line.startsWith('data: ') && !line.includes('[DONE]')) {
+                        const json = line.slice(6);
+                        try {
+                            const data = JSON.parse(json);
+                            const delta = data.choices?.[0]?.delta?.content;
+                            if (delta) content += delta;
+                        } catch (e) {
+                            // Skip invalid JSON
+                        }
+                    }
+                }
+                
+                // Fallback if no SSE content
+                if (!content) {
+                    try {
+                        const data = JSON.parse(text);
+                        content = data.choices?.[0]?.message?.content || data.content || text;
+                    } catch (e) {
+                        content = text;
+                    }
+                }
+                
+                addMessage('assistant', content);
+                setStatus('完成');
+                
+            } catch (e) {
+                addMessage('error', '错误: ' + e.message);
+                setStatus('错误');
+            }
+        }
+    </script>
+</body>
+</html>

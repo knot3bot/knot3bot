@@ -1,0 +1,107 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  ZIG_VERSION: "0.15.2"
+
+jobs:
+  release:
+    name: Release for ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-linux-musl
+          - aarch64-linux-musl
+          - x86_64-macos-gnu
+          - aarch64-macos-gnu
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Zig
+        uses: goto-bus-terminal/docker-ziglang@v1
+        with:
+          zig-version: ${{ env.ZIG_VERSION }}
+
+      - name: Cross-compile
+        run: |
+          TARGET=${{ matrix.target }}
+          ARCH=$(echo $TARGET | cut -d- -f1)
+          OS=$(echo $TARGET | cut -d- -f2)
+          EXT=$(echo $TARGET | cut -d- -f3)
+          
+          # Build for target
+          zig build -Dtarget=$TARGET -Doptimize=ReleaseSmall
+          
+          # Rename output
+          mkdir -p release/
+          cp zig-out/bin/zighermes release/zighermes-${TARGET}
+          
+          # Print size
+          ls -lh release/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: zighermes-${{ matrix.target }}
+          path: release/*
+
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [release]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          draft: true
+          files: artifacts/**/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  docker:
+    name: Docker Build & Push
+    runs-on: ubuntu-latest
+    needs: [release]
+    
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
+
+      - name: Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:${{ steps.version.outputs.VERSION }}
+            ghcr.io/${{ github.repository }}:latest

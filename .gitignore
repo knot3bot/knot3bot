@@ -1,0 +1,51 @@
+# Build artifacts
+zig-out/
+.zig-cache/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe
+
+# Editor directories
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment files (keep .env.example)
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+logs/
+
+# Test artifacts
+test-output/
+coverage/
+
+# Data files
+*.db
+*.sqlite
+*.sqlite3
+data/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Release artifacts
+release/
+dist/
+build/
+
+# Credentials
+*.pem
+*.key
+credentials.json
