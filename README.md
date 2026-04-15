@@ -113,7 +113,20 @@ zig fmt src/
 ./scripts/docker-test.sh
 ```
 
+## Documentation
+
+Full documentation available in [`docs/`](docs/):
+
+- [Installation](docs/installation.md)
+- [Quick Start](docs/quickstart.md)
+- [CLI Reference](docs/cli.md)
+- [Configuration](docs/configuration.md)
+- [HTTP API](docs/api.md)
+- [Tools Reference](docs/tools.md)
+- [Architecture](docs/architecture.md)
+
 ## Contributing
+
 
 Contributions welcome. Please read existing code style (Zig standard, snake_case functions, PascalCase types). Run `zig build test` before submitting.
 
