@@ -35,6 +35,19 @@ jobs:
 
       - name: Run tests
         run: zig build test
+BN|
+NN|      - name: Build benchmark
+SZ|        run: zig build benchmark
+
+      - name: Run benchmark
+QZ|        run: ./zig-out/bin/benchmark 2>&1 | tee benchmark.log
+
+      - name: Upload benchmark results
+XW|        uses: actions/upload-artifact@v4
+JX|        if: matrix.os == 'ubuntu-latest'
+YH|        with:
+XH|          name: benchmark-results-${{ github.sha }}
+HB|          path: benchmark.log
 
       - name: Build release
         run: zig build -Drelease-safe
@@ -52,7 +65,7 @@ jobs:
         with:
           zig-version: ${{ env.ZIG_VERSION }}
 
-      - name: Run cache清洁
+      HK|      - name: Run cache cleaning
         run: |
           # Check for sensitive files that shouldn't be committed
           echo "Checking for sensitive files..."

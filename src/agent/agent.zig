@@ -70,10 +70,19 @@ pub const ReActStep = struct {
 
     pub fn toJSON(self: *const ReActStep, allocator: std.mem.Allocator) ![]const u8 {
         var output: std.ArrayList(u8) = .empty;
-        defer output.deinit(allocator);
+        errdefer output.deinit(allocator);
+
+        // Track temporary allocations to free them later
+        var temp_allocs = std.ArrayList([]u8).init(allocator);
+        defer {
+            for (temp_allocs.items) |slice| allocator.free(slice);
+            temp_allocs.deinit(allocator);
+        }
 
         try output.appendSlice(allocator, "{\"step\":");
-        try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{}", .{self.step_number}));
+        const step_str = try std.fmt.allocPrint(allocator, "{}", .{self.step_number});
+        try temp_allocs.append(allocator, step_str);
+        try output.appendSlice(allocator, step_str);
         try output.appendSlice(allocator, ",\"thought\":\"");
         try output.appendSlice(allocator, self.thought);
         try output.appendSlice(allocator, "\"");
@@ -105,7 +114,9 @@ pub const ReActStep = struct {
         }
 
         try output.appendSlice(allocator, ",\"duration_ms\":");
-        try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{}", .{self.duration_ms}));
+        const duration_str = try std.fmt.allocPrint(allocator, "{}", .{self.duration_ms});
+        try temp_allocs.append(allocator, duration_str);
+        try output.appendSlice(allocator, duration_str);
         try output.appendSlice(allocator, "}");
 
         return try output.toOwnedSlice(allocator);
