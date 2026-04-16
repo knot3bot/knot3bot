@@ -42,7 +42,7 @@ jobs:
           
           # Rename output
           mkdir -p release/
-          cp zig-out/bin/zighermes release/zighermes-${TARGET}
+          cp zig-out/bin/knot3bot release/knot3bot-${TARGET}
           
           # Print size
           ls -lh release/
@@ -50,7 +50,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: zighermes-${{ matrix.target }}
+          name: knot3bot-${{ matrix.target }}
           path: release/*
 
   create-release:
