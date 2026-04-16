@@ -520,8 +520,9 @@ test "Edge case - empty model name" {
 
 test "Edge case - very long content in message" {
     const allocator = std.testing.allocator;
-    const long_content = "A".** 10000;
-    const messages = &[_]ChatMessage{.{ .role = "user", .content = long_content }};
+    var long_content: [10000]u8 = undefined;
+    @memset(&long_content, 'A');
+    const messages = &[_]ChatMessage{.{ .role = "user", .content = &long_content }};
 
     const request = ChatRequest{
         .model = "gpt-4o",

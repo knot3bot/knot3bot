@@ -88,12 +88,18 @@ pub const AnthropicClient = struct {
         const argv = &[_][]const u8{
             "curl",
             "-s",
-            "--max-time", "120",
-            "-X", "POST",
-            "-H", "Content-Type: application/json",
-            "-H", auth_header,
-            "-H", "anthropic-version: 2023-06-01",
-            "--data-binary", "@-",
+            "--max-time",
+            "120",
+            "-X",
+            "POST",
+            "-H",
+            "Content-Type: application/json",
+            "-H",
+            auth_header,
+            "-H",
+            "anthropic-version: 2023-06-01",
+            "--data-binary",
+            "@-",
             "https://api.anthropic.com/v1/messages",
         };
 
@@ -212,7 +218,7 @@ pub const AnthropicClient = struct {
                                 const tc_name = if (block.object.get("name")) |v| if (v == .string) v.string else "" else "";
                                 const tc_input = if (block.object.get("input")) |v| std.json.Stringify.valueAlloc(self.allocator, v, .{}) catch "{}" else "{}";
                                 defer if (block.object.get("input")) |_| self.allocator.free(tc_input);
-                                try w.print("{{\"id\":\"{s}\",\"type\":\"function\",\"function\":{{\"name\":\"{s}\",\"arguments\":", .{tc_id, tc_name});
+                                try w.print("{{\"id\":\"{s}\",\"type\":\"function\",\"function\":{{\"name\":\"{s}\",\"arguments\":", .{ tc_id, tc_name });
                                 try w.writeAll(tc_input);
                                 try w.writeAll("}}}");
                             }
@@ -235,14 +241,13 @@ pub const AnthropicClient = struct {
                 if (u.object.get("output_tokens")) |ct| {
                     if (ct == .integer) completion_tokens = @intCast(ct.integer);
                 }
-                try w.print(",\"usage\":{{\"prompt_tokens\":{d},\"completion_tokens\":{d},\"total_tokens\":{d}}}", .{prompt_tokens, completion_tokens, prompt_tokens + completion_tokens});
+                try w.print(",\"usage\":{{\"prompt_tokens\":{d},\"completion_tokens\":{d},\"total_tokens\":{d}}}", .{ prompt_tokens, completion_tokens, prompt_tokens + completion_tokens });
             }
         }
 
         try w.writeAll("}");
         return try output_json.toOwnedSlice(self.allocator);
     }
-
 
     fn buildRequestBody(self: *AnthropicClient, messages: []const AnthropicMessage) ![]u8 {
         var json: std.ArrayList(u8) = .empty;

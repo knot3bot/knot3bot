@@ -141,9 +141,8 @@ pub const WebSearchTool = struct {
         defer allocator.free(url);
 
         const argv = &[_][]const u8{
-            "curl", "-s", "-L", "--max-time", "15",
-            "-A", "knot3bot/1.0",
-            url,
+            "curl", "-s",           "-L", "--max-time", "15",
+            "-A",   "knot3bot/1.0", url,
         };
 
         var child = std.process.Child.init(argv, allocator);
@@ -178,9 +177,9 @@ pub const WebSearchTool = struct {
 
         while (count < limit) {
             const link_start = std.mem.indexOf(u8, html[pos..], "<a href=\"") orelse break;
-            const link_end = std.mem.indexOf(u8, html[pos + link_start + 9..], "\"") orelse break;
+            const link_end = std.mem.indexOf(u8, html[pos + link_start + 9 ..], "\"") orelse break;
             const actual_pos = pos + link_start + 9;
-            const href = html[actual_pos..actual_pos + link_end];
+            const href = html[actual_pos .. actual_pos + link_end];
 
             if (!std.mem.startsWith(u8, href, "http")) {
                 pos = actual_pos + link_end;
@@ -189,9 +188,9 @@ pub const WebSearchTool = struct {
 
             pos = actual_pos + link_end;
             const title_start = std.mem.indexOf(u8, html[pos..], ">") orelse break;
-            const title_end = std.mem.indexOf(u8, html[pos + title_start + 1..], "</a>") orelse break;
+            const title_end = std.mem.indexOf(u8, html[pos + title_start + 1 ..], "</a>") orelse break;
             const actual_title_start = pos + title_start + 1;
-            const title = html[actual_title_start..actual_title_start + title_end];
+            const title = html[actual_title_start .. actual_title_start + title_end];
 
             const clean_title = try stripHtmlTags(allocator, title);
 
@@ -387,9 +386,8 @@ pub const WebExtractTool = struct {
 
         const url = urls[0];
         const argv = &[_][]const u8{
-            "curl", "-s", "-L", "--max-time", "30",
-            "-A", "knot3bot/1.0",
-            url,
+            "curl", "-s",           "-L", "--max-time", "30",
+            "-A",   "knot3bot/1.0", url,
         };
 
         var child = std.process.Child.init(argv, allocator);

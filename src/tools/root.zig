@@ -194,7 +194,6 @@ pub const mcp_tool = @import("mcp_tool.zig");
 pub const process_registry = @import("process_registry.zig");
 pub const code_execution_tool = @import("code_execution_tool.zig");
 
-
 // ── Tool Registry ─────────────────────────────────────────────────────────────
 
 pub const ToolEntry = struct {

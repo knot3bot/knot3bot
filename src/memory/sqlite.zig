@@ -7,9 +7,6 @@ const c = @cImport(@cInclude("sqlite3.h"));
 const SQLITE_STATIC: ?*const fn (?*anyopaque) callconv(.c) void = null;
 const SQLITE_TRANSIENT: ?*const fn (?*anyopaque) callconv(.c) void = SQLITE_STATIC;
 
-
-
-
 pub const SqlError = error{
     DatabaseOpenFailed,
     PrepareFailed,

@@ -331,7 +331,9 @@ pub const Agent = struct {
         self.usage = UsageStats{};
 
         try self.messages.append(self.allocator, .{ .role = .user, .content = query });
-        errdefer { for (self.messages.items) |msg| self.allocator.free(msg.content); }
+        errdefer {
+            for (self.messages.items) |msg| self.allocator.free(msg.content);
+        }
 
         // Prompt cache check
         if (self.prompt_cache) |cache| {
@@ -384,8 +386,6 @@ pub const Agent = struct {
                     }
                 }
             }
-
-
 
             // Call LLM
             const llm_result = try self.callLLMWithTools();
@@ -443,7 +443,7 @@ pub const Agent = struct {
                     const tool_duration: u64 = @intCast(std.time.milliTimestamp() - tool_start);
 
                     const result_str = if (tool_result) |tr| tr else "{\"error\":\"Tool execution failed\"}";
-                    
+
                     if (self.config.verbose) {
                         std.debug.print("[Tool {s} took {d}ms]\n", .{ tc.function.name, tool_duration });
                     }
@@ -455,11 +455,9 @@ pub const Agent = struct {
                     try all_results.appendSlice(self.allocator, result_str);
 
                     // Add tool message to conversation
-                    const tool_msg = try std.fmt.allocPrint(self.allocator, 
-                        "{{\"tool\": \"{s}\", \"result\": {s}}}", 
-                        .{ tc.function.name, result_str });
+                    const tool_msg = try std.fmt.allocPrint(self.allocator, "{{\"tool\": \"{s}\", \"result\": {s}}}", .{ tc.function.name, result_str });
                     defer self.allocator.free(tool_msg);
-                    
+
                     try self.messages.append(self.allocator, .{
                         .role = .tool,
                         .content = tool_msg,
@@ -507,7 +505,7 @@ pub const Agent = struct {
                 };
             }
             return result;
-            }
+        }
 
         // Max iterations reached
         self.usage.errors += 1;
@@ -548,15 +546,30 @@ pub const Agent = struct {
         defer msgs.deinit(self.allocator);
         for (self.messages.items) |msg| {
             const role = switch (msg.role) {
-                .system => "system", .user => "user", .assistant => "assistant", .tool => "tool",
+                .system => "system",
+                .user => "user",
+                .assistant => "assistant",
+                .tool => "tool",
             };
             try msgs.append(self.allocator, .{ .role = role, .content = msg.content });
         }
         const tool_defs = try self.getToolDefs();
-        defer { for (tool_defs) |td| { self.allocator.free(td.function.name); if (td.function.description) |d| self.allocator.free(d); if (td.function.parameters) |p| self.allocator.free(p); } self.allocator.free(tool_defs); }
+        defer {
+            for (tool_defs) |td| {
+                self.allocator.free(td.function.name);
+                if (td.function.description) |d| self.allocator.free(d);
+                if (td.function.parameters) |p| self.allocator.free(p);
+            }
+            self.allocator.free(tool_defs);
+        }
         var stream_data = StreamUserData{ .callback = callback, .user_data = user_data, .allocator = self.allocator };
         var client_val: LLMClient = self.client.?; // Store unwrapped value
-        try providers.openai_compatible.chatStreamWithRetry(&client_val, msgs.items, RetryConfig{}, struct { fn func(chunk: []const u8, ud: ?*anyopaque) void { const data = @as(*StreamUserData, @ptrCast(@alignCast(ud.?))); data.callback(chunk, data.user_data); } }.func, &stream_data);
+        try providers.openai_compatible.chatStreamWithRetry(&client_val, msgs.items, RetryConfig{}, struct {
+            fn func(chunk: []const u8, ud: ?*anyopaque) void {
+                const data = @as(*StreamUserData, @ptrCast(@alignCast(ud.?)));
+                data.callback(chunk, data.user_data);
+            }
+        }.func, &stream_data);
         while (self.iteration_budget.hasRemaining()) {
             self.iteration_budget.tick();
             self.usage.iterations += 1;
@@ -564,24 +577,26 @@ pub const Agent = struct {
             if (llm_result.usage) |u| self.usage.update(u.prompt, u.completion);
             self.usage.api_calls += 1;
             try self.messages.append(self.allocator, .{ .role = .assistant, .content = llm_result.content });
-            if (llm_result.tool_calls) |tcs| { if (tcs.len > 0) {
-                var all_results: std.ArrayList(u8) = .empty;
-                defer all_results.deinit(self.allocator);
-                for (tcs) |tc| {
-                    self.usage.tool_calls += 1;
-                    const tool_result = self.executeToolWithError(tc.function.name, tc.function.arguments);
-                    const result_str = if (tool_result) |tr| tr else "{\"error\":\"Tool execution failed\"}";
-                    if (all_results.items.len > 0) try all_results.appendSlice(self.allocator, ", ");
-                    try all_results.appendSlice(self.allocator, result_str);
-                    const tool_msg = try std.fmt.allocPrint(self.allocator, "tool: {s}, result: {s}", .{ tc.function.name, result_str });
-                    defer self.allocator.free(tool_msg);
-                    try self.messages.append(self.allocator, .{ .role = .tool, .content = tool_msg });
+            if (llm_result.tool_calls) |tcs| {
+                if (tcs.len > 0) {
+                    var all_results: std.ArrayList(u8) = .empty;
+                    defer all_results.deinit(self.allocator);
+                    for (tcs) |tc| {
+                        self.usage.tool_calls += 1;
+                        const tool_result = self.executeToolWithError(tc.function.name, tc.function.arguments);
+                        const result_str = if (tool_result) |tr| tr else "{\"error\":\"Tool execution failed\"}";
+                        if (all_results.items.len > 0) try all_results.appendSlice(self.allocator, ", ");
+                        try all_results.appendSlice(self.allocator, result_str);
+                        const tool_msg = try std.fmt.allocPrint(self.allocator, "tool: {s}, result: {s}", .{ tc.function.name, result_str });
+                        defer self.allocator.free(tool_msg);
+                        try self.messages.append(self.allocator, .{ .role = .tool, .content = tool_msg });
+                    }
+                    const indicator = try std.fmt.allocPrint(self.allocator, "[Tool(s) executed. Results: {s}]", .{try all_results.toOwnedSlice(self.allocator)});
+                    defer self.allocator.free(indicator);
+                    callback(indicator, user_data);
+                    continue;
                 }
-                const indicator = try std.fmt.allocPrint(self.allocator, "[Tool(s) executed. Results: {s}]", .{ try all_results.toOwnedSlice(self.allocator) });
-                defer self.allocator.free(indicator);
-                callback(indicator, user_data);
-                continue;
-            } }
+            }
             return llm_result.content;
         }
         return "Max iterations reached";
@@ -933,11 +948,7 @@ pub const Agent = struct {
             const content_copy = try self.allocator.dupe(u8, msg.content);
             errdefer self.allocator.free(content_copy);
 
-            const role_enum: Role = if (std.mem.eql(u8, msg.role, "system")) .system
-                else if (std.mem.eql(u8, msg.role, "user")) .user
-                else if (std.mem.eql(u8, msg.role, "assistant")) .assistant
-                else if (std.mem.eql(u8, msg.role, "tool")) .tool
-                else .user;
+            const role_enum: Role = if (std.mem.eql(u8, msg.role, "system")) .system else if (std.mem.eql(u8, msg.role, "user")) .user else if (std.mem.eql(u8, msg.role, "assistant")) .assistant else if (std.mem.eql(u8, msg.role, "tool")) .tool else .user;
 
             try self.messages.append(self.allocator, .{
                 .role = role_enum,

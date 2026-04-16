@@ -71,9 +71,9 @@ fn cleanupSlot(slot_idx: usize) void {
     if (process_table[slot_idx].child) |child| {
         std.heap.page_allocator.destroy(child);
     }
-        if (process_table[slot_idx].cwd) |cwd| {
-            std.heap.page_allocator.free(cwd);
-        }
+    if (process_table[slot_idx].cwd) |cwd| {
+        std.heap.page_allocator.free(cwd);
+    }
     process_table[slot_idx].used = false;
     process_table[slot_idx].child = null;
 }

@@ -384,11 +384,7 @@ pub const Server = struct {
 
         if (messages.len > 1) {
             for (messages[0 .. messages.len - 1]) |msg| {
-                const role: Agent.Role = if (std.mem.eql(u8, msg.role, "system")) .system
-                    else if (std.mem.eql(u8, msg.role, "user")) .user
-                    else if (std.mem.eql(u8, msg.role, "assistant")) .assistant
-                    else if (std.mem.eql(u8, msg.role, "tool")) .tool
-                    else .user;
+                const role: Agent.Role = if (std.mem.eql(u8, msg.role, "system")) .system else if (std.mem.eql(u8, msg.role, "user")) .user else if (std.mem.eql(u8, msg.role, "assistant")) .assistant else if (std.mem.eql(u8, msg.role, "tool")) .tool else .user;
                 if (role == .system) continue;
                 agent.appendMessage(role, msg.content) catch {};
             }
@@ -574,11 +570,7 @@ pub const Server = struct {
 
         if (messages.len > 1) {
             for (messages[0 .. messages.len - 1]) |msg| {
-                const role: Agent.Role = if (std.mem.eql(u8, msg.role, "system")) .system
-                    else if (std.mem.eql(u8, msg.role, "user")) .user
-                    else if (std.mem.eql(u8, msg.role, "assistant")) .assistant
-                    else if (std.mem.eql(u8, msg.role, "tool")) .tool
-                    else .user;
+                const role: Agent.Role = if (std.mem.eql(u8, msg.role, "system")) .system else if (std.mem.eql(u8, msg.role, "user")) .user else if (std.mem.eql(u8, msg.role, "assistant")) .assistant else if (std.mem.eql(u8, msg.role, "tool")) .tool else .user;
                 if (role == .system) continue;
                 agent.appendMessage(role, msg.content) catch {};
             }
@@ -645,7 +637,9 @@ pub const Server = struct {
         // Deep health check - verify DB connectivity
         var db_healthy = true;
         if (self.db_path) |path| {
-            _ = SqliteMemorySystem.init(self.allocator, path) catch { db_healthy = false; };
+            _ = SqliteMemorySystem.init(self.allocator, path) catch {
+                db_healthy = false;
+            };
         }
 
         const provider = self.agent_config.provider.name();
@@ -780,7 +774,6 @@ fn validateChatRequest(req: *const ChatCompletionRequest) bool {
 
     return true;
 }
-
 
 // Request/Response Types
 // ============================================================================

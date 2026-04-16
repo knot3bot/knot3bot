@@ -326,8 +326,9 @@ test "serializeForSummary - formats all roles" {
 
 test "serializeForSummary - truncates long content" {
     const allocator = std.testing.allocator;
-    const long_content = "A".** 4000;
-    const messages = &[_]Message{.{ .role = .user, .content = long_content }};
+    var long_content: [4000]u8 = undefined;
+    @memset(&long_content, 'A');
+    const messages = &[_]Message{.{ .role = .user, .content = &long_content }};
 
     const output = try serializeForSummary(allocator, messages);
     defer allocator.free(output);

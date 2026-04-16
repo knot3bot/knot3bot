@@ -141,8 +141,8 @@ pub const ACAdapter = struct {
                 .{ .key = "serverInfo", .value = .{ .object = &.{
                     .{ .key = "name", .value = .{ .string = "knot3bot" } },
                     .{ .key = "version", .value = .{ .string = "0.0.1" } },
-                }}},
-            }},
+                } } },
+            } },
         };
     }
 
@@ -156,7 +156,7 @@ pub const ACAdapter = struct {
             .id = 1,
             .result = std.json.Value{ .object = &.{
                 .{ .key = "sessionId", .value = .{ .string = session_id } },
-            }},
+            } },
         };
     }
 
@@ -187,7 +187,6 @@ pub const ACAdapter = struct {
         const session_id = obj.get("sessionId") orelse return error.InvalidParams;
         const prompt = obj.get("prompt") orelse return error.InvalidParams;
 
-
         // Extract text from prompt array
         var prompt_text = std.array_list.AlignedManaged(u8, null).init(self.allocator);
         defer prompt_text.deinit();
@@ -212,7 +211,7 @@ pub const ACAdapter = struct {
                     .id = message.id,
                     .result = std.json.Value{ .object = &.{
                         .{ .key = "text", .value = .{ .string = "Agent execution failed" } },
-                    }},
+                    } },
                 };
             };
             defer agent.allocator.free(answer);
@@ -221,14 +220,14 @@ pub const ACAdapter = struct {
                 .id = message.id,
                 .result = std.json.Value{ .object = &.{
                     .{ .key = "text", .value = .{ .string = answer } },
-                }},
+                } },
             };
         }
 
         const request_params = std.json.Value{ .object = &.{
             .{ .key = "sessionId", .value = session_id },
             .{ .key = "prompt", .value = prompt },
-        }};
+        } };
 
         const response = self.sendRequest("session/prompt", request_params) catch {
             return AcpMessage{
@@ -236,7 +235,7 @@ pub const ACAdapter = struct {
                 .id = message.id,
                 .result = std.json.Value{ .object = &.{
                     .{ .key = "text", .value = .{ .string = "ACP connection not available" } },
-                }},
+                } },
             };
         };
 

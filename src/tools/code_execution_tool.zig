@@ -126,8 +126,7 @@ fn detectDangerousCode(code: []const u8) ?[]const u8 {
 
     for (dangerous) |pattern| {
         if (std.mem.indexOf(u8, code, pattern) != null) {
-            return std.fmt.allocPrint(root.allocator,
-                "Blocked: code contains '{s}' which is not allowed in sandbox", .{pattern}) catch
+            return std.fmt.allocPrint(root.allocator, "Blocked: code contains '{s}' which is not allowed in sandbox", .{pattern}) catch
                 "Blocked: dangerous code pattern";
         }
     }

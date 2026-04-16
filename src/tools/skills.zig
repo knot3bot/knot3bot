@@ -187,41 +187,41 @@ fn parseSkillFrontmatterToManifest(content: []const u8) SkillManifest {
     if (std.mem.indexOf(u8, yaml_content, "name:")) |name_idx| {
         const name_start = name_idx + 5;
         const line_end = std.mem.indexOf(u8, yaml_content[name_start..], "\n") orelse yaml_content.len;
-        var name = std.mem.trim(u8, yaml_content[name_start..name_start + line_end], " \t");
+        var name = std.mem.trim(u8, yaml_content[name_start .. name_start + line_end], " \t");
         if (std.mem.startsWith(u8, name, "\"")) name = name[1..];
-        if (std.mem.endsWith(u8, name, "\"")) name = name[0..name.len-1];
+        if (std.mem.endsWith(u8, name, "\"")) name = name[0 .. name.len - 1];
         result.name = name;
     }
     if (std.mem.indexOf(u8, yaml_content, "description:")) |desc_idx| {
         const desc_start = desc_idx + 12;
         const line_end = std.mem.indexOf(u8, yaml_content[desc_start..], "\n") orelse yaml_content.len;
-        var desc = std.mem.trim(u8, yaml_content[desc_start..desc_start + line_end], " \t");
+        var desc = std.mem.trim(u8, yaml_content[desc_start .. desc_start + line_end], " \t");
         if (std.mem.startsWith(u8, desc, "\"")) desc = desc[1..];
-        if (std.mem.endsWith(u8, desc, "\"")) desc = desc[0..desc.len-1];
+        if (std.mem.endsWith(u8, desc, "\"")) desc = desc[0 .. desc.len - 1];
         result.description = desc;
     }
     if (std.mem.indexOf(u8, yaml_content, "category:")) |cat_idx| {
         const cat_start = cat_idx + 9;
         const line_end = std.mem.indexOf(u8, yaml_content[cat_start..], "\n") orelse yaml_content.len;
-        var cat = std.mem.trim(u8, yaml_content[cat_start..cat_start + line_end], " \t");
+        var cat = std.mem.trim(u8, yaml_content[cat_start .. cat_start + line_end], " \t");
         if (std.mem.startsWith(u8, cat, "\"")) cat = cat[1..];
-        if (std.mem.endsWith(u8, cat, "\"")) cat = cat[0..cat.len-1];
+        if (std.mem.endsWith(u8, cat, "\"")) cat = cat[0 .. cat.len - 1];
         if (cat.len > 0) result.category = cat;
     }
     if (std.mem.indexOf(u8, yaml_content, "version:")) |ver_idx| {
         const ver_start = ver_idx + 8;
         const line_end = std.mem.indexOf(u8, yaml_content[ver_start..], "\n") orelse yaml_content.len;
-        var ver = std.mem.trim(u8, yaml_content[ver_start..ver_start + line_end], " \t");
+        var ver = std.mem.trim(u8, yaml_content[ver_start .. ver_start + line_end], " \t");
         if (std.mem.startsWith(u8, ver, "\"")) ver = ver[1..];
-        if (std.mem.endsWith(u8, ver, "\"")) ver = ver[0..ver.len-1];
+        if (std.mem.endsWith(u8, ver, "\"")) ver = ver[0 .. ver.len - 1];
         if (ver.len > 0) result.version = ver;
     }
     if (std.mem.indexOf(u8, yaml_content, "author:")) |auth_idx| {
         const auth_start = auth_idx + 7;
         const line_end = std.mem.indexOf(u8, yaml_content[auth_start..], "\n") orelse yaml_content.len;
-        var auth = std.mem.trim(u8, yaml_content[auth_start..auth_start + line_end], " \t");
+        var auth = std.mem.trim(u8, yaml_content[auth_start .. auth_start + line_end], " \t");
         if (std.mem.startsWith(u8, auth, "\"")) auth = auth[1..];
-        if (std.mem.endsWith(u8, auth, "\"")) auth = auth[0..auth.len-1];
+        if (std.mem.endsWith(u8, auth, "\"")) auth = auth[0 .. auth.len - 1];
         if (auth.len > 0) result.author = auth;
     }
     return result;
@@ -241,27 +241,27 @@ fn parseSkillFrontmatter(content: []const u8) struct { name: []const u8, descrip
     if (std.mem.indexOf(u8, yaml_content, "name:")) |name_idx| {
         const name_start = name_idx + 5;
         const line_end = std.mem.indexOf(u8, yaml_content[name_start..], "\n") orelse yaml_content.len;
-        var name = std.mem.trim(u8, yaml_content[name_start..name_start + line_end], " \t");
+        var name = std.mem.trim(u8, yaml_content[name_start .. name_start + line_end], " \t");
         if (std.mem.startsWith(u8, name, "\"")) name = name[1..];
-        if (std.mem.endsWith(u8, name, "\"")) name = name[0..name.len-1];
+        if (std.mem.endsWith(u8, name, "\"")) name = name[0 .. name.len - 1];
         result.name = name;
     }
 
     if (std.mem.indexOf(u8, yaml_content, "description:")) |desc_idx| {
         const desc_start = desc_idx + 12;
         const line_end = std.mem.indexOf(u8, yaml_content[desc_start..], "\n") orelse yaml_content.len;
-        var desc = std.mem.trim(u8, yaml_content[desc_start..desc_start + line_end], " \t");
+        var desc = std.mem.trim(u8, yaml_content[desc_start .. desc_start + line_end], " \t");
         if (std.mem.startsWith(u8, desc, "\"")) desc = desc[1..];
-        if (std.mem.endsWith(u8, desc, "\"")) desc = desc[0..desc.len-1];
+        if (std.mem.endsWith(u8, desc, "\"")) desc = desc[0 .. desc.len - 1];
         result.description = desc;
     }
 
     if (std.mem.indexOf(u8, yaml_content, "category:")) |cat_idx| {
         const cat_start = cat_idx + 9;
         const line_end = std.mem.indexOf(u8, yaml_content[cat_start..], "\n") orelse yaml_content.len;
-        var cat = std.mem.trim(u8, yaml_content[cat_start..cat_start + line_end], " \t");
+        var cat = std.mem.trim(u8, yaml_content[cat_start .. cat_start + line_end], " \t");
         if (std.mem.startsWith(u8, cat, "\"")) cat = cat[1..];
-        if (std.mem.endsWith(u8, cat, "\"")) cat = cat[0..cat.len-1];
+        if (std.mem.endsWith(u8, cat, "\"")) cat = cat[0 .. cat.len - 1];
         if (cat.len > 0) result.category = cat;
     }
 
@@ -642,7 +642,7 @@ pub const SkillManagerTool = struct {
         std.fs.cwd().makeDir(skill_dir) catch {};
 
         // Write manifest.json
-        const manifest_path = try std.fmt.allocPrint(allocator, "{s}/manifest.json", .{ skill_dir });
+        const manifest_path = try std.fmt.allocPrint(allocator, "{s}/manifest.json", .{skill_dir});
         defer allocator.free(manifest_path);
 
         std.fs.cwd().writeFile(.{ .sub_path = manifest_path, .data = manifest_json }) catch {
@@ -654,7 +654,6 @@ pub const SkillManagerTool = struct {
 
     pub const vtable = root.ToolVTable(@This());
 };
-
 
 // ── SkillRunTool ────────────────────────────────────────────────────────────────
 
@@ -689,7 +688,6 @@ pub const SkillRunTool = struct {
         }
         // Skill body extraction available via extractSkillBody() if needed
         _ = extractSkillBody(content);
-
 
         // Build execution context
         var output = std.ArrayList(u8).empty;

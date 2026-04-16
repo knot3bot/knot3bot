@@ -12,7 +12,7 @@ pub const LogLevel = enum(u3) {
     debug,
     info,
     warn,
-    err,  // using 'err' since 'error' is a keyword
+    err, // using 'err' since 'error' is a keyword
 };
 
 pub const Logger = struct {

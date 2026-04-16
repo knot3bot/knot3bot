@@ -20,7 +20,7 @@ pub const Style = enum {
     assistant,
     system,
     tool,
-    err,  // 'error' is a keyword
+    err, // 'error' is a keyword
     success,
     info,
 };

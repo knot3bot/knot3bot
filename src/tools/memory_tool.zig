@@ -216,9 +216,7 @@ pub const MemoryStore = struct {
         if (new_count > limit) {
             _ = entries.pop();
             const current = self.calcCharCount(entries.items);
-            return ToolResult.fail(std.fmt.allocPrint(root.allocator,
-                "Memory at {d}/{d} chars. Adding this entry ({d} chars) would exceed the limit. Replace or remove existing entries first.",
-                .{ current, limit, trimmed.len }) catch "Memory limit exceeded");
+            return ToolResult.fail(std.fmt.allocPrint(root.allocator, "Memory at {d}/{d} chars. Adding this entry ({d} chars) would exceed the limit. Replace or remove existing entries first.", .{ current, limit, trimmed.len }) catch "Memory limit exceeded");
         }
 
         // Persist to disk
@@ -269,9 +267,7 @@ pub const MemoryStore = struct {
 
         const new_count = self.calcCharCount(test_entries);
         if (new_count > limit) {
-            return ToolResult.fail(std.fmt.allocPrint(root.allocator,
-                "Replacement would put memory at {d}/{d} chars. Shorten the new content or remove other entries first.",
-                .{ new_count, limit }) catch "Memory limit exceeded");
+            return ToolResult.fail(std.fmt.allocPrint(root.allocator, "Replacement would put memory at {d}/{d} chars. Shorten the new content or remove other entries first.", .{ new_count, limit }) catch "Memory limit exceeded");
         }
 
         entries.items[match_idx.?] = trimmed_new;

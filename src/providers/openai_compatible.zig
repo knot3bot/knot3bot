@@ -484,7 +484,8 @@ pub const LLMClient = struct {
             "curl",
             "-s",
             "--no-buffer",
-            "--keepalive-time", "30",
+            "--keepalive-time",
+            "30",
             "--keepalive",
             "--tcp-fastopen",
             "-X",
@@ -586,7 +587,8 @@ pub const LLMClient = struct {
             "-s",
             "--max-time",
             "120",
-            "--keepalive-time", "30",
+            "--keepalive-time",
+            "30",
             "--keepalive",
             "--tcp-fastopen",
             "-X",
@@ -718,7 +720,8 @@ pub const LLMClient = struct {
             "-s",
             "--max-time",
             "120",
-            "--keepalive-time", "30",
+            "--keepalive-time",
+            "30",
             "--keepalive",
             "--tcp-fastopen",
             "-X",
@@ -909,7 +912,6 @@ pub fn chatStreamWithRetry(
         // Success
         return;
     }
-
 }
 
 /// Alias for backwards compatibility

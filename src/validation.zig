@@ -26,7 +26,6 @@ pub fn validatePath(path: []const u8) ValidationError!void {
     if (path.len > 0 and path[0] == '/') {
         return error.PathTraversal;
     }
-
 }
 
 /// Validate URL to prevent SSRF attacks
@@ -36,12 +35,12 @@ pub fn validateUrl(url: []const u8) ValidationError!void {
     if (std.mem.indexOfScalar(u8, url, 0)) |_| {
         return error.InvalidUrl;
     }
-    
+
     // Reject file:// scheme
     if (std.mem.indexOf(u8, url, "file://") != null) {
         return error.BlockedUrlScheme;
     }
-    
+
     // Reject localhost variants
     const hosts_to_block = &[_][]const u8{
         "localhost",
@@ -65,8 +64,8 @@ pub fn validateUrl(url: []const u8) ValidationError!void {
     if (std.mem.indexOf(u8, url, "172.16.") != null or std.mem.indexOf(u8, url, "172.17.") != null or
         std.mem.indexOf(u8, url, "172.18.") != null or std.mem.indexOf(u8, url, "172.19.") != null or
         std.mem.indexOf(u8, url, "172.2") != null or std.mem.indexOf(u8, url, "172.30.") != null or
-        std.mem.indexOf(u8, url, "172.31.") != null) {
+        std.mem.indexOf(u8, url, "172.31.") != null)
+    {
         return error.BlockedHost;
     }
-
 }

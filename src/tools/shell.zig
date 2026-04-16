@@ -66,12 +66,12 @@ pub const ShellTool = struct {
     fn validateCommand(command: []const u8) ?[]const u8 {
         // Block dangerous shell metacharacters that enable injection
         const dangerous = &[_][]const u8{
-            "&& ", "| ", "|| ", "; ",  // Command chaining
-            "> ", "< ",                // I/O redirection
-            "`",                         // Command substitution
-            "$}(",                       // Subshell
-            "eval",                      // Eval keyword
-            "exec",                      // Exec keyword
+            "&& ", "| ", "|| ", "; ", // Command chaining
+            "> ", "< ", // I/O redirection
+            "`", // Command substitution
+            "$}(", // Subshell
+            "eval", // Eval keyword
+            "exec", // Exec keyword
         };
         for (dangerous) |pattern| {
             if (std.mem.indexOf(u8, command, pattern) != null) {

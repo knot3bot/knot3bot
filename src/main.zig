@@ -162,7 +162,6 @@ const ManagerMemoryBackend = @import("memory/root.zig").ManagerMemoryBackend;
 const MemorySystem = @import("memory/root.zig").MemorySystem;
 const SqliteMemorySystem = @import("memory/root.zig").SqliteMemorySystem;
 
-
 fn runCliMode(config: *const CliConfig, registry: *const ToolRegistry) !void {
     var gpa = std.heap.GeneralPurposeAllocator(.{}){};
     defer _ = gpa.deinit();
@@ -185,7 +184,10 @@ fn runCliMode(config: *const CliConfig, registry: *const ToolRegistry) !void {
     var manager = MemoryManager.init(allocator, backends);
     defer manager.deinit();
     defer in_memory.deinit();
-    defer if (sqlite) |s| { s.deinit(); allocator.destroy(s); };
+    defer if (sqlite) |s| {
+        s.deinit();
+        allocator.destroy(s);
+    };
 
     try manager.createSession(config.session_id);
 
@@ -361,7 +363,6 @@ pub fn main() !void {
             server.deinit();
             model_registry.deinit();
         }
-
     } else {
         try runCliMode(&config, &registry);
     }
