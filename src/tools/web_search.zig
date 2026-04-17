@@ -1,18 +1,6 @@
 //! Web Tools - Search and Extract
 //!
-//! Provides web search and content extraction using multiple backends:
-//!   - firecrawl: https://docs.firecrawl.dev (search, extract, crawl)
-//!   - tavily: https://tavily.com (search, extract, crawl)
-//!   - exa: https://exa.ai (search, extract)
-//!   - parallel: https://docs.parallel.ai (search, extract)
-//!
-//! Configuration via environment variables:
-//!   - FIRECRAWL_API_KEY / FIRECRAWL_API_URL
-//!   - TAVILY_API_KEY
-//!   - EXA_API_KEY
-//!   - PARALLEL_API_KEY
-//!
-//! Falls back to duckduckgo HTML scraping if no API keys.
+//! Provides web search and content extraction using multiple backends.
 
 const std = @import("std");
 const root = @import("root.zig");
@@ -21,34 +9,32 @@ const ToolResult = root.ToolResult;
 const JsonObjectMap = root.JsonObjectMap;
 const getString = root.getString;
 const getInt = root.getInt;
+const shared = @import("../shared/root.zig");
 
-/// Web backend type
 pub const WebBackend = enum {
     firecrawl,
     tavily,
     exa,
     parallel,
-    duckduckgo, // fallback
+    duckduckgo,
 };
 
-/// Detect available backend from environment
 fn detectBackend() WebBackend {
-    if (std.posix.getenv("FIRECRAWL_API_KEY") != null or std.posix.getenv("FIRECRAWL_API_URL") != null) {
+    if (shared.context.getenv("FIRECRAWL_API_KEY") != null or shared.context.getenv("FIRECRAWL_API_URL") != null) {
         return .firecrawl;
     }
-    if (std.posix.getenv("TAVILY_API_KEY") != null) {
+    if (shared.context.getenv("TAVILY_API_KEY") != null) {
         return .tavily;
     }
-    if (std.posix.getenv("EXA_API_KEY") != null) {
+    if (shared.context.getenv("EXA_API_KEY") != null) {
         return .exa;
     }
-    if (std.posix.getenv("PARALLEL_API_KEY") != null) {
+    if (shared.context.getenv("PARALLEL_API_KEY") != null) {
         return .parallel;
     }
     return .duckduckgo;
 }
 
-/// Web Search Tool
 pub const WebSearchTool = struct {
     pub const tool_name = "web_search";
     pub const tool_description = "Search the web for information using multiple backends (Firecrawl, Tavily, Exa, Parallel, or DuckDuckGo fallback). Returns list of URLs with titles and descriptions.";
@@ -86,8 +72,8 @@ pub const WebSearchTool = struct {
     }
 
     fn searchFirecrawl(allocator: std.mem.Allocator, query: []const u8, limit: u32) !ToolResult {
-        const api_key = std.posix.getenv("FIRECRAWL_API_KEY") orelse "";
-        const api_url = std.posix.getenv("FIRECRAWL_API_URL") orelse "https://api.firecrawl.dev";
+        const api_key = shared.context.getenv("FIRECRAWL_API_KEY") orelse "";
+        const api_url = shared.context.getenv("FIRECRAWL_API_URL") orelse "https://api.firecrawl.dev";
 
         const url = try std.fmt.allocPrint(allocator, "{s}/v0/search", .{api_url});
         defer allocator.free(url);
@@ -101,7 +87,7 @@ pub const WebSearchTool = struct {
     }
 
     fn searchTavily(allocator: std.mem.Allocator, query: []const u8, limit: u32) !ToolResult {
-        const api_key = std.posix.getenv("TAVILY_API_KEY") orelse "";
+        const api_key = shared.context.getenv("TAVILY_API_KEY") orelse "";
 
         const url = "https://api.tavily.com/search";
         const json_body = try std.fmt.allocPrint(allocator,
@@ -112,7 +98,7 @@ pub const WebSearchTool = struct {
     }
 
     fn searchExa(allocator: std.mem.Allocator, query: []const u8, limit: u32) !ToolResult {
-        const api_key = std.posix.getenv("EXA_API_KEY") orelse "";
+        const api_key = shared.context.getenv("EXA_API_KEY") orelse "";
 
         const url = "https://api.exa.ai/search";
         const json_body = try std.fmt.allocPrint(allocator,
@@ -123,7 +109,7 @@ pub const WebSearchTool = struct {
     }
 
     fn searchParallel(allocator: std.mem.Allocator, query: []const u8, limit: u32) !ToolResult {
-        const api_key = std.posix.getenv("PARALLEL_API_KEY") orelse "";
+        const api_key = shared.context.getenv("PARALLEL_API_KEY") orelse "";
 
         const url = "https://api.parallel.ai/uko/v1/search";
         const json_body = try std.fmt.allocPrint(allocator,
@@ -145,33 +131,23 @@ pub const WebSearchTool = struct {
             "-A",   "knot3bot/1.0", url,
         };
 
-        var child = std.process.Child.init(argv, allocator);
-        child.stdin_behavior = .Ignore;
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Pipe;
-
-        child.spawn() catch {
+        const result = std.process.run(allocator, shared.context.io(), .{
+            .argv = argv,
+        }) catch {
             return ToolResult.fail("Failed to execute search");
         };
+        defer allocator.free(result.stdout);
+        defer allocator.free(result.stderr);
 
-        const stdout = child.stdout.?.readToEndAlloc(allocator, 1024 * 100) catch {
-            _ = child.kill() catch {};
-            _ = child.wait() catch {};
-            return ToolResult.fail("Failed to read search results");
-        };
-        defer allocator.free(stdout);
-
-        _ = child.wait() catch {};
-
-        return parseSearchResults(allocator, stdout, limit);
+        return parseSearchResults(allocator, result.stdout, limit);
     }
 
     fn parseSearchResults(allocator: std.mem.Allocator, html: []const u8, limit: u32) !ToolResult {
         var results: std.ArrayList(u8) = .empty;
         defer results.deinit(allocator);
-        const w = results.writer(allocator);
+        var allocating = std.Io.Writer.Allocating.fromArrayList(allocator, &results);
 
-        try w.writeAll("{\"results\":[");
+        try allocating.writer.writeAll("{\"results\":[");
         var count: u32 = 0;
         var pos: usize = 0;
 
@@ -194,8 +170,8 @@ pub const WebSearchTool = struct {
 
             const clean_title = try stripHtmlTags(allocator, title);
 
-            if (count > 0) try w.writeAll(",");
-            try w.print(
+            if (count > 0) try allocating.writer.writeAll(",");
+            try allocating.writer.print(
                 \\{{"url":"{s}","title":"{s}"}}
             , .{ href, clean_title });
 
@@ -204,25 +180,28 @@ pub const WebSearchTool = struct {
             pos = actual_title_start + title_end + 4;
         }
 
-        try w.writeAll("]}");
+        try allocating.writer.writeAll("]}");
+        results = allocating.toArrayList();
         return ToolResult.ok(try results.toOwnedSlice(allocator));
     }
 
     fn percentEncode(allocator: std.mem.Allocator, str: []const u8) ![]const u8 {
         var result: std.ArrayList(u8) = .empty;
         defer result.deinit(allocator);
+        var allocating = std.Io.Writer.Allocating.fromArrayList(allocator, &result);
 
         for (str) |c| {
             switch (c) {
                 'A'...'Z', 'a'...'z', '0'...'9', '-', '_', '.', '~' => {
-                    try result.append(allocator, c);
+                    try allocating.writer.writeByte(c);
                 },
                 else => {
-                    try result.writer(allocator).print("%{X}", .{@as(u8, c)});
+                    try allocating.writer.print("%{X}", .{@as(u8, c)});
                 },
             }
         }
 
+        result = allocating.toArrayList();
         return try result.toOwnedSlice(allocator);
     }
 
@@ -247,7 +226,6 @@ pub const WebSearchTool = struct {
     pub const vtable = root.ToolVTable(@This());
 };
 
-/// Web Extract Tool - Extract content from URLs
 pub const WebExtractTool = struct {
     pub const tool_name = "web_extract";
     pub const tool_description = "Extract content from specific URLs using multiple backends. Returns formatted content (markdown by default).";
@@ -261,7 +239,6 @@ pub const WebExtractTool = struct {
         const urls_val = args.get("urls") orelse return ToolResult.fail("urls required");
         const urls: []const std.json.Value = if (urls_val == .array) urls_val.array.items else return ToolResult.fail("urls must be an array");
 
-        // Collect URLs
         var urls_list: std.ArrayList([]const u8) = .empty;
         defer urls_list.deinit(allocator);
 
@@ -299,22 +276,23 @@ pub const WebExtractTool = struct {
     }
 
     fn extractFirecrawl(allocator: std.mem.Allocator, urls: []const []const u8) !ToolResult {
-        const api_key = std.posix.getenv("FIRECRAWL_API_KEY") orelse "";
-        const api_url = std.posix.getenv("FIRECRAWL_API_URL") orelse "https://api.firecrawl.dev";
+        const api_key = shared.context.getenv("FIRECRAWL_API_KEY") orelse "";
+        const api_url = shared.context.getenv("FIRECRAWL_API_URL") orelse "https://api.firecrawl.dev";
 
         const url = try std.fmt.allocPrint(allocator, "{s}/v0/extract", .{api_url});
         defer allocator.free(url);
 
-        // Build URLs array JSON
         var urls_json: std.ArrayList(u8) = .empty;
         defer urls_json.deinit(allocator);
-        const w = urls_json.writer(allocator);
-        try w.writeAll("[");
+        var allocating = std.Io.Writer.Allocating.fromArrayList(allocator, &urls_json);
+
+        try allocating.writer.writeAll("[");
         for (urls, 0..) |u, i| {
-            if (i > 0) try w.writeAll(",");
-            try w.print("\\\"{s}\\\"", .{u});
+            if (i > 0) try allocating.writer.writeAll(",");
+            try allocating.writer.print("\\\"{s}\\\"", .{u});
         }
-        try w.writeAll("]");
+        try allocating.writer.writeAll("]");
+        urls_json = allocating.toArrayList();
 
         const json_body = try std.fmt.allocPrint(allocator,
             \\{{"urls":{s},"format":"markdown"}}
@@ -325,17 +303,19 @@ pub const WebExtractTool = struct {
     }
 
     fn extractTavily(allocator: std.mem.Allocator, urls: []const []const u8) !ToolResult {
-        const api_key = std.posix.getenv("TAVILY_API_KEY") orelse "";
+        const api_key = shared.context.getenv("TAVILY_API_KEY") orelse "";
 
         var urls_json: std.ArrayList(u8) = .empty;
         defer urls_json.deinit(allocator);
-        const w = urls_json.writer(allocator);
-        try w.writeAll("[");
+        var allocating = std.Io.Writer.Allocating.fromArrayList(allocator, &urls_json);
+
+        try allocating.writer.writeAll("[");
         for (urls, 0..) |u, i| {
-            if (i > 0) try w.writeAll(",");
-            try w.print("\\\"{s}\\\"", .{u});
+            if (i > 0) try allocating.writer.writeAll(",");
+            try allocating.writer.print("\\\"{s}\\\"", .{u});
         }
-        try w.writeAll("]");
+        try allocating.writer.writeAll("]");
+        urls_json = allocating.toArrayList();
 
         const json_body = try std.fmt.allocPrint(allocator,
             \\{{"api_key":"{s}","urls":{s}}}
@@ -345,15 +325,17 @@ pub const WebExtractTool = struct {
     }
 
     fn extractExa(allocator: std.mem.Allocator, urls: []const []const u8) !ToolResult {
-        const api_key = std.posix.getenv("EXA_API_KEY") orelse "";
+        const api_key = shared.context.getenv("EXA_API_KEY") orelse "";
 
         var urls_json: std.ArrayList(u8) = .empty;
         defer urls_json.deinit(allocator);
-        const w = urls_json.writer(allocator);
+        var allocating = std.Io.Writer.Allocating.fromArrayList(allocator, &urls_json);
+
         for (urls, 0..) |u, i| {
-            if (i > 0) try w.writeAll(",");
-            try w.print("\\\"{s}\\\"", .{u});
+            if (i > 0) try allocating.writer.writeAll(",");
+            try allocating.writer.print("\\\"{s}\\\"", .{u});
         }
+        urls_json = allocating.toArrayList();
 
         const json_body = try std.fmt.allocPrint(allocator,
             \\{{"api_key":"{s}","urls":{s}}}
@@ -363,15 +345,17 @@ pub const WebExtractTool = struct {
     }
 
     fn extractParallel(allocator: std.mem.Allocator, urls: []const []const u8) !ToolResult {
-        const api_key = std.posix.getenv("PARALLEL_API_KEY") orelse "";
+        const api_key = shared.context.getenv("PARALLEL_API_KEY") orelse "";
 
         var urls_json: std.ArrayList(u8) = .empty;
         defer urls_json.deinit(allocator);
-        const w = urls_json.writer(allocator);
+        var allocating = std.Io.Writer.Allocating.fromArrayList(allocator, &urls_json);
+
         for (urls, 0..) |u, i| {
-            if (i > 0) try w.writeAll(",");
-            try w.print("\\\"{s}\\\"", .{u});
+            if (i > 0) try allocating.writer.writeAll(",");
+            try allocating.writer.print("\\\"{s}\\\"", .{u});
         }
+        urls_json = allocating.toArrayList();
 
         const json_body = try std.fmt.allocPrint(allocator,
             \\{{"api_key":"{s}","urls":{s}}}
@@ -381,7 +365,6 @@ pub const WebExtractTool = struct {
     }
 
     fn extractFallback(allocator: std.mem.Allocator, urls: []const []const u8) !ToolResult {
-        // Simple curl-based extraction for first URL
         if (urls.len == 0) return ToolResult.fail("No URLs provided");
 
         const url = urls[0];
@@ -390,33 +373,22 @@ pub const WebExtractTool = struct {
             "-A",   "knot3bot/1.0", url,
         };
 
-        var child = std.process.Child.init(argv, allocator);
-        child.stdin_behavior = .Ignore;
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Pipe;
-
-        child.spawn() catch {
+        const result = std.process.run(allocator, shared.context.io(), .{
+            .argv = argv,
+        }) catch {
             return ToolResult.fail("Failed to fetch URL");
         };
-
-        const stdout = child.stdout.?.readToEndAlloc(allocator, 1024 * 500) catch {
-            _ = child.kill() catch {};
-            _ = child.wait() catch {};
-            return ToolResult.fail("Content too large or fetch failed");
-        };
-        defer allocator.free(stdout);
-
-        _ = child.wait() catch {};
+        defer allocator.free(result.stdout);
+        defer allocator.free(result.stderr);
 
         return ToolResult.ok(try std.fmt.allocPrint(allocator,
             \\{{"url":"{s}","content":"{s}","extracted":true}}
-        , .{ url, stdout }));
+        , .{ url, result.stdout }));
     }
 
     pub const vtable = root.ToolVTable(@This());
 };
 
-/// Make HTTP request using curl
 fn makeHttpRequest(allocator: std.mem.Allocator, method: []const u8, url: []const u8, api_key: []const u8, json_body: []const u8, content_type: []const u8) !ToolResult {
     var argv: [12][]const u8 = undefined;
 
@@ -442,32 +414,20 @@ fn makeHttpRequest(allocator: std.mem.Allocator, method: []const u8, url: []cons
     argv[argc] = url;
     argc += 1;
 
-    var child = std.process.Child.init(argv[0..argc], allocator);
-    child.stdin_behavior = .Ignore;
-    child.stdout_behavior = .Pipe;
-    child.stderr_behavior = .Pipe;
-
-    child.spawn() catch {
+    const result = std.process.run(allocator, shared.context.io(), .{
+        .argv = argv[0..argc],
+    }) catch {
         return ToolResult.fail("Failed to execute HTTP request");
     };
+    defer allocator.free(result.stdout);
+    defer allocator.free(result.stderr);
 
-    const stdout = child.stdout.?.readToEndAlloc(allocator, 1024 * 500) catch {
-        _ = child.kill() catch {};
-        _ = child.wait() catch {};
-        return ToolResult.fail("Failed to read response");
-    };
-    defer allocator.free(stdout);
-
-    const term = child.wait() catch {
-        return ToolResult.fail("Request failed");
-    };
-
-    switch (term) {
-        .Exited => |code| {
+    switch (result.term) {
+        .exited => |code| {
             if (code == 0) {
-                return ToolResult.ok(stdout);
+                return ToolResult.ok(result.stdout);
             } else {
-                return ToolResult.fail(try std.fmt.allocPrint(allocator, "API request failed with code {d}: {s}", .{ code, stdout }));
+                return ToolResult.fail(try std.fmt.allocPrint(allocator, "API request failed with code {d}: {s}", .{ code, result.stdout }));
             }
         },
         else => return ToolResult.fail("API request failed"),

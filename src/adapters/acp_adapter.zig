@@ -101,8 +101,8 @@ pub const ACAdapter = struct {
         try self.stdin_writer.?.flush();
 
         // Wait for response with matching id
-        const deadline = std.time.timestamp() + 900; // 15 min timeout
-        while (std.time.timestamp() < deadline) {
+        const deadline = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds() + 900; // 15 min timeout
+        while (std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds() < deadline) {
             const line = try self.stdout_reader.?.readUntilDelimiterAlloc(self.allocator, '\n', 1024 * 1024);
             defer self.allocator.free(line);
 
@@ -149,7 +149,7 @@ pub const ACAdapter = struct {
     /// Handle session/new method
     fn handleSessionNew(self: *ACAdapter, message: AcpMessage) !AcpMessage {
         _ = message;
-        const session_id = try std.fmt.allocPrint(self.allocator, "sess_{}", .{std.time.timestamp()});
+        const session_id = try std.fmt.allocPrint(self.allocator, "sess_{}", .{std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds()});
         self.session_id = session_id;
         return AcpMessage{
             .jsonrpc = "2.0",

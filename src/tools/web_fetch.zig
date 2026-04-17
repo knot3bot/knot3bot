@@ -9,6 +9,8 @@ const ToolResult = root.ToolResult;
 const JsonObjectMap = root.JsonObjectMap;
 const getString = root.getString;
 const validateUrl = @import("../validation.zig").validateUrl;
+const shared = @import("../shared/root.zig");
+
 pub const WebFetchTool = struct {
     workspace_dir: []const u8,
 
@@ -24,7 +26,6 @@ pub const WebFetchTool = struct {
         _ = _self;
         const url = getString(args, "url") orelse return ToolResult.fail("url required");
 
-        // Security: validate URL to prevent SSRF attacks
         validateUrl(url) catch |err| {
             const err_msg = switch (err) {
                 error.InvalidUrl => "Invalid URL (null bytes not allowed)",
@@ -39,40 +40,31 @@ pub const WebFetchTool = struct {
 
         const timeout: u32 = if (timeout_str) |t| std.fmt.parseInt(u32, t, 10) catch 30 else 30;
         const max_size: usize = if (max_size_str) |s| std.fmt.parseInt(usize, s, 10) catch 1048576 else 1048576;
-        // Simple curl-based fetch
+
         const argv = &[_][]const u8{
             "curl",
             "-s",
             "--max-time",
             try std.fmt.allocPrint(allocator, "{d}", .{timeout}),
-            "-L", // Follow redirects
+            "-L",
             "-A",
             "knot3bot/1.0",
             url,
         };
 
-        var child = std.process.Child.init(argv, allocator);
-        child.stdin_behavior = .Ignore;
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Pipe;
-
-        try child.spawn();
-
-        const stdout = child.stdout.?.readToEndAlloc(allocator, max_size) catch {
-            _ = child.kill() catch {};
-            _ = child.wait() catch {};
-            return ToolResult.fail("Failed to read response (too large or network error)");
+        const result = std.process.run(allocator, shared.context.io(), .{
+            .argv = argv,
+            .stdout_limit = .limited(max_size),
+        }) catch {
+            return ToolResult.fail("Failed to fetch URL");
         };
-        defer allocator.free(stdout);
+        defer allocator.free(result.stdout);
+        defer allocator.free(result.stderr);
 
-        const term = child.wait() catch {
-            return ToolResult.fail("Failed to wait for curl");
-        };
-
-        switch (term) {
-            .Exited => |code| {
+        switch (result.term) {
+            .exited => |code| {
                 if (code == 0) {
-                    return ToolResult.ok(stdout);
+                    return ToolResult.ok(result.stdout);
                 } else {
                     return ToolResult.fail(try std.fmt.allocPrint(allocator, "Fetch failed with code {d}", .{code}));
                 }

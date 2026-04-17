@@ -56,7 +56,7 @@ pub const Logger = struct {
     pub fn log(self: *Logger, level: LogLevel, comptime format: []const u8, args: anytype) void {
         if (@intFromEnum(level) < @intFromEnum(self.level)) return;
 
-        const timestamp = std.time.timestamp();
+        const timestamp = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds();
         const level_str = switch (level) {
             .debug => "DEBUG",
             .info => "INFO",

@@ -12,22 +12,25 @@ const AuthConfig = @import("root.zig").AuthConfig;
 const models = @import("root.zig").models;
 const context_compressor = @import("root.zig").context_compressor;
 const trajectory = @import("root.zig").trajectory;
+const shared = @import("root.zig").shared;
 
 var g_shutdown_flag = std.atomic.Value(bool).init(false);
 
-fn handleSignal(sig: c_int) callconv(.c) void {
+fn handleSignal(sig: std.c.SIG) callconv(.c) void {
     _ = sig;
     g_shutdown_flag.store(true, .monotonic);
 }
 
 fn setupSignalHandlers() !void {
-    const sa = std.posix.Sigaction{
+    var mask: std.c.sigset_t = undefined;
+    _ = std.c.sigemptyset(&mask);
+    const sa = std.c.Sigaction{
         .handler = .{ .handler = handleSignal },
-        .mask = std.posix.sigemptyset(),
+        .mask = mask,
         .flags = 0,
     };
-    std.posix.sigaction(std.posix.SIG.INT, &sa, null);
-    std.posix.sigaction(std.posix.SIG.TERM, &sa, null);
+    _ = std.c.sigaction(std.c.SIG.INT, &sa, null);
+    _ = std.c.sigaction(std.c.SIG.TERM, &sa, null);
 }
 
 const CliConfig = struct {
@@ -41,7 +44,7 @@ const CliConfig = struct {
     port: u16,
 };
 
-fn getApiKeyFromEnv() ?[]const u8 {
+fn getApiKeyFromEnv(environ: *const std.process.Environ.Map) ?[]const u8 {
     const env_vars = &[_][]const u8{
         "BAILIAN_API_KEY",
         "OPENAI_API_KEY",
@@ -49,19 +52,18 @@ fn getApiKeyFromEnv() ?[]const u8 {
         "MINIMAX_API_KEY",
         "ZAI_API_KEY",
         "VOLCANO_API_KEY",
+        "TENCENT_API_KEY",
     };
 
     for (env_vars) |var_name| {
-        if (std.process.getEnvVarOwned(std.heap.page_allocator, var_name)) |value| {
-            return value;
-        } else |_| {
-            continue;
+        if (environ.get(var_name)) |value| {
+            if (value.len > 0) return value;
         }
     }
     return null;
 }
 
-fn parseArgs() !CliConfig {
+fn parseArgs(args: std.process.Args, environ: *const std.process.Environ.Map) !CliConfig {
     var config = CliConfig{
         .api_key = null,
         .db_path = null,
@@ -73,29 +75,29 @@ fn parseArgs() !CliConfig {
         .port = 8080,
     };
 
-    var args = try std.process.argsWithAllocator(std.heap.page_allocator);
-    defer args.deinit();
+    var args_iter = try args.iterateAllocator(std.heap.page_allocator);
+    defer args_iter.deinit();
 
-    _ = args.next();
+    _ = args_iter.next();
 
-    while (args.next()) |arg| {
+    while (args_iter.next()) |arg| {
         if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             try printHelp();
-            std.process.exit(0);
+            return error.HelpPrinted;
         } else if (std.mem.eql(u8, arg, "--db-path")) {
-            config.db_path = args.next() orelse return error.MissingDbPath;
+            config.db_path = args_iter.next() orelse return error.MissingDbPath;
         } else if (std.mem.eql(u8, arg, "--session")) {
-            config.session_id = args.next() orelse return error.MissingSession;
+            config.session_id = args_iter.next() orelse return error.MissingSession;
         } else if (std.mem.eql(u8, arg, "--model")) {
-            config.model = args.next() orelse return error.MissingModel;
+            config.model = args_iter.next() orelse return error.MissingModel;
         } else if (std.mem.eql(u8, arg, "--max-iterations")) {
-            const iter_str = args.next() orelse return error.MissingMaxIterations;
+            const iter_str = args_iter.next() orelse return error.MissingMaxIterations;
             config.max_iterations = try std.fmt.parseInt(usize, iter_str, 10);
         } else if (std.mem.eql(u8, arg, "--provider")) {
-            const provider_str = args.next() orelse return error.MissingProvider;
+            const provider_str = args_iter.next() orelse return error.MissingProvider;
             config.provider = providers.Provider.fromStr(provider_str) orelse {
                 std.log.err("Unknown provider: {s}", .{provider_str});
-                std.log.info("Available: openai, kimi, minimax, zai, bailian, volcano", .{});
+                std.log.info("Available: openai, kimi, minimax, zai, bailian, volcano, kimi-plan, minimax-plan, bailian-plan, volcano-plan, tencent, tencent-plan", .{});
                 return error.InvalidProvider;
             };
             if (config.model.len == 0) {
@@ -104,13 +106,13 @@ fn parseArgs() !CliConfig {
         } else if (std.mem.eql(u8, arg, "--server")) {
             config.server_mode = true;
         } else if (std.mem.eql(u8, arg, "--port")) {
-            const port_str = args.next() orelse return error.MissingPort;
+            const port_str = args_iter.next() orelse return error.MissingPort;
             config.port = try std.fmt.parseInt(u16, port_str, 10);
         }
     }
 
     if (config.api_key == null) {
-        config.api_key = getApiKeyFromEnv();
+        config.api_key = getApiKeyFromEnv(environ);
     }
 
     return config;
@@ -127,13 +129,16 @@ fn printHelp() !void {
         \\  --db-path <path>        SQLite database path (default: in-memory)
         \\  --session <id>          Session ID (default: default)
         \\  --model <name>          LLM model name
-        \\  --provider <name>       LLM provider: openai, kimi, minimax, zai, bailian, volcano
+        \\  --provider <name>       LLM provider: openai, kimi, minimax, zai, bailian, volcano, kimi-plan, minimax-plan, bailian-plan, volcano-plan, tencent, tencent-plan
         \\  --max-iterations <n>    Max ReAct iterations (default: 10)
         \\  --server                Run in HTTP server mode
         \\  --port <port>           Server port (default: 8080)
         \\
         \\Environment variables:
         \\  OPENAI_API_KEY, KIMI_API_KEY, MINIMAX_API_KEY,
+        \\  ZAI_API_KEY, BAILIAN_API_KEY, VOLCANO_API_KEY, TENCENT_API_KEY
+        \\
+        \\  ZAI_API_KEY, BAILIAN_API_KEY, VOLCANO_API_KEY, TENCENT_API_KEY
         \\  ZAI_API_KEY, BAILIAN_API_KEY, VOLCANO_API_KEY
         \\
         \\Examples:
@@ -163,9 +168,8 @@ const MemorySystem = @import("memory/root.zig").MemorySystem;
 const SqliteMemorySystem = @import("memory/root.zig").SqliteMemorySystem;
 
 fn runCliMode(config: *const CliConfig, registry: *const ToolRegistry) !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    var arena = std.heap.ArenaAllocator.init(gpa.allocator());
+    const gpa = shared.context.gpa();
+    var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
 
     const allocator = arena.allocator();
@@ -194,14 +198,12 @@ fn runCliMode(config: *const CliConfig, registry: *const ToolRegistry) !void {
     const memory_path = if (config.db_path) |p| p else "in-memory";
     printSessionInfo(config, memory_path);
 
-    const stdin_file = std.fs.File.stdin();
     var buf: [4096]u8 = undefined;
-
+    var reader = std.Io.File.stdin().reader(shared.context.io(), &buf);
     while (!g_shutdown_flag.load(.monotonic)) {
-        std.debug.print("{s}> {s}", .{ display.Colors.blue, display.Colors.reset });
         std.debug.print("> ", .{});
 
-        const n = stdin_file.read(&buf) catch |err| {
+        const n = reader.interface.readSliceShort(&buf) catch |err| {
             std.debug.print("Read error: {s}\n", .{@errorName(err)});
             continue;
         };
@@ -298,15 +300,18 @@ fn runAgentStream(allocator: std.mem.Allocator, config: *const CliConfig, regist
     }
 }
 
-pub fn main() !void {
+pub fn main(init: std.process.Init) !u8 {
     try setupSignalHandlers();
+    shared.context.init(init.io, init.environ_map, init.gpa);
 
-    const config = try parseArgs();
+    const config = parseArgs(init.minimal.args, init.environ_map) catch |err| {
+        if (err == error.HelpPrinted) return 0;
+        return err;
+    };
 
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
-    const workspace_dir = std.process.getEnvVarOwned(allocator, "HERMES_WORKSPACE") catch "/tmp";
+    const gpa_state = init.gpa;
+    const allocator = gpa_state;
+    const workspace_dir = if (init.environ_map.get("HERMES_WORKSPACE")) |v| try allocator.dupe(u8, v) else "/tmp";
     defer if (workspace_dir.len > 0 and !std.mem.eql(u8, workspace_dir, "/tmp")) allocator.free(workspace_dir);
 
     var registry = try createDefaultRegistry(allocator, workspace_dir);
@@ -328,9 +333,9 @@ pub fn main() !void {
             .provider = config.provider,
         };
 
-        const auth_keys = if (config.api_key) |key| &.{key} else &.{};
+        const auth_keys = if (config.api_key) |key| &.{key} else &[_][]const u8{};
         const auth_config = AuthConfig{
-            .require_auth = config.api_key != null,
+            .require_auth = false,
             .api_keys = auth_keys,
             .allowed_origins = &.{},
         };
@@ -359,6 +364,7 @@ pub fn main() !void {
         }
         var model_registry = try models.createDefaultModelRegistry(allocator);
         server.model_registry = &model_registry;
+        try server.start();
         defer {
             server.deinit();
             model_registry.deinit();
@@ -366,4 +372,6 @@ pub fn main() !void {
     } else {
         try runCliMode(&config, &registry);
     }
+
+    return 0;
 }

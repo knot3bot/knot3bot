@@ -1,7 +1,9 @@
 const std = @import("std");
+const shared = @import("../shared/root.zig");
 
 /// Escape special characters for JSON string values
-fn escapeJsonString(writer: anytype, str: []const u8) !void {
+fn escapeJsonString(writer_arg: anytype, str: []const u8) !void {
+    var writer = writer_arg;
     for (str) |c| {
         switch (c) {
             '"' => try writer.writeAll("\\\""),
@@ -195,16 +197,23 @@ pub const Provider = enum {
     zai,
     bailian,
     volcano,
-
+    kimi_plan,
+    minimax_plan,
+    bailian_plan,
+    volcano_plan,
+    tencent,
+    tencent_plan,
     pub fn baseUrl(self: Provider) []const u8 {
         return switch (self) {
             .openai => "https://api.openai.com/v1",
             .anthropic => "https://api.anthropic.com/v1",
-            .kimi => "https://api.kimi.com/coding/v1",
-            .minimax => "https://api.minimaxi.com/v1",
+            .kimi, .kimi_plan => "https://api.kimi.com/coding/v1",
+            .minimax, .minimax_plan => "https://api.minimaxi.com/v1",
             .zai => "https://api.zplus.ai/v1",
-            .bailian => "https://dashscope.aliyuncs.com/compatible-mode/v1",
+            .bailian, .bailian_plan => "https://dashscope.aliyuncs.com/compatible-mode/v1",
             .volcano => "https://ark.cn-beijing.volces.com/api/v3",
+            .volcano_plan => "https://ark.cn-beijing.volces.com/api/coding/v3",
+            .tencent, .tencent_plan => "https://api.hunyuan.cloud.tencent.com/v1",
         };
     }
 
@@ -212,63 +221,96 @@ pub const Provider = enum {
         return switch (self) {
             .openai => "gpt-4o",
             .anthropic => "claude-3-5-sonnet-20240620",
-            .kimi => "moonshot-v1-8k",
-            .minimax => "abab6.5s-chat",
-            .zai => "glm-4-flash",
-            .bailian => "qwen-plus",
-            .volcano => "doubao-pro-32k",
+            .kimi, .kimi_plan => "kimi-k2.5",
+            .minimax, .minimax_plan => "MiniMax-M2.7",
+            .zai => "glm-4.7",
+            .bailian, .bailian_plan => "qwen3.5-plus",
+            .volcano => "doubao-seed-1-8-251228",
+            .volcano_plan => "ark-code-latest",
+            .tencent, .tencent_plan => "hunyuan-lite",
         };
     }
+
 
     pub fn name(self: Provider) []const u8 {
         return switch (self) {
             .openai => "OpenAI",
             .anthropic => "Anthropic",
             .kimi => "Kimi (Moonshot)",
+            .kimi_plan => "Kimi Coding Plan",
             .minimax => "MiniMax",
+            .minimax_plan => "MiniMax Coding Plan",
             .zai => "Z.ai (Zhipu)",
             .bailian => "Bailian (Alibaba)",
+            .bailian_plan => "Bailian Coding Plan",
             .volcano => "Volcano Engine",
+            .volcano_plan => "Volcano Engine Coding Plan",
+            .tencent => "Tencent (Hunyuan)",
+            .tencent_plan => "Tencent Coding Plan",
         };
     }
-
-    /// Get available models for this provider
+    pub fn internalName(self: Provider) []const u8 {
+        return switch (self) {
+            .openai => "openai",
+            .anthropic => "anthropic",
+            .kimi => "kimi",
+            .kimi_plan => "kimi-plan",
+            .minimax => "minimax",
+            .minimax_plan => "minimax-plan",
+            .zai => "zai",
+            .bailian => "bailian",
+            .bailian_plan => "bailian-plan",
+            .volcano => "volcano",
+            .volcano_plan => "volcano-plan",
+            .tencent => "tencent",
+            .tencent_plan => "tencent-plan",
+        };
+    }
     pub fn models(self: Provider) []const []const u8 {
         return switch (self) {
             .openai => &.{ "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo" },
             .anthropic => &.{ "claude-3-5-sonnet-20240620", "claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307" },
-            .kimi => &.{ "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k" },
-            .kimi => &.{ "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k" },
-            .minimax => &.{ "abab6.5s-chat", "abab6.5-chat", "abab5.5-chat" },
-            .zai => &.{ "glm-4-flash", "glm-4-plus", "glm-4", "glm-3-turbo" },
-            .bailian => &.{ "qwen-plus", "qwen-max", "qwen-turbo", "qwen-long" },
-            .volcano => &.{ "doubao-pro-32k", "doubao-pro-128k", "doubao-lite-32k" },
+            .kimi, .kimi_plan => &.{ "kimi-k2.5", "kimi-k2-turbo-preview", "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k", "moonshot-v1-auto" },
+            .minimax, .minimax_plan => &.{ "MiniMax-M2.7", "MiniMax-M2.5", "MiniMax-M2.1", "MiniMax-M2", "abab6.5s-chat" },
+            .zai => &.{ "glm-4.7", "glm-4.7-flash", "glm-4.6", "glm-4-plus", "glm-4-flash" },
+            .bailian, .bailian_plan => &.{ "qwen3.5-plus", "qwen3.5-flash", "qwen3-max", "qwen-plus", "qwen-flash" },
+            .volcano => &.{ "doubao-seed-1-8-251228", "doubao-pro-32k", "doubao-pro-128k", "doubao-lite-32k", "doubao-seed-1-6-250615" },
+            .volcano_plan => &.{ "ark-code-latest", "doubao-seed-code", "glm-4.7", "kimi-k2-thinking", "doubao-seed-code-preview-251028" },
+            .tencent, .tencent_plan => &.{ "hunyuan-lite", "hunyuan-standard", "hunyuan-pro", "hunyuan-t1" },
         };
     }
-
     pub fn fromStr(s: []const u8) ?Provider {
+        const lowered = std.ascii.allocLowerString(std.heap.page_allocator, s) catch return null;
+        defer std.heap.page_allocator.free(lowered);
         inline for (.{
             .{ "openai", .openai },
             .{ "anthropic", .anthropic },
             .{ "claude", .anthropic },
             .{ "gpt", .openai },
-            .{ "gpt", .openai },
+            .{ "kimi-plan", .kimi_plan },
             .{ "kimi", .kimi },
             .{ "moonshot", .kimi },
+            .{ "minimax-plan", .minimax_plan },
             .{ "minimax", .minimax },
             .{ "zai", .zai },
             .{ "zhipu", .zai },
             .{ "glm", .zai },
+            .{ "bailian-plan", .bailian_plan },
             .{ "bailian", .bailian },
             .{ "qwen", .bailian },
             .{ "aliyun", .bailian },
             .{ "alibaba", .bailian },
+            .{ "volcano-plan", .volcano_plan },
             .{ "volcano", .volcano },
             .{ "byte", .volcano },
             .{ "doubao", .volcano },
             .{ "火山", .volcano },
+            .{ "tencent-plan", .tencent_plan },
+            .{ "tencent", .tencent },
+            .{ "hunyuan", .tencent },
+            .{ "腾讯", .tencent },
         }) |pair| {
-            if (std.ascii.indexOfIgnoreCase(s, pair[0]) != null) {
+            if (std.mem.eql(u8, lowered, pair[0])) {
                 return pair[1];
             }
         }
@@ -502,26 +544,27 @@ pub const LLMClient = struct {
             url,
         };
 
-        var child = std.process.Child.init(argv, self.allocator);
-        child.stdin_behavior = .Pipe;
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Ignore;
-
-        try child.spawn();
+        const io = shared.context.io();
+        var child = try std.process.spawn(io, .{
+            .argv = argv,
+            .stdin = .pipe,
+            .stdout = .pipe,
+            .stderr = .ignore,
+        });
 
         if (child.stdin) |stdin_file| {
-            stdin_file.writeAll(body) catch {
-                stdin_file.close();
+            stdin_file.writeStreamingAll(io, body) catch {
+                stdin_file.close(io);
                 child.stdin = null;
-                _ = child.kill() catch {};
-                _ = child.wait() catch {};
+                child.kill(io);
+                _ = child.wait(io) catch {};
                 return error.CurlWriteError;
             };
-            stdin_file.close();
+            stdin_file.close(io);
             child.stdin = null;
         } else {
-            _ = child.kill() catch {};
-            _ = child.wait() catch {};
+            child.kill(io);
+            _ = child.wait(io) catch {};
             return error.CurlSpawnError;
         }
         const stdout_file = child.stdout.?;
@@ -530,7 +573,7 @@ pub const LLMClient = struct {
         var line_pos: usize = 0;
 
         while (true) {
-            const bytes_read = stdout_file.read(&response_buffer) catch |err| {
+            const bytes_read = stdout_file.readStreaming(io, &[_][]u8{&response_buffer}) catch |err| {
                 std.log.err("Read error: {s}", .{@errorName(err)});
                 break;
             };
@@ -546,9 +589,9 @@ pub const LLMClient = struct {
                             const data = line[6..];
 
                             if (std.mem.eql(u8, data, "[DONE]")) {
-                                stdout_file.close();
+                                stdout_file.close(io);
                                 child.stdout = null;
-                                _ = child.wait() catch {};
+                                _ = child.wait(io) catch {};
                                 return;
                             }
 
@@ -567,9 +610,9 @@ pub const LLMClient = struct {
             }
         }
 
-        stdout_file.close();
+        stdout_file.close(io);
         child.stdout = null;
-        _ = child.wait() catch {};
+        _ = child.wait(io) catch {};
     }
 
     pub fn chat(self: *LLMClient, messages: []const ChatMessage) ![]const u8 {
@@ -581,6 +624,13 @@ pub const LLMClient = struct {
 
         const auth_header = try std.fmt.allocPrint(self.allocator, "Authorization: Bearer {s}", .{self.api_key});
         defer self.allocator.free(auth_header);
+
+        const temp_path = "/tmp/knot3bot_curl_body.json";
+        try shared.context.cwdWriteFile(temp_path, body);
+        defer shared.context.cwdDeleteFile(temp_path) catch {};
+
+        const data_arg = try std.fmt.allocPrint(self.allocator, "@{s}", .{temp_path});
+        defer self.allocator.free(data_arg);
 
         const argv = &[_][]const u8{
             "curl",
@@ -598,47 +648,21 @@ pub const LLMClient = struct {
             "-H",
             auth_header,
             "--data-binary",
-            "@-",
+            data_arg,
             url,
         };
 
-        var child = std.process.Child.init(argv, self.allocator);
-        child.stdin_behavior = .Pipe;
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Ignore;
-
-        try child.spawn();
-
-        if (child.stdin) |stdin_file| {
-            stdin_file.writeAll(body) catch {
-                stdin_file.close();
-                child.stdin = null;
-                _ = child.kill() catch {};
-                _ = child.wait() catch {};
-                return error.CurlWriteError;
-            };
-            stdin_file.close();
-            child.stdin = null;
-        } else {
-            _ = child.kill() catch {};
-            _ = child.wait() catch {};
+        const result = std.process.run(self.allocator, shared.context.io(), .{
+            .argv = argv,
+        }) catch |err| {
+            std.log.warn("curl run failed: {s}", .{@errorName(err)});
             return error.CurlSpawnError;
-        }
-
-        const max_response_size = 8 * 1024 * 1024;
-        const stdout = child.stdout.?.readToEndAlloc(self.allocator, max_response_size) catch {
-            _ = child.kill() catch {};
-            _ = child.wait() catch {};
-            return error.CurlReadError;
         };
-        defer self.allocator.free(stdout);
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
 
-        const term = child.wait() catch {
-            return error.CurlWaitError;
-        };
-
-        switch (term) {
-            .Exited => |code| {
+        switch (result.term) {
+            .exited => |code| {
                 if (code != 0) {
                     return switch (code) {
                         6 => error.CurlDnsError,
@@ -652,9 +676,8 @@ pub const LLMClient = struct {
             else => return error.CurlFailed,
         }
 
-        return try self.extractContent(stdout);
+        return try self.extractContent(result.stdout);
     }
-
     /// Chat with tools (function calling API)
     pub fn chatWithTools(self: *LLMClient, messages: []const ChatMessage, tools: []const ToolDef) ![]const u8 {
         // Mock mode - return fake response for UI testing
@@ -670,7 +693,8 @@ pub const LLMClient = struct {
         // Build request with tools
         var body_list: std.ArrayList(u8) = .empty;
         defer body_list.deinit(self.allocator);
-        const writer = body_list.writer(self.allocator);
+        var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &body_list);
+        const writer = &allocating.writer;
         // Start with model
         try writer.writeAll("{\"model\":\"");
         try writer.writeAll(self.model);
@@ -706,6 +730,7 @@ pub const LLMClient = struct {
             try writer.writeAll("}}");
         }
         try writer.writeAll("]}");
+        body_list = allocating.toArrayList();
         const body = try body_list.toOwnedSlice(self.allocator);
         defer self.allocator.free(body);
 
@@ -714,6 +739,13 @@ pub const LLMClient = struct {
 
         const auth_header = try std.fmt.allocPrint(self.allocator, "Authorization: Bearer {s}", .{self.api_key});
         defer self.allocator.free(auth_header);
+
+        const temp_path = "/tmp/knot3bot_curl_body.json";
+        try shared.context.cwdWriteFile(temp_path, body);
+        defer shared.context.cwdDeleteFile(temp_path) catch {};
+
+        const data_arg = try std.fmt.allocPrint(self.allocator, "@{s}", .{temp_path});
+        defer self.allocator.free(data_arg);
 
         const argv = &[_][]const u8{
             "curl",
@@ -731,46 +763,21 @@ pub const LLMClient = struct {
             "-H",
             auth_header,
             "--data-binary",
-            "@-",
+            data_arg,
             url,
         };
 
-        var child = std.process.Child.init(argv, self.allocator);
-        child.stdin_behavior = .Pipe;
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Ignore;
-
-        try child.spawn();
-
-        if (child.stdin) |stdin_file| {
-            stdin_file.writeAll(body) catch {
-                stdin_file.close();
-                child.stdin = null;
-                _ = child.kill() catch {};
-                _ = child.wait() catch {};
-                return error.CurlWriteError;
-            };
-            stdin_file.close();
-            child.stdin = null;
-        } else {
-            _ = child.kill() catch {};
-            _ = child.wait() catch {};
+        const result = std.process.run(self.allocator, shared.context.io(), .{
+            .argv = argv,
+        }) catch |err| {
+            std.log.warn("curl run failed: {s}", .{@errorName(err)});
             return error.CurlSpawnError;
-        }
-
-        const stdout = child.stdout.?.readToEndAlloc(self.allocator, 8 * 1024 * 1024) catch {
-            _ = child.kill() catch {};
-            _ = child.wait() catch {};
-            return error.CurlReadError;
         };
-        defer self.allocator.free(stdout);
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
 
-        const term = child.wait() catch {
-            return error.CurlWaitError;
-        };
-
-        switch (term) {
-            .Exited => |code| {
+        switch (result.term) {
+            .exited => |code| {
                 if (code != 0) {
                     return switch (code) {
                         6 => error.CurlDnsError,
@@ -783,7 +790,7 @@ pub const LLMClient = struct {
             else => return error.CurlFailed,
         }
 
-        return try self.extractContent(stdout);
+        return try self.extractContent(result.stdout);
     }
 };
 
@@ -891,7 +898,7 @@ pub fn chatStreamWithRetry(
             std.debug.print("Stream retry attempt {d}/{d} after {d}ms delay...\n", .{
                 attempt, config.max_retries, delay_ms,
             });
-            std.Thread.sleep(delay_ms * std.time.ns_per_ms);
+            try std.Io.sleep(shared.context.io(), std.Io.Duration.fromMilliseconds(delay_ms), .real);
             delay_ms = @min(
                 @as(u32, @intFromFloat(@as(f32, @floatFromInt(delay_ms)) * config.backoff_multiplier)),
                 config.max_delay_ms,

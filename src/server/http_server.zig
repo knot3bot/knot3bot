@@ -2,6 +2,7 @@
 //! Production-grade with request limits, timeouts, structured logging
 
 const std = @import("std");
+const shared = @import("../shared/context.zig");
 const Agent = @import("../agent/root.zig").Agent;
 const AgentConfig = Agent.AgentConfig;
 const ToolRegistry = @import("../tools/root.zig").ToolRegistry;
@@ -105,10 +106,38 @@ var request_counter: u64 = 0;
 
 fn generateRequestId() []const u8 {
     request_counter += 1;
-    const timestamp = std.time.timestamp();
-    var buf: [64]u8 = undefined;
-    const result = std.fmt.bufPrint(&buf, "{d}-{d}", .{ timestamp, request_counter }) catch unreachable;
+    const timestamp = shared.timestamp();
+    const static = struct {
+        var buf: [64]u8 = undefined;
+    };
+    const result = std.fmt.bufPrint(&static.buf, "{d}-{d}", .{ timestamp, request_counter }) catch unreachable;
     return result;
+}
+
+fn streamWriteAllFd(fd: i32, data: []const u8) !void {
+    var total_sent: usize = 0;
+    while (total_sent < data.len) {
+        const sent = std.c.send(fd, data[total_sent..].ptr, data[total_sent..].len, 0);
+        if (sent < 0) return error.WriteFailed;
+        total_sent += @intCast(sent);
+    }
+}
+
+fn streamWriteAll(conn: std.Io.net.Stream, data: []const u8) !void {
+    return streamWriteAllFd(conn.socket.handle, data);
+}
+
+fn appendJsonEscaped(list: *std.ArrayList(u8), allocator: std.mem.Allocator, text: []const u8) !void {
+    for (text) |c| {
+        switch (c) {
+            '"' => try list.appendSlice(allocator, "\\\""),
+            '\\' => try list.appendSlice(allocator, "\\\\"),
+            '\n' => try list.appendSlice(allocator, "\\n"),
+            '\r' => try list.appendSlice(allocator, "\\r"),
+            '\t' => try list.appendSlice(allocator, "\\t"),
+            else => try list.append(allocator, c),
+        }
+    }
 }
 
 // ============================================================================
@@ -154,7 +183,7 @@ pub const Server = struct {
             .shutdown_flag = shutdown_flag,
             .db_path = db_path,
             .config = config,
-            .start_time = std.time.timestamp(),
+            .start_time = shared.timestamp(),
             .metrics = ServerMetrics.init(allocator),
             .auth_config = auth_config,
             .rate_limiter = rate_limiter_mod.RateLimiter.init(allocator, .{ .max_requests = config.rate_limit_requests, .window_ms = config.rate_limit_window_secs * 1000 }),
@@ -186,23 +215,24 @@ pub const Server = struct {
     }
 
     pub fn start(self: *Server) !void {
-        const address = try std.net.Address.parseIp4("127.0.0.1", self.port);
-        var tcp_server = try address.listen(.{
+        const io = shared.io();
+        const address = try std.Io.net.IpAddress.parseIp4("0.0.0.0", self.port);
+        var tcp_server = try address.listen(io, .{
             .reuse_address = true,
         });
-        defer tcp_server.deinit();
+        defer tcp_server.deinit(io);
 
-        std.log.info("Server listening on http://127.0.0.1:{d}/", .{self.port});
+        std.log.info("Server listening on http://0.0.0.0:{d}/", .{self.port});
         std.log.info("Provider: {s}  Model: {s}", .{ self.agent_config.provider.name(), self.agent_config.model });
         std.log.info("Max request size: {d} bytes", .{self.config.max_request_size});
 
         while (!self.shutdown_flag.load(.monotonic)) {
-            const conn = tcp_server.accept() catch |err| {
+            const conn = tcp_server.accept(io) catch |err| {
                 if (self.shutdown_flag.load(.monotonic)) break;
                 std.log.debug("Accept error: {s}", .{@errorName(err)});
                 continue;
             };
-            defer conn.stream.close();
+            defer conn.close(io);
 
             self.handleConnection(conn) catch |err| {
                 std.log.err("Connection error: {s}", .{@errorName(err)});
@@ -230,14 +260,16 @@ pub const Server = struct {
         return self.auth_config.validateKey(token);
     }
 
-    fn handleConnection(self: *Server, conn: std.net.Server.Connection) !void {
+    fn handleConnection(self: *Server, conn: std.Io.net.Stream) !void {
         const request_id = generateRequestId();
 
         // Use dynamic buffer for request to handle large payloads
         var buf = try self.allocator.alloc(u8, self.config.max_request_size);
         defer self.allocator.free(buf);
 
-        const n = conn.stream.read(buf) catch |err| {
+        var stream_reader = std.Io.net.Stream.reader(conn, shared.io(), buf);
+        var chunk_buf = [_][]u8{buf};
+        const n = stream_reader.interface.readVec(&chunk_buf) catch |err| {
             std.log.err("[{s}] Read error: {s}", .{ request_id, @errorName(err) });
             return;
         };
@@ -253,7 +285,7 @@ pub const Server = struct {
         }
 
         const request = buf[0..n];
-        const start_time = std.time.milliTimestamp();
+        const start_time = shared.milliTimestamp();
 
         const auth_header = extractAuthHeader(request);
 
@@ -282,6 +314,27 @@ pub const Server = struct {
         std.log.info("[{s}] {s} {s}", .{ request_id, method, path });
 
         if (std.mem.eql(u8, method, "GET")) {
+            if (std.mem.eql(u8, path, "/") or std.mem.eql(u8, path, "/index.html")) {
+                try self.serveStaticFile(conn, "ui/index.html", "text/html; charset=utf-8", request_id);
+            } else if (std.mem.eql(u8, path, "/health")) {
+                try self.handleHealth(conn, request_id);
+            } else if (std.mem.eql(u8, path, "/healthz")) {
+                try self.sendJson(conn, 200, "{\"status\":\"ok\"}", request_id);
+            } else if (std.mem.eql(u8, path, "/v1/models")) {
+                try self.handleGetModels(conn, request_id);
+            } else if (std.mem.eql(u8, path, "/metrics")) {
+                try self.handleGetMetrics(conn, request_id);
+            } else if (std.mem.eql(u8, path, "/ready")) {
+                try self.handleReady(conn, request_id);
+            } else if (std.mem.eql(u8, path, "/api/tools")) {
+                try self.handleGetTools(conn, request_id);
+            } else if (std.mem.eql(u8, path, "/api/config")) {
+                try self.handleGetConfig(conn, request_id);
+            } else {
+                try self.sendJson(conn, 404, "{\"error\":{\"message\":\"Not found\"}}", request_id);
+            }
+        } else if (std.mem.eql(u8, method, "OPTIONS")) {
+            try self.sendOptions(conn, request_id);
             if (std.mem.eql(u8, path, "/") or std.mem.eql(u8, path, "/health")) {
                 try self.handleHealth(conn, request_id);
             } else if (std.mem.eql(u8, path, "/healthz")) {
@@ -315,15 +368,13 @@ pub const Server = struct {
             try self.sendJson(conn, 405, "{\"error\":{\"message\":\"Method not allowed\"}}", request_id);
         }
 
-        const duration = @as(u64, @intCast(std.time.milliTimestamp() - start_time));
+        const duration = @as(u64, @intCast(shared.milliTimestamp() - start_time));
         self.metrics.record(path, duration, false);
         std.log.info("[{s}] Request completed in {d}ms", .{ request_id, duration });
     }
 
-    fn handleChatCompletion(self: *Server, conn: std.net.Server.Connection, body: []const u8, request_id: []const u8) !void {
-        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-        defer _ = gpa.deinit();
-        var arena = std.heap.ArenaAllocator.init(gpa.allocator());
+    fn handleChatCompletion(self: *Server, conn: std.Io.net.Stream, body: []const u8, request_id: []const u8) !void {
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
         defer arena.deinit();
         const allocator = arena.allocator();
 
@@ -431,11 +482,15 @@ pub const Server = struct {
             try json_buf.appendSlice(self.allocator, "{\"id\":\"");
             try json_buf.appendSlice(self.allocator, chat_id);
             try json_buf.appendSlice(self.allocator, "\",\"object\":\"chat.completion\",\"created\":");
-            try json_buf.writer(self.allocator).print("{}", .{std.time.timestamp()});
+            {
+                var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &json_buf);
+                try allocating.writer.print("{}", .{shared.timestamp()});
+                json_buf = allocating.toArrayList();
+            }
             try json_buf.appendSlice(self.allocator, ",\"model\":\"");
             try json_buf.appendSlice(self.allocator, self.agent_config.model);
             try json_buf.appendSlice(self.allocator, "\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"");
-            try json_buf.appendSlice(self.allocator, response);
+            try appendJsonEscaped(&json_buf, self.allocator, response);
             try json_buf.appendSlice(self.allocator, "\"}}],\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":0,\"total_tokens\":0}}");
             try self.sendJson(conn, 200, try json_buf.toOwnedSlice(self.allocator), request_id);
         }
@@ -443,27 +498,27 @@ pub const Server = struct {
 
     fn handleStreamingCompletion(
         self: *Server,
-        conn: std.net.Server.Connection,
+        conn: std.Io.net.Stream,
         allocator: std.mem.Allocator,
         agent: *Agent.Agent,
         user_message: []const u8,
         request_id: []const u8,
     ) ![]const u8 {
         const header = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: *\r\nX-Request-ID: ";
-        try conn.stream.writeAll(header);
-        try conn.stream.writeAll(request_id);
-        try conn.stream.writeAll("\r\n\r\n");
+        try streamWriteAll(conn, header);
+        try streamWriteAll(conn, request_id);
+        try streamWriteAll(conn, "\r\n\r\n");
 
         const model_name = self.agent_config.model;
 
         const StreamCtx = struct {
-            stream: *std.net.Stream,
+            stream: std.Io.net.Stream,
             model_name: []const u8,
             request_id: []const u8,
         };
         const ctx = try allocator.create(StreamCtx);
         ctx.* = .{
-            .stream = @constCast(&conn.stream),
+            .stream = conn,
             .model_name = model_name,
             .request_id = request_id,
         };
@@ -473,27 +528,62 @@ pub const Server = struct {
             fn cb(chunk: []const u8, ud: ?*anyopaque) void {
                 const p = @as(*StreamCtx, @ptrFromInt(@intFromPtr(ud.?)));
                 var buf: [8192]u8 = undefined;
-                var fbs: std.io.FixedBufferStream([]u8) = .{ .buffer = &buf, .pos = 0 };
-                const writer = fbs.writer();
-                const ts = std.time.timestamp();
-                writer.writeAll("data: {\"id\":\"chatcmpl-") catch return;
-                writer.writeAll(p.request_id) catch return;
-                writer.writeAll("\",\"object\":\"chat.completion.chunk\",\"created\":") catch return;
-                writer.print("{d}", .{ts}) catch return;
-                writer.writeAll(",\"model\":\"") catch return;
-                writer.writeAll(p.model_name) catch return;
-                writer.writeAll("\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"") catch return;
+                const ts = shared.timestamp();
+
+                var pos: usize = 0;
+
+                const appendSlice = struct {
+                    fn run(buffer: *[8192]u8, position: *usize, data: []const u8) bool {
+                        if (position.* + data.len > buffer.len) return false;
+                        @memcpy(buffer[position.*..][0..data.len], data);
+                        position.* += data.len;
+                        return true;
+                    }
+                }.run;
+
+                const appendByte = struct {
+                    fn run(buffer: *[8192]u8, position: *usize, byte: u8) bool {
+                        if (position.* >= buffer.len) return false;
+                        buffer[position.*] = byte;
+                        position.* += 1;
+                        return true;
+                    }
+                }.run;
+
+                if (!appendSlice(&buf, &pos, "data: {\"id\":\"chatcmpl-")) return;
+                if (!appendSlice(&buf, &pos, p.request_id)) return;
+                if (!appendSlice(&buf, &pos, "\",\"object\":\"chat.completion.chunk\",\"created\":")) return;
+
+                const ts_slice = std.fmt.bufPrint(buf[pos..], "{d}", .{ts}) catch return;
+                pos += ts_slice.len;
+
+                if (!appendSlice(&buf, &pos, ",\"model\":\"")) return;
+                if (!appendSlice(&buf, &pos, p.model_name)) return;
+                if (!appendSlice(&buf, &pos, "\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"")) return;
+
                 for (chunk) |c| {
                     switch (c) {
-                        '\\' => writer.writeAll("\\\\") catch return,
-                        '"' => writer.writeAll("\\\"") catch return,
-                        '\n' => writer.writeAll("\\n") catch return,
-                        '\r' => writer.writeAll("\\r") catch return,
-                        else => writer.writeByte(c) catch return,
+                        '\\' => {
+                            if (!appendSlice(&buf, &pos, "\\\\")) return;
+                        },
+                        '"' => {
+                            if (!appendSlice(&buf, &pos, "\\\"")) return;
+                        },
+                        '\n' => {
+                            if (!appendSlice(&buf, &pos, "\\n")) return;
+                        },
+                        '\r' => {
+                            if (!appendSlice(&buf, &pos, "\\r")) return;
+                        },
+                        else => {
+                            if (!appendByte(&buf, &pos, c)) return;
+                        },
                     }
                 }
-                writer.writeAll("\"}}]}\r\n") catch return;
-                p.stream.writeAll(buf[0..fbs.pos]) catch return;
+
+                if (!appendSlice(&buf, &pos, "\"}}]}\r\n")) return;
+
+                streamWriteAll(p.stream, buf[0..pos]) catch return;
             }
         }.cb;
 
@@ -501,19 +591,17 @@ pub const Server = struct {
         const response = agent.runStreaming(user_message, callback, ctx_ptr) catch |err| {
             std.log.err("[{s}] Streaming error: {s}", .{ request_id, @errorName(err) });
             self.circuit_brk.recordFailure();
-            conn.stream.writeAll("data: [DONE]\r\n\r\n") catch {};
+            streamWriteAll(conn, "data: [DONE]\r\n\r\n") catch {};
             return error.StreamingFailed;
         };
         self.circuit_brk.recordSuccess();
 
-        conn.stream.writeAll("data: [DONE]\r\n\r\n") catch {};
+        streamWriteAll(conn, "data: [DONE]\r\n\r\n") catch {};
         return response;
     }
 
-    fn handleResponses(self: *Server, conn: std.net.Server.Connection, body: []const u8, request_id: []const u8) !void {
-        var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-        defer _ = gpa.deinit();
-        var arena = std.heap.ArenaAllocator.init(gpa.allocator());
+    fn handleResponses(self: *Server, conn: std.Io.net.Stream, body: []const u8, request_id: []const u8) !void {
+        var arena = std.heap.ArenaAllocator.init(self.allocator);
         defer arena.deinit();
         const allocator = arena.allocator();
 
@@ -606,23 +694,62 @@ pub const Server = struct {
         try json_buf.appendSlice(self.allocator, "{\"id\":\"");
         try json_buf.appendSlice(self.allocator, resp_id);
         try json_buf.appendSlice(self.allocator, "\",\"object\":\"response\",\"created_at\":");
-        try json_buf.writer(self.allocator).print("{}", .{std.time.timestamp()});
+        {
+            var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &json_buf);
+            try allocating.writer.print("{}", .{shared.timestamp()});
+            json_buf = allocating.toArrayList();
+        }
         try json_buf.appendSlice(self.allocator, ",\"model\":\"");
         try json_buf.appendSlice(self.allocator, self.agent_config.model);
         try json_buf.appendSlice(self.allocator, "\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"");
-        try json_buf.appendSlice(self.allocator, response);
+            try appendJsonEscaped(&json_buf, self.allocator, response);
         try json_buf.appendSlice(self.allocator, "\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":0,\"total_tokens\":0}}");
         try self.sendJson(conn, 200, try json_buf.toOwnedSlice(self.allocator), request_id);
     }
-    fn sendJson(self: *Server, conn: std.net.Server.Connection, status: u16, json: []const u8, request_id: []const u8) !void {
-        const header = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 {d} OK\r\nContent-Type: application/json\r\nContent-Length: {d}\r\nAccess-Control-Allow-Origin: *\r\nX-Request-ID: {s}\r\n\r\n", .{ status, json.len, request_id });
+    fn serveStaticFile(self: *Server, conn: std.Io.net.Stream, file_path: []const u8, content_type: []const u8, request_id: []const u8) !void {
+        const file = shared.cwdOpenFile(file_path, .{}) catch {
+            try self.sendJson(conn, 404, "{\"error\":{\"message\":\"Not found\"}}", request_id);
+            return;
+        };
+        defer file.close(shared.io());
+        const stat = file.stat(shared.io()) catch {
+            try self.sendJson(conn, 500, "{\"error\":{\"message\":\"Failed to stat file\"}}", request_id);
+            return;
+        };
+        const size = @as(usize, @intCast(stat.size));
+        const header = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 200 OK\r\nContent-Type: {s}\r\nContent-Length: {d}\r\nAccess-Control-Allow-Origin: *\r\nX-Request-ID: {s}\r\n\r\n", .{ content_type, size, request_id });
         defer self.allocator.free(header);
-        try conn.stream.writeAll(header);
-        try conn.stream.writeAll(json);
+        try streamWriteAll(conn, header);
+        var buf: [8192]u8 = undefined;
+        var total_read: usize = 0;
+        while (total_read < size) {
+            var iov: [1][]u8 = .{buf[0..]};
+            const n = file.readStreaming(shared.io(), &iov) catch |err| switch (err) {
+                error.EndOfStream => break,
+                else => break,
+            };
+            if (n == 0) break;
+            try streamWriteAll(conn, buf[0..n]);
+            total_read += n;
+        }
     }
 
-    fn handleHealth(self: *Server, conn: std.net.Server.Connection, request_id: []const u8) !void {
-        const uptime = std.time.timestamp() - self.start_time;
+    fn sendOptions(self: *Server, conn: std.Io.net.Stream, request_id: []const u8) !void {
+        const header = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\nX-Request-ID: {s}\r\n\r\n", .{request_id});
+        defer self.allocator.free(header);
+        try streamWriteAll(conn, header);
+    }
+
+    fn sendJson(self: *Server, conn: std.Io.net.Stream, status: u16, json: []const u8, request_id: []const u8) !void {
+        const header = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 {d} OK\r\nContent-Type: application/json\r\nContent-Length: {d}\r\nAccess-Control-Allow-Origin: *\r\nX-Request-ID: {s}\r\n\r\n", .{ status, json.len, request_id });
+        defer self.allocator.free(header);
+        try streamWriteAll(conn, header);
+        try streamWriteAll(conn, json);
+    }
+
+
+    fn handleHealth(self: *Server, conn: std.Io.net.Stream, request_id: []const u8) !void {
+        const uptime = shared.timestamp() - self.start_time;
         const provider = self.agent_config.provider.name();
         const model = self.agent_config.model;
         const tool_count = self.registry.count();
@@ -633,7 +760,7 @@ pub const Server = struct {
         try self.sendJson(conn, 200, response, request_id);
     }
 
-    fn handleReady(self: *Server, conn: std.net.Server.Connection, request_id: []const u8) !void {
+    fn handleReady(self: *Server, conn: std.Io.net.Stream, request_id: []const u8) !void {
         // Deep health check - verify DB connectivity
         var db_healthy = true;
         if (self.db_path) |path| {
@@ -650,19 +777,23 @@ pub const Server = struct {
         try self.sendJson(conn, 200, response, request_id);
     }
 
-    fn handleGetModels(self: *Server, conn: std.net.Server.Connection, request_id: []const u8) !void {
+    fn handleGetModels(self: *Server, conn: std.Io.net.Stream, request_id: []const u8) !void {
         const models_list = self.agent_config.provider.models();
         var json_buf = std.ArrayList(u8).empty;
         defer json_buf.deinit(self.allocator);
         try json_buf.appendSlice(self.allocator, "{\"object\":\"list\",\"data\":[");
         const provider_name = self.agent_config.provider.name();
-        const timestamp = std.time.timestamp();
+        const timestamp = shared.timestamp();
         for (models_list, 0..) |model, i| {
             if (i > 0) try json_buf.appendSlice(self.allocator, ",");
             try json_buf.appendSlice(self.allocator, "{\"id\":\"");
             try json_buf.appendSlice(self.allocator, model);
             try json_buf.appendSlice(self.allocator, "\",\"object\":\"model\",\"created\":");
-            try json_buf.writer(self.allocator).print("{d}", .{timestamp});
+            {
+                var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &json_buf);
+                try allocating.writer.print("{d}", .{timestamp});
+                json_buf = allocating.toArrayList();
+            }
             try json_buf.appendSlice(self.allocator, ",\"owned_by\":\"");
             try json_buf.appendSlice(self.allocator, provider_name);
             try json_buf.appendSlice(self.allocator, "\"}");
@@ -671,8 +802,8 @@ pub const Server = struct {
         try self.sendJson(conn, 200, try json_buf.toOwnedSlice(self.allocator), request_id);
     }
 
-    fn handleGetMetrics(self: *Server, conn: std.net.Server.Connection, request_id: []const u8) !void {
-        const uptime = std.time.timestamp() - self.start_time;
+    fn handleGetMetrics(self: *Server, conn: std.Io.net.Stream, request_id: []const u8) !void {
+        const uptime = shared.timestamp() - self.start_time;
         const avg_ms = if (self.metrics.total_requests > 0) self.metrics.total_response_time_ms / self.metrics.total_requests else 0;
 
         // Prometheus exposition format
@@ -681,56 +812,141 @@ pub const Server = struct {
 
         try metrics_text.appendSlice(self.allocator, "# HELP knot3bot_uptime_seconds Server uptime in seconds\n");
         try metrics_text.appendSlice(self.allocator, "# TYPE knot3bot_uptime_seconds gauge\n");
-        try metrics_text.writer(self.allocator).print("knot3bot_uptime_seconds {d}\n", .{uptime});
+        {
+            var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &metrics_text);
+            try allocating.writer.print("knot3bot_uptime_seconds {d}\n", .{uptime});
+            metrics_text = allocating.toArrayList();
+        }
 
         try metrics_text.appendSlice(self.allocator, "# HELP knot3bot_total_requests Total number of HTTP requests\n");
         try metrics_text.appendSlice(self.allocator, "# TYPE knot3bot_total_requests counter\n");
-        try metrics_text.writer(self.allocator).print("knot3bot_total_requests {d}\n", .{self.metrics.total_requests});
+        {
+            var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &metrics_text);
+            try allocating.writer.print("knot3bot_total_requests {d}\n", .{self.metrics.total_requests});
+            metrics_text = allocating.toArrayList();
+        }
 
         try metrics_text.appendSlice(self.allocator, "# HELP knot3bot_chat_requests Total chat completion requests\n");
         try metrics_text.appendSlice(self.allocator, "# TYPE knot3bot_chat_requests counter\n");
-        try metrics_text.writer(self.allocator).print("knot3bot_chat_requests {d}\n", .{self.metrics.chat_requests});
+        {
+            var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &metrics_text);
+            try allocating.writer.print("knot3bot_chat_requests {d}\n", .{self.metrics.chat_requests});
+            metrics_text = allocating.toArrayList();
+        }
 
         try metrics_text.appendSlice(self.allocator, "# HELP knot3bot_streaming_requests Total streaming requests\n");
         try metrics_text.appendSlice(self.allocator, "# TYPE knot3bot_streaming_requests counter\n");
-        try metrics_text.writer(self.allocator).print("knot3bot_streaming_requests {d}\n", .{self.metrics.streaming_requests});
+        {
+            var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &metrics_text);
+            try allocating.writer.print("knot3bot_streaming_requests {d}\n", .{self.metrics.streaming_requests});
+            metrics_text = allocating.toArrayList();
+        }
 
         try metrics_text.appendSlice(self.allocator, "# HELP knot3bot_errors Total HTTP errors\n");
         try metrics_text.appendSlice(self.allocator, "# TYPE knot3bot_errors counter\n");
-        try metrics_text.writer(self.allocator).print("knot3bot_errors {d}\n", .{self.metrics.error_count});
+        {
+            var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &metrics_text);
+            try allocating.writer.print("knot3bot_errors {d}\n", .{self.metrics.error_count});
+            metrics_text = allocating.toArrayList();
+        }
 
         try metrics_text.appendSlice(self.allocator, "# HELP knot3bot_request_size_errors Total request size limit errors\n");
         try metrics_text.appendSlice(self.allocator, "# TYPE knot3bot_request_size_errors counter\n");
-        try metrics_text.writer(self.allocator).print("knot3bot_request_size_errors {d}\n", .{self.metrics.request_size_errors});
+        {
+            var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &metrics_text);
+            try allocating.writer.print("knot3bot_request_size_errors {d}\n", .{self.metrics.request_size_errors});
+            metrics_text = allocating.toArrayList();
+        }
 
         try metrics_text.appendSlice(self.allocator, "# HELP knot3bot_request_duration_ms Average request duration in ms\n");
         try metrics_text.appendSlice(self.allocator, "# TYPE knot3bot_request_duration_ms gauge\n");
-        try metrics_text.writer(self.allocator).print("knot3bot_request_duration_ms {d}\n", .{avg_ms});
+        {
+            var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &metrics_text);
+            try allocating.writer.print("knot3bot_request_duration_ms {d}\n", .{avg_ms});
+            metrics_text = allocating.toArrayList();
+        }
 
         try metrics_text.appendSlice(self.allocator, "# HELP knot3bot_rate_limit_exceeded Total rate limit violations\n");
         try metrics_text.appendSlice(self.allocator, "# TYPE knot3bot_rate_limit_exceeded counter\n");
-        try metrics_text.writer(self.allocator).print("knot3bot_rate_limit_exceeded {d}\n", .{self.metrics.rate_limit_exceeded});
+        {
+            var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &metrics_text);
+            try allocating.writer.print("knot3bot_rate_limit_exceeded {d}\n", .{self.metrics.rate_limit_exceeded});
+            metrics_text = allocating.toArrayList();
+        }
 
         try metrics_text.appendSlice(self.allocator, "# HELP knot3bot_circuit_breaker_state Current circuit breaker state (0=closed, 1=open, 2=half_open)\n");
         try metrics_text.appendSlice(self.allocator, "# TYPE knot3bot_circuit_breaker_state gauge\n");
-        try metrics_text.writer(self.allocator).print("knot3bot_circuit_breaker_state {d}\n", .{@intFromEnum(self.circuit_brk.getState())});
+        {
+            var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &metrics_text);
+            try allocating.writer.print("knot3bot_circuit_breaker_state {d}\n", .{@intFromEnum(self.circuit_brk.getState())});
+            metrics_text = allocating.toArrayList();
+        }
 
         try metrics_text.appendSlice(self.allocator, "# HELP knot3bot_circuit_breaker_trips Total circuit breaker trips\n");
         try metrics_text.appendSlice(self.allocator, "# TYPE knot3bot_circuit_breaker_trips counter\n");
-        try metrics_text.writer(self.allocator).print("knot3bot_circuit_breaker_trips {d}\n", .{self.circuit_brk.total_trips});
+        {
+            var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &metrics_text);
+            try allocating.writer.print("knot3bot_circuit_breaker_trips {d}\n", .{self.circuit_brk.total_trips});
+            metrics_text = allocating.toArrayList();
+        }
 
         try metrics_text.appendSlice(self.allocator, "# HELP knot3bot_circuit_breaker_rejections Total requests rejected by circuit breaker\n");
         try metrics_text.appendSlice(self.allocator, "# TYPE knot3bot_circuit_breaker_rejections counter\n");
-        try metrics_text.writer(self.allocator).print("knot3bot_circuit_breaker_rejections {d}\n", .{self.metrics.circuit_breaker_rejections});
+        {
+            var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &metrics_text);
+            try allocating.writer.print("knot3bot_circuit_breaker_rejections {d}\n", .{self.metrics.circuit_breaker_rejections});
+            metrics_text = allocating.toArrayList();
+        }
 
         try self.sendMetrics(conn, try metrics_text.toOwnedSlice(self.allocator), request_id);
     }
 
-    fn sendMetrics(self: *Server, conn: std.net.Server.Connection, metrics: []const u8, request_id: []const u8) !void {
+    fn handleGetTools(self: *Server, conn: std.Io.net.Stream, request_id: []const u8) !void {
+        const tools = self.registry.list();
+        var json_buf = std.ArrayList(u8).empty;
+        defer json_buf.deinit(self.allocator);
+        try json_buf.appendSlice(self.allocator, "{\"tools\":[");
+        for (tools, 0..) |tool, i| {
+            if (i > 0) try json_buf.appendSlice(self.allocator, ",");
+            try json_buf.appendSlice(self.allocator, "{\"name\":\"");
+            try json_buf.appendSlice(self.allocator, tool.spec.name);
+            try appendJsonEscaped(&json_buf, self.allocator, tool.spec.description);
+            try json_buf.appendSlice(self.allocator, "\",\"parameters\":");
+            try appendJsonEscaped(&json_buf, self.allocator, tool.spec.description);
+            // Simple JSON escape for description
+            for (tool.spec.description) |c| {
+                switch (c) {
+                    '"' => try json_buf.appendSlice(self.allocator, "\\\""),
+                    '\\' => try json_buf.appendSlice(self.allocator, "\\\\"),
+                    '\n' => try json_buf.appendSlice(self.allocator, "\\n"),
+                    '\r' => try json_buf.appendSlice(self.allocator, "\\r"),
+                    '\t' => try json_buf.appendSlice(self.allocator, "\\t"),
+                    else => try json_buf.append(self.allocator, c),
+                }
+            }
+            try json_buf.appendSlice(self.allocator, "\",\"parameters\":");
+            try json_buf.appendSlice(self.allocator, tool.spec.parameters_json);
+            try json_buf.appendSlice(self.allocator, "}");
+        }
+        try json_buf.appendSlice(self.allocator, "]}");
+        try self.sendJson(conn, 200, try json_buf.toOwnedSlice(self.allocator), request_id);
+    }
+
+    fn handleGetConfig(self: *Server, conn: std.Io.net.Stream, request_id: []const u8) !void {
+        const uptime = shared.timestamp() - self.start_time;
+        const avg_ms = if (self.metrics.total_requests > 0) self.metrics.total_response_time_ms / self.metrics.total_requests else 0;
+        const response = try std.fmt.allocPrint(self.allocator,
+            \\{{"provider":"{s}","model":"{s}","version":"0.1.0","uptime_seconds":{d},"total_requests":{d},"avg_response_ms":{d},"rate_limit_exceeded":{d},"max_request_size":{d},"session_id":"default"}}
+        , .{ self.agent_config.provider.name(), self.agent_config.model, uptime, self.metrics.total_requests, avg_ms, self.metrics.rate_limit_exceeded, self.config.max_request_size });
+        defer self.allocator.free(response);
+        try self.sendJson(conn, 200, response, request_id);
+    }
+
+    fn sendMetrics(self: *Server, conn: std.Io.net.Stream, metrics: []const u8, request_id: []const u8) !void {
         const header = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\nContent-Length: {d}\r\nAccess-Control-Allow-Origin: *\r\nX-Request-ID: {s}\r\n\r\n", .{ metrics.len, request_id });
         defer self.allocator.free(header);
-        try conn.stream.writeAll(header);
-        try conn.stream.writeAll(metrics);
+        try streamWriteAll(conn, header);
+        try streamWriteAll(conn, metrics);
     }
 };
 

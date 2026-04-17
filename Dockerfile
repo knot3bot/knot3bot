@@ -1,29 +1,17 @@
 # syntax=docker/dockerfile:1
 
-# ── Stage 1: Build ────────────────────────────────────────────
-FROM alpine:3.23 AS builder
-
-RUN apk add --no-cache zig musl-dev sqlite-dev
-
-WORKDIR /app
-COPY build.zig build.zig.zon ./
-COPY src/ src/
-
-# Build natively for linux with musl
-RUN zig build -Dtarget=x86_64-linux-musl -Doptimize=ReleaseSafe
-
-# ── Stage 2: Runtime ─────────────────────────────────────────
-FROM alpine:3.23 AS release
+# Runtime image using the locally-built static musl binary
+FROM alpine:3.23
 
 LABEL org.opencontainers.image.source=https://github.com/n0x/knot3bot
 
-RUN apk add --no-cache ca-certificates curl tzdata sqlite-libs
+RUN apk add --no-cache ca-certificates curl tzdata
 
-COPY --from=builder /app/zig-out/bin/knot3bot /usr/local/bin/knot3bot
+COPY zig-out/bin/knot3bot /usr/local/bin/knot3bot
+COPY ui/ /app/ui/
 
-# Test stage
-FROM release AS test
 WORKDIR /app
-COPY --from=builder /app/zig-out/bin/knot3bot /usr/local/bin/knot3bot
-ENTRYPOINT ["zig", "build", "test"]
-CMD []
+EXPOSE 8080
+
+ENTRYPOINT ["/usr/local/bin/knot3bot"]
+CMD ["--server", "--port", "8080"]

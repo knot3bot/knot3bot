@@ -1,5 +1,6 @@
 //! Anthropic API Provider - Minimal text-only adapter
 const std = @import("std");
+const shared = @import("../shared/root.zig");
 
 pub const AnthropicMessage = struct {
     role: []const u8,
@@ -54,28 +55,7 @@ pub const AnthropicClient = struct {
             "https://api.anthropic.com/v1/messages",
         };
 
-        var child = std.process.Child.init(argv, self.allocator);
-        child.stdin_behavior = .Pipe;
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Ignore;
-
-        try child.spawn();
-
-        if (child.stdin) |stdin_file| {
-            stdin_file.writeAll(body) catch {
-                stdin_file.close();
-                child.stdin = null;
-            };
-            stdin_file.close();
-            child.stdin = null;
-        }
-
-        const stdout = try child.stdout.?.readToEndAlloc(self.allocator, 1024 * 1024 * 10);
-        defer self.allocator.free(stdout);
-
-        _ = try child.wait();
-
-        return try self.extractContent(stdout);
+        return try self.runCurl(argv, body);
     }
 
     pub fn chatWithTools(self: *AnthropicClient, messages: []const AnthropicMessage, tools: []const ToolDef) ![]const u8 {
@@ -103,34 +83,56 @@ pub const AnthropicClient = struct {
             "https://api.anthropic.com/v1/messages",
         };
 
-        var child = std.process.Child.init(argv, self.allocator);
-        child.stdin_behavior = .Pipe;
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Ignore;
+        return try self.runCurl(argv, body);
+    }
 
-        try child.spawn();
-
-        if (child.stdin) |stdin_file| {
-            stdin_file.writeAll(body) catch {
-                stdin_file.close();
-                child.stdin = null;
-            };
-            stdin_file.close();
-            child.stdin = null;
+    fn runCurl(self: *AnthropicClient, argv: []const []const u8, body: []const u8) ![]u8 {
+        const io = shared.context.io();
+        var child = try std.process.spawn(io, .{
+            .argv = argv,
+            .stdin = .pipe,
+            .stdout = .pipe,
+            .stderr = .ignore,
+        });
+        defer {
+            child.kill(io);
+            _ = child.wait(io) catch {};
         }
 
-        const stdout = try child.stdout.?.readToEndAlloc(self.allocator, 1024 * 1024 * 10);
-        defer self.allocator.free(stdout);
+        if (child.stdin) |stdin_file| {
+            stdin_file.writeStreamingAll(io, body) catch {
+                stdin_file.close(io);
+                child.stdin = null;
+                return error.CurlWriteError;
+            };
+            stdin_file.close(io);
+            child.stdin = null;
+        } else {
+            return error.CurlSpawnError;
+        }
 
-        _ = try child.wait();
+        const stdout_file = child.stdout.?;
+        defer stdout_file.close(io);
 
-        return try self.convertToOpenAIFormat(stdout);
+        var result = std.ArrayList(u8).empty;
+        defer result.deinit(self.allocator);
+
+        var buf: [8192]u8 = undefined;
+        var file_reader = std.Io.File.reader(stdout_file, io, &buf);
+        while (true) {
+            const n = file_reader.interface.readSliceShort(&buf) catch break;
+            if (n == 0) break;
+            try result.appendSlice(self.allocator, buf[0..n]);
+        }
+
+        return try result.toOwnedSlice(self.allocator);
     }
 
     fn buildRequestBodyWithTools(self: *AnthropicClient, messages: []const AnthropicMessage, tools: []const ToolDef) ![]u8 {
         var json: std.ArrayList(u8) = .empty;
         defer json.deinit(self.allocator);
-        const writer = json.writer(self.allocator);
+        var json_allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &json);
+        var writer = json_allocating.writer;
 
         try writer.print("{{\"model\":\"{s}\",\"max_tokens\":1024,\"messages\":[", .{self.model});
         for (messages, 0..) |msg, i| {
@@ -157,6 +159,7 @@ pub const AnthropicClient = struct {
             try writer.writeAll("}");
         }
         try writer.writeAll("]}");
+        json = json_allocating.toArrayList();
         return try json.toOwnedSlice(self.allocator);
     }
 
@@ -175,7 +178,8 @@ pub const AnthropicClient = struct {
 
         var output_json = std.ArrayList(u8).empty;
         defer output_json.deinit(self.allocator);
-        const w = output_json.writer(self.allocator);
+        var output_allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &output_json);
+        var w = output_allocating.writer;
 
         try w.writeAll("{\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\"");
 
@@ -246,13 +250,15 @@ pub const AnthropicClient = struct {
         }
 
         try w.writeAll("}");
+        output_json = output_allocating.toArrayList();
         return try output_json.toOwnedSlice(self.allocator);
     }
 
     fn buildRequestBody(self: *AnthropicClient, messages: []const AnthropicMessage) ![]u8 {
         var json: std.ArrayList(u8) = .empty;
         defer json.deinit(self.allocator);
-        const writer = json.writer(self.allocator);
+        var json_allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &json);
+        var writer = json_allocating.writer;
 
         try writer.print("{{\"model\":\"{s}\",\"max_tokens\":1024,\"messages\":[", .{self.model});
         for (messages, 0..) |msg, i| {
@@ -264,6 +270,7 @@ pub const AnthropicClient = struct {
             try writer.writeAll("\"}");
         }
         try writer.writeAll("]}");
+        json = json_allocating.toArrayList();
         return try json.toOwnedSlice(self.allocator);
     }
 
@@ -299,7 +306,8 @@ pub const AnthropicClient = struct {
     }
 };
 
-fn escapeJsonString(writer: anytype, str: []const u8) !void {
+fn escapeJsonString(writer_arg: anytype, str: []const u8) !void {
+    var writer = writer_arg;
     for (str) |c| {
         switch (c) {
             '"' => try writer.writeAll("\\\""),

@@ -7,6 +7,7 @@ const ReActStep = agent_module.ReActStep;
 const Message = agent_module.Message;
 const Role = agent_module.Role;
 
+const shared = @import("../shared/root.zig");
 pub const TrajectoryRecorder = struct {
     allocator: std.mem.Allocator,
     completed_filename: []const u8 = "trajectory_samples.jsonl",
@@ -26,9 +27,10 @@ pub const TrajectoryRecorder = struct {
     ) !void {
         const filename = if (completed) self.completed_filename else self.failed_filename;
 
-        var json_buf = std.array_list.AlignedManaged(u8, null).init(self.allocator);
-        defer json_buf.deinit();
-        const w = json_buf.writer();
+        var json_buf = std.ArrayList(u8).empty;
+        defer json_buf.deinit(self.allocator);
+        var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &json_buf);
+        const w = &allocating.writer;
 
         try w.writeAll("{\"conversations\":[");
         for (messages, 0..) |msg, i| {
@@ -46,7 +48,7 @@ pub const TrajectoryRecorder = struct {
         try w.writeAll("],");
 
         // Timestamp in ISO-8601-ish format
-        const ts = std.time.timestamp();
+        const ts = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds();
         const seconds = @mod(ts, 60);
         const minutes = @mod(@divTrunc(ts, 60), 60);
         const hours = @mod(@divTrunc(ts, 3600), 24);
@@ -91,12 +93,11 @@ pub const TrajectoryRecorder = struct {
         }
         try w.writeAll("]}");
 
-        // Append to file
-        var file = try std.fs.cwd().openFile(filename, .{ .mode = .read_write });
-        defer file.close();
-        try file.seekFromEnd(0);
-        try file.writeAll(json_buf.items);
-        try file.writeAll("\n");
+        var file = try shared.context.cwdOpenFile(filename, .{ .mode = .read_write });
+        defer file.close(shared.context.io());
+        const stat = try file.stat(shared.context.io());
+        try json_buf.appendSlice(self.allocator, "\n");
+        try file.writePositionalAll(shared.context.io(), json_buf.items, stat.size);
     }
 };
 
@@ -148,19 +149,21 @@ test "save trajectory creates file and uses correct filenames" {
     };
 
     // Clean up any existing test files
-    std.fs.cwd().deleteFile(recorder.completed_filename) catch {};
-    std.fs.cwd().deleteFile(recorder.failed_filename) catch {};
+    shared.context.cwdDeleteFile(recorder.completed_filename) catch {};
+    shared.context.cwdDeleteFile(recorder.failed_filename) catch {};
 
     try recorder.save("gpt-4o", true, steps, messages);
     try recorder.save("gpt-4o", false, steps, messages);
 
     // Verify files exist
-    const completed_stat = try std.fs.cwd().statFile(recorder.completed_filename);
+    const io_instance = shared.context.io();
+    const cwd_dir = shared.context.cwd();
+    const completed_stat = try cwd_dir.statFile(io_instance, recorder.completed_filename, .{});
     try std.testing.expect(completed_stat.size > 0);
-    const failed_stat = try std.fs.cwd().statFile(recorder.failed_filename);
+    const failed_stat = try cwd_dir.statFile(io_instance, recorder.failed_filename, .{});
     try std.testing.expect(failed_stat.size > 0);
 
     // Clean up
-    try std.fs.cwd().deleteFile(recorder.completed_filename);
-    try std.fs.cwd().deleteFile(recorder.failed_filename);
+    try shared.context.cwdDeleteFile(recorder.completed_filename);
+    try shared.context.cwdDeleteFile(recorder.failed_filename);
 }

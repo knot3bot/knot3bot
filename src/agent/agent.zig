@@ -254,7 +254,7 @@ pub const Agent = struct {
                 if (mr.get(config.model)) |_| {
                     resolved_model = config.model;
                 } else {
-                    if (mr.route(.{ .needs_function_calling = true, .needs_streaming = true })) |decision| {
+                    if (mr.routeForProvider(config.provider.internalName(), .{ .needs_function_calling = true, .needs_streaming = true })) |decision| {
                         resolved_model = allocator.dupe(u8, decision.model.name) catch config.model;
                     }
                 }
@@ -358,7 +358,7 @@ pub const Agent = struct {
         while (self.iteration_budget.hasRemaining()) {
             self.iteration_budget.tick();
             self.usage.iterations += 1;
-            const start_time = std.time.milliTimestamp();
+            const start_time = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toMilliseconds();
 
             // Context compression before LLM call if needed
             if (self.config.context_compressor) |*cc| {
@@ -389,7 +389,7 @@ pub const Agent = struct {
 
             // Call LLM
             const llm_result = try self.callLLMWithTools();
-            const step_duration: u64 = @intCast(std.time.milliTimestamp() - start_time);
+            const step_duration: u64 = @intCast(std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toMilliseconds() - start_time);
 
             // Update usage from LLM response
             if (llm_result.usage) |u| {
@@ -436,11 +436,11 @@ pub const Agent = struct {
 
                 for (tcs) |tc| {
                     self.usage.tool_calls += 1;
-                    const tool_start = std.time.milliTimestamp();
+                    const tool_start = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toMilliseconds();
 
                     // Execute tool with error handling
                     const tool_result = self.executeToolWithError(tc.function.name, tc.function.arguments);
-                    const tool_duration: u64 = @intCast(std.time.milliTimestamp() - tool_start);
+                    const tool_duration: u64 = @intCast(std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toMilliseconds() - tool_start);
 
                     const result_str = if (tool_result) |tr| tr else "{\"error\":\"Tool execution failed\"}";
 
@@ -967,9 +967,9 @@ pub const Agent = struct {
 pub fn createDefaultSystemPrompt(allocator: std.mem.Allocator, registry: *const ToolRegistry) ![]const u8 {
     var list: std.ArrayList(u8) = .empty;
     defer list.deinit(allocator);
-    const w = list.writer(allocator);
+    var allocating = std.Io.Writer.Allocating.fromArrayList(allocator, &list);
 
-    try w.writeAll(
+    try allocating.writer.writeAll(
         \\You are knot3bot, an intelligent AI assistant built with Zig.
         \\
         \\Guidelines:
@@ -980,11 +980,12 @@ pub fn createDefaultSystemPrompt(allocator: std.mem.Allocator, registry: *const 
         \\
     );
 
-    try w.writeAll("\nAvailable tools:\n");
+    try allocating.writer.writeAll("\nAvailable tools:\n");
     for (registry.list()) |entry| {
-        try w.print("  - {s}: {s}\n", .{ entry.spec.name, entry.spec.description });
+        try allocating.writer.print("  - {s}: {s}\n", .{ entry.spec.name, entry.spec.description });
     }
 
+    list = allocating.toArrayList();
     return try list.toOwnedSlice(allocator);
 }
 
@@ -992,9 +993,9 @@ pub fn createDefaultSystemPrompt(allocator: std.mem.Allocator, registry: *const 
 pub fn createReActSystemPrompt(allocator: std.mem.Allocator, registry: *const ToolRegistry) ![]const u8 {
     var list: std.ArrayList(u8) = .empty;
     defer list.deinit(allocator);
-    const w = list.writer(allocator);
+    var allocating = std.Io.Writer.Allocating.fromArrayList(allocator, &list);
 
-    try w.writeAll(
+    try allocating.writer.writeAll(
         \\You are knot3bot, an AI assistant that uses the ReAct (Reasoning + Acting) pattern.
         \\
         \\Your reasoning process:
@@ -1012,10 +1013,11 @@ pub fn createReActSystemPrompt(allocator: std.mem.Allocator, registry: *const To
         \\
     );
 
-    try w.writeAll("\nAvailable tools:\n");
+    try allocating.writer.writeAll("\nAvailable tools:\n");
     for (registry.list()) |entry| {
-        try w.print("  - {s}: {s}\n", .{ entry.spec.name, entry.spec.description });
+        try allocating.writer.print("  - {s}: {s}\n", .{ entry.spec.name, entry.spec.description });
     }
 
+    list = allocating.toArrayList();
     return try list.toOwnedSlice(allocator);
 }

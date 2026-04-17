@@ -7,6 +7,7 @@ const Tool = root.Tool;
 const ToolResult = root.ToolResult;
 const JsonObjectMap = root.JsonObjectMap;
 const getString = root.getString;
+const shared = @import("../shared/root.zig");
 const validation = @import("../validation.zig");
 
 // ── FileReadTool ─────────────────────────────────────────────────────────────────
@@ -27,7 +28,6 @@ pub const FileReadTool = struct {
             return ToolResult.fail("path is required");
         };
 
-        // Security: validate path to prevent path traversal
         validation.validatePath(path) catch {
             return ToolResult.fail("Invalid or unsafe path");
         };
@@ -35,7 +35,7 @@ pub const FileReadTool = struct {
         const full_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ self.workspace_dir, path });
         defer allocator.free(full_path);
 
-        const content = std.fs.cwd().readFileAlloc(allocator, full_path, 1024 * 1024) catch {
+        const content = shared.context.cwdReadFileAlloc(allocator, full_path, 1024 * 1024) catch {
             return ToolResult.fail("Failed to read file");
         };
 
@@ -66,7 +66,6 @@ pub const FileWriteTool = struct {
             return ToolResult.fail("content is required");
         };
 
-        // Security: validate path to prevent path traversal
         validation.validatePath(path) catch {
             return ToolResult.fail("Invalid or unsafe path");
         };
@@ -74,7 +73,7 @@ pub const FileWriteTool = struct {
         const full_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ self.workspace_dir, path });
         defer allocator.free(full_path);
 
-        std.fs.cwd().writeFile(.{ .sub_path = full_path, .data = content }) catch {
+        shared.context.cwdWriteFile(full_path, content) catch {
             return ToolResult.fail("Failed to write file");
         };
 
@@ -100,7 +99,6 @@ pub const ListDirectoryTool = struct {
     pub fn execute(self: *ListDirectoryTool, allocator: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
         const path = getString(args, "path") orelse ".";
 
-        // Security: validate path to prevent path traversal
         validation.validatePath(path) catch {
             return ToolResult.fail("Invalid or unsafe path");
         };
@@ -108,16 +106,16 @@ pub const ListDirectoryTool = struct {
         const full_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ self.workspace_dir, path });
         defer allocator.free(full_path);
 
-        var dir = std.fs.cwd().openDir(full_path, .{}) catch {
+        var dir = shared.context.cwdOpenDir(full_path, .{}) catch {
             return ToolResult.fail("Failed to open directory");
         };
-        defer dir.close();
+        defer dir.close(shared.context.io());
 
         var entries: std.ArrayList(u8) = .empty;
         defer entries.deinit(allocator);
 
         var iterator = dir.iterate();
-        while (iterator.next() catch null) |entry| {
+        while (iterator.next(shared.context.io()) catch null) |entry| {
             if (entries.items.len > 0) try entries.appendSlice(allocator, "| | |");
             try entries.appendSlice(allocator, entry.name);
         }
@@ -149,7 +147,6 @@ pub const GrepTool = struct {
             return ToolResult.fail("pattern is required");
         };
 
-        // Security: validate path to prevent path traversal
         validation.validatePath(path) catch {
             return ToolResult.fail("Invalid or unsafe path");
         };
@@ -157,7 +154,7 @@ pub const GrepTool = struct {
         const full_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ self.workspace_dir, path });
         defer allocator.free(full_path);
 
-        const content = std.fs.cwd().readFileAlloc(allocator, full_path, 1024 * 1024) catch {
+        const content = shared.context.cwdReadFileAlloc(allocator, full_path, 1024 * 1024) catch {
             return ToolResult.fail("Failed to read file");
         };
 
@@ -201,15 +198,14 @@ pub const GlobTool = struct {
             return ToolResult.fail("pattern is required");
         };
 
-        // Security: validate pattern to prevent directory traversal
         validation.validatePath(pattern) catch {
             return ToolResult.fail("Invalid or unsafe pattern");
         };
 
-        var dir = std.fs.cwd().openDir(self.workspace_dir, .{}) catch {
+        var dir = shared.context.cwdOpenDir(self.workspace_dir, .{}) catch {
             return ToolResult.fail("Failed to open workspace directory");
         };
-        defer dir.close();
+        defer dir.close(shared.context.io());
 
         var results = std.ArrayList(u8).empty;
         defer results.deinit(allocator);
@@ -224,9 +220,9 @@ pub const GlobTool = struct {
         return ToolResult.ok(try results.toOwnedSlice(allocator));
     }
 
-    fn walkRecursive(self: *GlobTool, dir: std.fs.Dir, allocator: std.mem.Allocator, prefix: []const u8, pattern: []const u8, results: *std.ArrayList(u8), count: *usize) !void {
+    fn walkRecursive(self: *GlobTool, dir: std.Io.Dir, allocator: std.mem.Allocator, prefix: []const u8, pattern: []const u8, results: *std.ArrayList(u8), count: *usize) !void {
         var iterator = dir.iterate();
-        while (iterator.next() catch null) |entry| {
+        while (iterator.next(shared.context.io()) catch null) |entry| {
             const full_path = if (prefix.len > 0)
                 try std.fmt.allocPrint(allocator, "{s}/{s}", .{ prefix, entry.name })
             else
@@ -243,8 +239,8 @@ pub const GlobTool = struct {
                     }
                 },
                 .directory => {
-                    var subdir = dir.openDir(entry.name, .{}) catch continue;
-                    defer subdir.close();
+                    var subdir = dir.openDir(shared.context.io(), entry.name, .{}) catch continue;
+                    defer subdir.close(shared.context.io());
                     try self.walkRecursive(subdir, allocator, full_path, pattern, results, count);
                 },
                 else => {},

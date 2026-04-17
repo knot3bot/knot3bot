@@ -55,8 +55,8 @@ pub const MemorySystem = struct {
         const session = Session{
             .id = id_copy,
             .messages = .empty,
-            .created_at = std.time.timestamp(),
-            .updated_at = std.time.timestamp(),
+            .created_at = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds(),
+            .updated_at = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds(),
         };
 
         try self.sessions.put(id_copy, session);
@@ -80,10 +80,10 @@ pub const MemorySystem = struct {
         try session.messages.append(self.allocator, .{
             .role = role_copy,
             .content = content_copy,
-            .timestamp = std.time.timestamp(),
+            .timestamp = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds(),
         });
 
-        session.updated_at = std.time.timestamp();
+        session.updated_at = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds();
     }
 
     /// Get session history as JSON

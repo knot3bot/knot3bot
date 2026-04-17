@@ -234,7 +234,7 @@ pub const ContextCompressor = struct {
     }
 
     fn generateSummary(self: *ContextCompressor, arena_alloc: std.mem.Allocator, turns: []const Message) !?[]const u8 {
-        const now = std.time.timestamp();
+        const now = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds();
         if (now < self.summary_failure_cooldown_until) {
             return null;
         }
@@ -242,9 +242,11 @@ pub const ContextCompressor = struct {
         const summary_budget = computeSummaryBudget(turns, self.max_summary_tokens);
         const content_to_summarize = try serializeForSummary(arena_alloc, turns);
 
-        var prompt_text = std.array_list.AlignedManaged(u8, null).init(arena_alloc);
+        var prompt_text = std.ArrayList(u8).empty;
+        defer prompt_text.deinit(arena_alloc);
+        var allocating = std.Io.Writer.Allocating.fromArrayList(arena_alloc, &prompt_text);
         if (self.previous_summary) |prev| {
-            try prompt_text.writer().print(
+            try allocating.writer.print(
                 \\You are updating a context compaction summary. A previous compaction produced the summary below. New conversation turns have occurred since then and need to be incorporated.
                 \\
                 \\PREVIOUS SUMMARY:
@@ -286,7 +288,7 @@ pub const ContextCompressor = struct {
                 \\Write only the summary body. Do not include any preamble or prefix.
             , .{ prev, content_to_summarize, summary_budget });
         } else {
-            try prompt_text.writer().print(
+            try allocating.writer.print(
                 \\Create a structured handoff summary for a later assistant that will continue this conversation after earlier turns are compacted.
                 \\
                 \\TURNS TO SUMMARIZE:
@@ -329,13 +331,14 @@ pub const ContextCompressor = struct {
         var client = LLMClient.init(self.allocator, self.api_key, self.provider, self.model);
         defer client.deinit();
 
+        prompt_text = allocating.toArrayList();
         const prompt_msg = ChatMessage{ .role = "user", .content = prompt_text.items };
         const raw = client.chat(&[_]ChatMessage{prompt_msg}) catch |err| {
             std.log.warn("Failed to generate context summary: {s}. Pausing summaries for {d}s.", .{
                 @errorName(err),
                 SUMMARY_FAILURE_COOLDOWN_SECONDS,
             });
-            self.summary_failure_cooldown_until = std.time.timestamp() + SUMMARY_FAILURE_COOLDOWN_SECONDS;
+            self.summary_failure_cooldown_until = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds() + SUMMARY_FAILURE_COOLDOWN_SECONDS;
             return null;
         };
         defer self.allocator.free(raw);
@@ -436,9 +439,11 @@ fn computeSummaryBudget(turns: []const Message, max_summary_tokens: u32) u32 {
 }
 
 fn serializeForSummary(arena_alloc: std.mem.Allocator, turns: []const Message) ![]const u8 {
-    var parts = std.array_list.AlignedManaged(u8, null).init(arena_alloc);
+    var parts = std.ArrayList(u8).empty;
+    defer parts.deinit(arena_alloc);
+    var allocating = std.Io.Writer.Allocating.fromArrayList(arena_alloc, &parts);
     for (turns) |msg| {
-        if (parts.items.len > 0) try parts.appendSlice("\n\n");
+        if (parts.items.len > 0) try allocating.writer.writeAll("\n\n");
         var content = msg.content;
         if (content.len > 3000) {
             const truncated = try std.fmt.allocPrint(arena_alloc, "{s}\n...[truncated]...\n{s}", .{
@@ -449,16 +454,17 @@ fn serializeForSummary(arena_alloc: std.mem.Allocator, turns: []const Message) !
         }
         switch (msg.role) {
             .tool => {
-                try parts.writer().print("[TOOL RESULT]: {s}", .{content});
+                try allocating.writer.print("[TOOL RESULT]: {s}", .{content});
             },
             .assistant => {
-                try parts.writer().print("[ASSISTANT]: {s}", .{content});
+                try allocating.writer.print("[ASSISTANT]: {s}", .{content});
             },
             else => {
-                try parts.writer().print("[{s}]: {s}", .{ @tagName(msg.role), content });
+                try allocating.writer.print("[{s}]: {s}", .{ @tagName(msg.role), content });
             },
         }
     }
+    parts = allocating.toArrayList();
     return parts.items;
 }
 

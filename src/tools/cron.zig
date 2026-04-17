@@ -8,6 +8,7 @@ const Tool = root.Tool;
 const ToolResult = root.ToolResult;
 const JsonObjectMap = root.JsonObjectMap;
 const getString = root.getString;
+const shared = @import("../shared/root.zig");
 
 pub const CronTool = struct {
     workspace_dir: []const u8,
@@ -47,7 +48,6 @@ pub const CronTool = struct {
     }
 
     fn isScheduleValid(schedule: []const u8) bool {
-        // Basic cron validation (5 fields)
         var parts = std.mem.splitSequence(u8, schedule, " ");
         var count: usize = 0;
         while (parts.next()) |part| : (count += 1) {
@@ -57,22 +57,19 @@ pub const CronTool = struct {
     }
 
     fn addJob(self: *CronTool, allocator: std.mem.Allocator, name: []const u8, schedule: []const u8, command: []const u8) !ToolResult {
-        // Create cron jobs directory
         const cron_dir_path = try std.fmt.allocPrint(allocator, "{s}/.knot3bot/cron", .{self.workspace_dir});
         defer allocator.free(cron_dir_path);
 
-        std.fs.cwd().makeDir(cron_dir_path) catch |err| if (err != error.PathAlreadyExists) return err;
+        shared.context.cwdMakeDir(cron_dir_path) catch |err| if (err != error.PathAlreadyExists) return err;
 
-        // Generate job ID
-        const job_id = try std.fmt.allocPrint(allocator, "{d}", .{std.time.timestamp()});
+        const job_id = try std.fmt.allocPrint(allocator, "{d}", .{shared.context.timestamp()});
         defer allocator.free(job_id);
 
-        // Write job file
         const job_path = try std.fmt.allocPrint(allocator, "{s}/{s}.json", .{ cron_dir_path, job_id });
         defer allocator.free(job_path);
 
-        var job_file = try std.fs.cwd().createFile(job_path, .{});
-        defer job_file.close();
+        var job_file = try shared.context.cwdCreateFile(job_path, .{});
+        defer job_file.close(shared.context.io());
 
         var buf: [1024]u8 = undefined;
         const json_str = try std.fmt.bufPrint(&buf,
@@ -82,10 +79,10 @@ pub const CronTool = struct {
             name,
             schedule,
             command,
-            std.time.timestamp(),
+            shared.context.timestamp(),
         });
 
-        try job_file.writeAll(json_str);
+        try job_file.writeStreamingAll(shared.context.io(), json_str);
 
         return ToolResult.ok(try std.fmt.allocPrint(allocator, "Job added: {s} (ID: {s})", .{ name, job_id }));
     }
@@ -94,25 +91,25 @@ pub const CronTool = struct {
         const cron_dir_path = try std.fmt.allocPrint(allocator, "{s}/.knot3bot/cron", .{self.workspace_dir});
         defer allocator.free(cron_dir_path);
 
-        var dir = std.fs.cwd().openDir(cron_dir_path, .{}) catch |err| {
+        var dir = shared.context.cwdOpenDir(cron_dir_path, .{}) catch |err| {
             if (err == error.FileNotFound) {
                 return ToolResult.ok("No cron jobs scheduled");
             }
             return err;
         };
-        defer dir.close();
+        defer dir.close(shared.context.io());
 
         var result = std.ArrayList(u8).empty;
         errdefer result.deinit(allocator);
         try result.appendSlice(allocator, "Cron Jobs:\n");
 
         var it = dir.iterate();
-        while (it.next() catch null) |entry| {
+        while (it.next(shared.context.io()) catch null) |entry| {
             if (std.mem.endsWith(u8, entry.name, ".json")) {
                 const full_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ cron_dir_path, entry.name });
                 defer allocator.free(full_path);
 
-                const content = try std.fs.cwd().readFileAlloc(allocator, full_path, 4096);
+                const content = try shared.context.cwdReadFileAlloc(allocator, full_path, 4096);
                 defer allocator.free(content);
 
                 try result.appendSlice(allocator, content);
@@ -130,7 +127,7 @@ pub const CronTool = struct {
         const job_path = try std.fmt.allocPrint(allocator, "{s}/{s}.json", .{ cron_dir_path, job_id });
         defer allocator.free(job_path);
 
-        std.fs.cwd().deleteFile(job_path) catch |err| {
+        shared.context.cwdDeleteFile(job_path) catch |err| {
             if (err == error.FileNotFound) {
                 return ToolResult.fail("Job not found");
             }
@@ -147,7 +144,7 @@ pub const CronTool = struct {
         const job_path = try std.fmt.allocPrint(allocator, "{s}/{s}.json", .{ cron_dir_path, job_id });
         defer allocator.free(job_path);
 
-        const content = std.fs.cwd().readFileAlloc(allocator, job_path, 4096) catch |err| {
+        const content = shared.context.cwdReadFileAlloc(allocator, job_path, 4096) catch |err| {
             if (err == error.FileNotFound) {
                 return ToolResult.fail("Job not found");
             }
@@ -155,33 +152,22 @@ pub const CronTool = struct {
         };
         defer allocator.free(content);
 
-        // Parse JSON to extract command
         const command = parseJsonCommand(content, allocator) catch |parse_err| {
             return ToolResult.fail(try std.fmt.allocPrint(allocator, "Failed to parse job: {}", .{parse_err}));
         };
         defer allocator.free(command);
 
-        // Execute command using sh -c
-        const argv = &[_][]const u8{ "sh", "-c", command };
-        var child = std.process.Child.init(argv, allocator);
-        child.stdin_behavior = .Ignore;
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Pipe;
-        child.cwd = self.workspace_dir;
-
-        child.spawn() catch {
+        const result = std.process.run(allocator, shared.context.io(), .{
+            .argv = &[_][]const u8{ "sh", "-c", command },
+            .cwd = .{ .path = self.workspace_dir },
+        }) catch {
             return ToolResult.fail("Failed to execute command");
         };
+        defer allocator.free(result.stdout);
+        defer allocator.free(result.stderr);
 
-        const stdout = child.stdout.?.readToEndAlloc(allocator, 1024 * 100) catch "";
-        defer allocator.free(stdout);
-        const stderr = child.stderr.?.readToEndAlloc(allocator, 4096) catch "";
-        defer allocator.free(stderr);
-
-        _ = child.wait() catch {};
-
-        if (stdout.len > 0) {
-            return ToolResult.ok(stdout);
+        if (result.stdout.len > 0) {
+            return ToolResult.ok(result.stdout);
         }
         return ToolResult.ok("Command executed");
     }

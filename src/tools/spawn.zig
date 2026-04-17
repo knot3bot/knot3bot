@@ -3,13 +3,6 @@
 //! Supports multiple execution environments:
 //!   - local: Execute directly on the host machine
 //!   - docker: Execute in Docker containers (isolated)
-//!
-//! Features:
-//!   - Background task support
-//!   - Process tracking and management
-//!   - Output buffering with size limits
-//!   - Working directory support
-//!   - Environment variable handling
 
 const std = @import("std");
 const root = @import("root.zig");
@@ -19,18 +12,17 @@ const JsonObjectMap = root.JsonObjectMap;
 const getString = root.getString;
 const getInt = root.getInt;
 const getBool = root.getBool;
+const shared = @import("../shared/root.zig");
 
 const MAX_PROCESSES = 32;
 const MAX_OUTPUT_BYTES = 200_000;
 const MAX_STDERR_BYTES = 10_000;
 
-/// Execution environment type
 pub const EnvType = enum {
     local,
     docker,
 };
 
-/// Process state
 pub const ProcessState = struct {
     pid: i32,
     command: []const u8,
@@ -43,7 +35,6 @@ pub const ProcessState = struct {
     cwd: ?[]const u8 = null,
 };
 
-/// Global process table
 var process_table: [MAX_PROCESSES]ProcessState = undefined;
 var process_count: usize = 0;
 
@@ -139,17 +130,14 @@ pub const SpawnTool = struct {
     }
 
     fn runProcess(_: *SpawnTool, allocator: std.mem.Allocator, command: []const u8, detach: bool, env_type: EnvType, cwd: ?[]const u8, timeout: ?i64) !ToolResult {
-        // Security: validate command
         if (validateSpawnCommand(command)) |err_msg| {
             return ToolResult.fail(err_msg);
         }
 
-        // Check process limit
         if (process_count >= MAX_PROCESSES and !detach) {
             return ToolResult.fail("Too many concurrent processes");
         }
 
-        // Prepare argv based on environment
         var argv: [10][]const u8 = undefined;
         var argc: usize = 0;
 
@@ -160,7 +148,6 @@ pub const SpawnTool = struct {
             argv[3] = "-i";
             argc = 4;
 
-            // Add working directory if specified
             if (cwd) |w| {
                 argv[argc] = "-w";
                 argc += 1;
@@ -168,7 +155,6 @@ pub const SpawnTool = struct {
                 argc += 1;
             }
 
-            // Add default shell
             argv[argc] = "alpine";
             argv[argc + 1] = "sh";
             argv[argc + 2] = "-c";
@@ -181,27 +167,17 @@ pub const SpawnTool = struct {
             argc = 3;
         }
 
-        var child = std.process.Child.init(argv[0..argc], std.heap.page_allocator);
-        child.stdin_behavior = .Inherit;
-
         if (detach) {
-            child.stdout_behavior = .Inherit;
-            child.stderr_behavior = .Inherit;
-        } else {
-            child.stdout_behavior = .Pipe;
-            child.stderr_behavior = .Pipe;
-        }
+            const child = std.process.spawn(shared.context.io(), .{
+                .argv = argv[0..argc],
+                .stdin = .inherit,
+                .stdout = .inherit,
+                .stderr = .inherit,
+                .cwd = if (cwd != null and env_type == .local) .{ .path = cwd.? } else .inherit,
+            }) catch |err| {
+                return ToolResult.fail(std.fmt.allocPrint(allocator, "Failed to spawn process: {}", .{err}) catch "Failed to spawn");
+            };
 
-        // Set working directory for local execution
-        if (cwd != null and env_type == .local) {
-            child.cwd_dir = std.fs.cwd().openDir(cwd.?, .{}) catch null;
-        }
-
-        child.spawn() catch |err| {
-            return ToolResult.fail(std.fmt.allocPrint(allocator, "Failed to spawn process: {}", .{err}) catch "Failed to spawn");
-        };
-
-        if (detach) {
             const slot = findEmptySlot();
             if (slot) |s| {
                 const child_copy = try std.heap.page_allocator.create(std.process.Child);
@@ -209,11 +185,12 @@ pub const SpawnTool = struct {
 
                 const cwd_copy = if (cwd) |c| try std.heap.page_allocator.dupe(u8, c) else null;
 
+                const pid = child.id orelse return ToolResult.fail("Failed to get process ID");
                 process_table[s] = .{
-                    .pid = child.id,
+                    .pid = pid,
                     .command = command,
                     .env_type = env_type,
-                    .started_at = std.time.timestamp(),
+                    .started_at = shared.context.timestamp(),
                     .child = child_copy,
                     .used = true,
                     .cwd = cwd_copy,
@@ -222,61 +199,45 @@ pub const SpawnTool = struct {
 
                 return ToolResult.ok(try std.fmt.allocPrint(allocator,
                     \\{{"started":true,"pid":{d},"detached":true,"env":"{s}","slot":{d}}}
-                , .{ child.id, @tagName(env_type), s }));
+                , .{ pid, @tagName(env_type), s }));
             } else {
                 return ToolResult.fail("Process table full");
             }
         } else {
-            // Handle timeout
-            var timeout_secs: i64 = 300; // 5 min default
+            var timeout_secs: i64 = 300;
             if (timeout) |t| timeout_secs = t;
 
-            // Set up timeout thread for non-detached processes
-            const start_time = std.time.timestamp();
-            // Read stdout with size limit
-            const stdout = child.stdout.?.readToEndAlloc(allocator, MAX_OUTPUT_BYTES) catch {
-                _ = child.kill() catch {};
-                return ToolResult.fail("Failed to read stdout");
+            const start_time = shared.context.timestamp();
+            const result = std.process.run(allocator, shared.context.io(), .{
+                .argv = argv[0..argc],
+                .cwd = if (cwd != null and env_type == .local) .{ .path = cwd.? } else .inherit,
+                .stdout_limit = .limited(MAX_OUTPUT_BYTES),
+                .stderr_limit = .limited(MAX_STDERR_BYTES),
+            }) catch |err| {
+                return ToolResult.fail(std.fmt.allocPrint(allocator, "Failed to spawn process: {}", .{err}) catch "Failed to spawn");
             };
-            defer allocator.free(stdout);
+            defer allocator.free(result.stdout);
+            defer allocator.free(result.stderr);
 
-            // Check if already timed out
-            if (std.time.timestamp() - start_time > timeout_secs) {
-                _ = child.kill() catch {};
+            if (shared.context.timestamp() - start_time > timeout_secs) {
                 return ToolResult.fail("Process timed out");
             }
 
-            // Read stderr with size limit
-            const stderr = child.stderr.?.readToEndAlloc(allocator, MAX_STDERR_BYTES) catch {
-                allocator.free(stdout);
-                _ = child.kill() catch {};
-                return ToolResult.fail("Failed to read stderr");
-            };
-            defer allocator.free(stderr);
-
-            // Wait for process with remaining timeout
-            const term = child.wait() catch {
-                allocator.free(stdout);
-                allocator.free(stderr);
-                return ToolResult.fail("Failed to wait for process");
-            };
-
-            const exit_code: i32 = switch (term) {
-                .Exited => |code| code,
-                .Signal => |sig| -@as(i32, @intCast(sig)),
-                .Stopped => |sig| @as(i32, @intCast(sig)) + 128,
+            const exit_code: i32 = switch (result.term) {
+                .exited => |code| code,
+                .signal => |sig| -@as(i32, @intCast(@intFromEnum(sig))),
+                .stopped => |sig| @as(i32, @intCast(@intFromEnum(sig))) + 128,
                 else => -1,
             };
 
-            // Truncate output if too large
-            const truncated_stdout = if (stdout.len > MAX_OUTPUT_BYTES)
-                stdout[0..MAX_OUTPUT_BYTES]
+            const truncated_stdout = if (result.stdout.len > MAX_OUTPUT_BYTES)
+                result.stdout[0..MAX_OUTPUT_BYTES]
             else
-                stdout;
+                result.stdout;
 
             return ToolResult.ok(try std.fmt.allocPrint(allocator,
                 \\{{"exited":true,"exit_code":{d},"stdout":"{s}","stderr":"{s}","truncated":{}}}
-            , .{ exit_code, truncated_stdout, stderr, stdout.len > MAX_OUTPUT_BYTES }));
+            , .{ exit_code, truncated_stdout, result.stderr, result.stdout.len > MAX_OUTPUT_BYTES }));
         }
     }
 
@@ -284,19 +245,19 @@ pub const SpawnTool = struct {
         _ = _self;
         var output: std.ArrayList(u8) = .empty;
         defer output.deinit(allocator);
-        const w = output.writer(allocator);
+        var allocating = std.Io.Writer.Allocating.fromArrayList(allocator, &output);
 
-        try w.writeAll("{\"processes\":[");
+        try allocating.writer.writeAll("{\"processes\":[");
         var first = true;
         var found_count: usize = 0;
 
         for (0..MAX_PROCESSES) |i| {
             if (process_table[i].used) {
-                if (!first) try w.writeAll(",");
+                if (!first) try allocating.writer.writeAll(",");
                 first = false;
                 found_count += 1;
 
-                try w.print(
+                try allocating.writer.print(
                     \\{{"slot":{d},"pid":{d},"command":"{s}","env":"{s}","started_at":{d},"exited":{}}}
                 , .{
                     i,
@@ -309,10 +270,11 @@ pub const SpawnTool = struct {
             }
         }
 
-        try w.writeAll("],\"count\":");
-        try w.print("{}", .{found_count});
-        try w.writeAll("}");
+        try allocating.writer.writeAll("],\"count\":");
+        try allocating.writer.print("{}", .{found_count});
+        try allocating.writer.writeAll("}");
 
+        output = allocating.toArrayList();
         return ToolResult.ok(try output.toOwnedSlice(allocator));
     }
 
@@ -320,17 +282,16 @@ pub const SpawnTool = struct {
         _ = _self;
         const slot = findByPid(pid);
         if (slot) |s| {
-            // For docker, we need to kill the container
             if (process_table[s].env_type == .docker) {
-                // Try to kill the container (docker run --rm means container exits on process exit)
                 const docker_argv = &[_][]const u8{ "docker", "kill", "--signal=KILL", try std.fmt.allocPrint(allocator, "{d}", .{pid}) };
-                var child = std.process.Child.init(docker_argv, allocator);
-                _ = child.spawn() catch {};
+                _ = std.process.spawn(shared.context.io(), .{
+                    .argv = docker_argv,
+                }) catch {};
             }
 
-            std.posix.kill(pid, 9) catch |err| {
-                return ToolResult.fail(try std.fmt.allocPrint(allocator, "Failed to kill process: {}", .{err}));
-            };
+            if (std.c.kill(pid, std.c.SIG.KILL) != 0) {
+                return ToolResult.fail("Failed to kill process");
+            }
             cleanupSlot(s);
             process_count -= 1;
             return ToolResult.ok("Process terminated");
@@ -344,14 +305,14 @@ pub const SpawnTool = struct {
         if (slot) |s| {
             const child = process_table[s].child;
             if (child) |c| {
-                const term = c.wait() catch |err| {
+                const term = c.wait(shared.context.io()) catch |err| {
                     return ToolResult.fail(try std.fmt.allocPrint(allocator, "Failed to wait: {}", .{err}));
                 };
 
                 const exit_code: i32 = switch (term) {
-                    .Exited => |code| code,
-                    .Signal => |sig| -@as(i32, @intCast(sig)),
-                    .Stopped => |sig| @as(i32, @intCast(sig)) + 128,
+                    .exited => |code| code,
+                    .signal => |sig| -@as(i32, @intCast(@intFromEnum(sig))),
+                    .stopped => |sig| @as(i32, @intCast(@intFromEnum(sig))) + 128,
                     else => -1,
                 };
 
@@ -372,8 +333,6 @@ pub const SpawnTool = struct {
         _ = _self;
         const slot = findByPid(pid);
         if (slot) |s| {
-            // For processes with stored output, return it
-            // For running processes, this would need streaming implementation
             if (process_table[s].exited) {
                 return ToolResult.ok(try std.fmt.allocPrint(allocator,
                     \\{{"pid":{d},"exited":true,"exit_code":{any}}}
@@ -386,12 +345,9 @@ pub const SpawnTool = struct {
         return ToolResult.fail("Process not found");
     }
 
-    /// Validate command for dangerous patterns
     fn validateSpawnCommand(command: []const u8) ?[]const u8 {
-        // Check for empty command
         if (command.len == 0) return "Empty command";
 
-        // Check for dangerous patterns
         const dangerous = &[_][]const u8{
             "&& ",      "| ",       "|| ",       "; ",
             "> ",       "< ",       "`",         "${",
@@ -406,7 +362,6 @@ pub const SpawnTool = struct {
             }
         }
 
-        // Block cd, export, source at the start
         const trimmed = std.mem.trim(u8, command, " \t\n");
         if (std.mem.startsWith(u8, trimmed, "cd ")) return "cd not allowed";
         if (std.mem.startsWith(u8, trimmed, "export ")) return "export not allowed";

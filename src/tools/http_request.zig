@@ -8,6 +8,7 @@ const Tool = root.Tool;
 const ToolResult = root.ToolResult;
 const JsonObjectMap = root.JsonObjectMap;
 const getString = root.getString;
+const shared = @import("../shared/root.zig");
 const validation = @import("../validation.zig");
 
 pub const HttpRequestTool = struct {
@@ -25,7 +26,6 @@ pub const HttpRequestTool = struct {
         _ = _self;
         const url = getString(args, "url") orelse return ToolResult.fail("url required");
 
-        // Security: validate URL to prevent SSRF attacks
         validation.validateUrl(url) catch {
             return ToolResult.fail("Invalid or blocked URL (SSRF protection)");
         };
@@ -36,7 +36,6 @@ pub const HttpRequestTool = struct {
         const timeout_str = getString(args, "timeout");
         const timeout: u32 = if (timeout_str) |t| std.fmt.parseInt(u32, t, 10) catch 30 else 30;
 
-        // Build curl command
         var argv: std.ArrayList([]const u8) = .empty;
         errdefer argv.deinit(allocator);
 
@@ -49,7 +48,6 @@ pub const HttpRequestTool = struct {
         try argv.append(allocator, "--max-time");
         try argv.append(allocator, try std.fmt.allocPrint(allocator, "{d}", .{timeout}));
 
-        // Add headers (comma-separated "name:value" pairs)
         if (headers_str) |h| {
             var parts = std.mem.splitSequence(u8, h, ",");
             while (parts.next()) |pair| {
@@ -65,7 +63,6 @@ pub const HttpRequestTool = struct {
             }
         }
 
-        // Add body for POST/PUT
         if (body != null and (std.mem.eql(u8, method, "POST") or std.mem.eql(u8, method, "PUT") or std.mem.eql(u8, method, "PATCH"))) {
             try argv.append(allocator, "-d");
             try argv.append(allocator, body.?);
@@ -73,39 +70,30 @@ pub const HttpRequestTool = struct {
 
         try argv.append(allocator, url);
 
-        var child = std.process.Child.init(try argv.toOwnedSlice(allocator), allocator);
-        child.stdin_behavior = .Ignore;
-        child.stdout_behavior = .Pipe;
-        child.stderr_behavior = .Pipe;
+        const argv_slice = try argv.toOwnedSlice(allocator);
+        defer allocator.free(argv_slice);
 
-        try child.spawn();
-
-        const max_response_size = 8 * 1024 * 1024; // 8MB
-        const stdout = child.stdout.?.readToEndAlloc(allocator, max_response_size) catch {
-            _ = child.kill() catch {};
-            _ = child.wait() catch {};
-            return ToolResult.fail("Failed to read response");
+        const result = std.process.run(allocator, shared.context.io(), .{
+            .argv = argv_slice,
+        }) catch {
+            return ToolResult.fail("Failed to execute curl");
         };
-        defer allocator.free(stdout);
+        defer allocator.free(result.stdout);
+        defer allocator.free(result.stderr);
 
-        const term = child.wait() catch {
-            return ToolResult.fail("Failed to wait for curl");
-        };
-
-        switch (term) {
-            .Exited => |code| {
+        switch (result.term) {
+            .exited => |code| {
                 if (code == 0) {
-                    // Parse response and status code
-                    const last_newline = std.mem.lastIndexOf(u8, stdout, "\n");
+                    const last_newline = std.mem.lastIndexOf(u8, result.stdout, "\n");
                     if (last_newline) |idx| {
-                        const status_str = stdout[idx + 1 ..];
-                        const response_body = stdout[0..idx];
+                        const status_str = result.stdout[idx + 1 ..];
+                        const response_body = result.stdout[0..idx];
                         const status_code = std.fmt.parseInt(u16, status_str, 10) catch 200;
                         return ToolResult.ok(try std.fmt.allocPrint(allocator,
                             \\{{"status":{d},"body":"{s}"}}
                         , .{ status_code, response_body }));
                     }
-                    return ToolResult.ok(stdout);
+                    return ToolResult.ok(result.stdout);
                 } else {
                     return ToolResult.fail(try std.fmt.allocPrint(allocator, "HTTP request failed with code {d}", .{code}));
                 }

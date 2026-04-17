@@ -87,7 +87,7 @@ pub const RateLimiter = struct {
     /// Check if request is allowed for the given identifier
     /// Uses API key if provided, otherwise falls back to IP
     pub fn check(self: *RateLimiter, identifier: []const u8) bool {
-        const now = std.time.timestamp() * std.time.ms_per_s;
+        const now = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds() * std.time.ms_per_s;
         const effective_limit = self.getEffectiveLimit(identifier);
         const bucket = self.getOrCreateBucket(identifier, now, effective_limit);
 

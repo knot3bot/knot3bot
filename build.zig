@@ -91,12 +91,22 @@ pub fn build(b: *std.Build) void {
     // Link SQLite if enabled
     if (enable_sqlite) {
         exe.root_module.addCMacro("ENABLE_SQLITE", "1");
-        exe.linkSystemLibrary("sqlite3");
-        exe.addIncludePath(.{ .cwd_relative = sqlite_include_path });
+        exe.root_module.linkSystemLibrary("sqlite3", .{});
+        exe.root_module.addIncludePath(.{ .cwd_relative = sqlite_include_path });
         if (sqlite_lib_path) |lib_path| {
-            exe.addLibraryPath(.{ .cwd_relative = lib_path });
+            exe.root_module.addLibraryPath(.{ .cwd_relative = lib_path });
         }
     }
+
+    // Config options module for conditional compilation
+    const config_options = b.addOptions();
+    config_options.addOption(bool, "enable_sqlite", enable_sqlite);
+    const config_mod = config_options.createModule();
+    mod.addImport("config", config_mod);
+    exe.root_module.addImport("config", config_mod);
+
+    exe.root_module.link_libc = true;
+
 
     // This declares intent for the executable to be installed into the
     // install prefix when running `zig build` (i.e. when executing the default

@@ -34,7 +34,7 @@ pub const CircuitBreaker = struct {
         switch (self.state) {
             .closed => return true,
             .open => {
-                const now = std.time.timestamp();
+                const now = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds();
                 const elapsed = now - self.last_failure_time;
                 if (elapsed >= @as(i64, self.config.recovery_timeout_secs)) {
                     self.state = .half_open;
@@ -72,13 +72,13 @@ pub const CircuitBreaker = struct {
                 self.failure_count += 1;
                 if (self.failure_count >= self.config.failure_threshold) {
                     self.state = .open;
-                    self.last_failure_time = std.time.timestamp();
+                    self.last_failure_time = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds();
                     self.total_trips += 1;
                 }
             },
             .half_open => {
                 self.state = .open;
-                self.last_failure_time = std.time.timestamp();
+                self.last_failure_time = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds();
                 self.total_trips += 1;
             },
             .open => {},
@@ -93,7 +93,7 @@ pub const CircuitBreaker = struct {
     /// Get remaining seconds until half-open (0 if not open)
     pub fn remainingTimeout(self: *CircuitBreaker) u32 {
         if (self.state != .open) return 0;
-        const now = std.time.timestamp();
+        const now = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds();
         const elapsed = now - self.last_failure_time;
         if (elapsed >= @as(i64, self.config.recovery_timeout_secs)) return 0;
         return @as(u32, @intCast(@as(i64, self.config.recovery_timeout_secs) - elapsed));

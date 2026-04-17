@@ -49,3 +49,4 @@ build/
 *.pem
 *.key
 credentials.json
+.gstack/

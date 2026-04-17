@@ -63,12 +63,12 @@ pub const ProcessRegistry = struct {
             return error.TooManyProcesses;
         }
 
-        const id = try std.fmt.allocPrint(self.allocator, "proc_{}", .{std.time.timestamp()});
+        const id = try std.fmt.allocPrint(self.allocator, "proc_{}", .{std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds()});
         const proc = TrackedProcess{
             .id = id,
             .command = command,
             .output_buffer = std.array_list.AlignedManaged(u8, null).init(self.allocator),
-            .started_at = std.time.timestamp(),
+            .started_at = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds(),
         };
 
         try self.processes.put(id, proc);

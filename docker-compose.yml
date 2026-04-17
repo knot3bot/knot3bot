@@ -13,8 +13,10 @@ services:
       - KIMI_API_KEY=${KIMI_API_KEY:-}
       - MINIMAX_API_KEY=${MINIMAX_API_KEY:-}
       - ZAI_API_KEY=${ZAI_API_KEY:-}
+      - TENCENT_API_KEY=${TENCENT_API_KEY:-}
       - VOLCANO_API_KEY=${VOLCANO_API_KEY:-}
       - HERMES_WORKSPACE=/app/workspace
+    command: ["--provider", "volcano-plan", "--server", "--port", "8080"]
     volumes:
       - knot3bot-data:/app/data
       - ./workspace:/app/workspace:ro

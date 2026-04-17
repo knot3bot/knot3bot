@@ -47,7 +47,7 @@ test "Provider.models returns non-empty list" {
 
 test "ModelRegistry.init creates empty registry" {
     const allocator = std.testing.allocator;
-    var registry = ModelRegistry.init(allocator);
+    var registry = try ModelRegistry.init(allocator);
     defer registry.deinit();
 
     try std.testing.expectEqual(@as(usize, 0), registry.count());
@@ -55,7 +55,7 @@ test "ModelRegistry.init creates empty registry" {
 
 test "ModelRegistry.register adds models" {
     const allocator = std.testing.allocator;
-    var registry = ModelRegistry.init(allocator);
+    var registry = try ModelRegistry.init(allocator);
     defer registry.deinit();
 
     try registry.register(.{
@@ -73,7 +73,7 @@ test "ModelRegistry.register adds models" {
 
 test "ModelRegistry.get finds registered models" {
     const allocator = std.testing.allocator;
-    var registry = ModelRegistry.init(allocator);
+    var registry = try ModelRegistry.init(allocator);
     defer registry.deinit();
 
     try registry.register(.{
@@ -93,7 +93,7 @@ test "ModelRegistry.get finds registered models" {
 
 test "ModelRegistry.get returns null for unknown models" {
     const allocator = std.testing.allocator;
-    var registry = ModelRegistry.init(allocator);
+    var registry = try ModelRegistry.init(allocator);
     defer registry.deinit();
 
     const found = registry.get("nonexistent-model");
@@ -102,7 +102,7 @@ test "ModelRegistry.get returns null for unknown models" {
 
 test "ModelRegistry.list returns all models" {
     const allocator = std.testing.allocator;
-    var registry = ModelRegistry.init(allocator);
+    var registry = try ModelRegistry.init(allocator);
     defer registry.deinit();
 
     try registry.register(.{
@@ -131,7 +131,7 @@ test "ModelRegistry.list returns all models" {
 
 test "ModelRegistry.route selects appropriate model" {
     const allocator = std.testing.allocator;
-    var registry = ModelRegistry.init(allocator);
+    var registry = try ModelRegistry.init(allocator);
     defer registry.deinit();
 
     // Register a function-calling model
