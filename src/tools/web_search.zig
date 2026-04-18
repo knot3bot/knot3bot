@@ -419,7 +419,6 @@ fn makeHttpRequest(allocator: std.mem.Allocator, method: []const u8, url: []cons
     }) catch {
         return ToolResult.fail("Failed to execute HTTP request");
     };
-    defer allocator.free(result.stdout);
     defer allocator.free(result.stderr);
 
     switch (result.term) {
@@ -427,9 +426,13 @@ fn makeHttpRequest(allocator: std.mem.Allocator, method: []const u8, url: []cons
             if (code == 0) {
                 return ToolResult.ok(result.stdout);
             } else {
-                return ToolResult.fail(try std.fmt.allocPrint(allocator, "API request failed with code {d}: {s}", .{ code, result.stdout }));
+                allocator.free(result.stdout);
+                return ToolResult.fail(try std.fmt.allocPrint(allocator, "API request failed with code {d}: {s}", .{ code, result.stderr }));
             }
         },
-        else => return ToolResult.fail("API request failed"),
+        else => {
+            allocator.free(result.stdout);
+            return ToolResult.fail("API request failed");
+        },
     }
 }

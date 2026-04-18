@@ -50,6 +50,7 @@ pub const Message = struct {
     role: Role,
     content: []const u8,
     tool_call_id: ?[]const u8 = null,
+    tool_calls_json: ?[]const u8 = null,
 };
 
 
@@ -208,6 +209,7 @@ pub const AgentConfig = struct {
 pub const LLMResult = struct {
     content: []const u8,
     tool_calls: ?[]ToolCallResult,
+    tool_calls_json: ?[]const u8 = null,
     usage: ?LLMUsage = null,
 };
 
@@ -424,6 +426,7 @@ pub const Agent = struct {
             try self.messages.append(self.allocator, .{
                 .role = .assistant,
                 .content = llm_result.content,
+                .tool_calls_json = llm_result.tool_calls_json,
             });
 
             // Handle tool calls
@@ -458,7 +461,6 @@ pub const Agent = struct {
 
                     // Add tool message to conversation
                     const tool_msg = try std.fmt.allocPrint(self.allocator, "{s}", .{result_str});
-                    defer self.allocator.free(tool_msg);
 
                     try self.messages.append(self.allocator, .{
                         .role = .tool,
@@ -554,7 +556,7 @@ pub const Agent = struct {
                 .assistant => "assistant",
                 .tool => "tool",
             };
-            try msgs.append(self.allocator, .{ .role = role, .content = msg.content });
+            try msgs.append(self.allocator, .{ .role = role, .content = msg.content, .tool_call_id = msg.tool_call_id, .tool_calls_json = msg.tool_calls_json });
         }
         const tool_defs = try self.getToolDefs();
         defer {
@@ -579,7 +581,7 @@ pub const Agent = struct {
             const llm_result = try self.callLLMWithTools();
             if (llm_result.usage) |u| self.usage.update(u.prompt, u.completion);
             self.usage.api_calls += 1;
-            try self.messages.append(self.allocator, .{ .role = .assistant, .content = llm_result.content });
+            try self.messages.append(self.allocator, .{ .role = .assistant, .content = llm_result.content, .tool_calls_json = llm_result.tool_calls_json });
             if (llm_result.tool_calls) |tcs| {
                 if (tcs.len > 0) {
                     var all_results: std.ArrayList(u8) = .empty;
@@ -591,7 +593,6 @@ pub const Agent = struct {
                         if (all_results.items.len > 0) try all_results.appendSlice(self.allocator, ", ");
                         try all_results.appendSlice(self.allocator, result_str);
                         const tool_msg = try std.fmt.allocPrint(self.allocator, "{s}", .{result_str});
-                        defer self.allocator.free(tool_msg);
                         try self.messages.append(self.allocator, .{ .role = .tool, .content = tool_msg, .tool_call_id = tc.id });
                     }
                     const indicator = try std.fmt.allocPrint(self.allocator, "[Tool(s) executed. Results: {s}]", .{try all_results.toOwnedSlice(self.allocator)});
@@ -621,7 +622,7 @@ pub const Agent = struct {
             }
         }
 
-        return result.output;
+        return self.allocator.dupe(u8, result.output) catch null;
     }
 
     fn callLLMWithTools(self: *Agent) !LLMResult {
@@ -673,6 +674,7 @@ pub const Agent = struct {
                 defer parsed.deinit();
                 var content: ?[]const u8 = null;
                 var tool_calls: ?[]ToolCallResult = null;
+                var tool_calls_json: ?[]const u8 = null;
                 var usage: ?LLMUsage = null;
                 if (parsed.value == .object) {
                     const obj = parsed.value.object;
@@ -732,6 +734,23 @@ pub const Agent = struct {
                                                     }
                                                 }
                                                 if (parsed_tcs.items.len > 0) {
+                                                    var json_buf: std.ArrayList(u8) = .empty;
+                                                    defer json_buf.deinit(self.allocator);
+                                                    try json_buf.appendSlice(self.allocator, "[");
+                                                    for (parsed_tcs.items, 0..) |tc, i| {
+                                                        if (i > 0) try json_buf.appendSlice(self.allocator, ",");
+                                                        try json_buf.appendSlice(self.allocator, "{\"id\":\"");
+                                                        try escapeJsonStringToBuffer(&json_buf, self.allocator, tc.id);
+                                                        try json_buf.appendSlice(self.allocator, "\",\"type\":\"");
+                                                        try escapeJsonStringToBuffer(&json_buf, self.allocator, tc.type);
+                                                        try json_buf.appendSlice(self.allocator, "\",\"function\":{\"name\":\"");
+                                                        try escapeJsonStringToBuffer(&json_buf, self.allocator, tc.function.name);
+                                                        try json_buf.appendSlice(self.allocator, "\",\"arguments\":\"");
+                                                        try escapeJsonStringToBuffer(&json_buf, self.allocator, tc.function.arguments);
+                                                        try json_buf.appendSlice(self.allocator, "\"}}");
+                                                    }
+                                                    try json_buf.appendSlice(self.allocator, "]");
+                                                    tool_calls_json = try json_buf.toOwnedSlice(self.allocator);
                                                     tool_calls = try parsed_tcs.toOwnedSlice(self.allocator);
                                                 }
                                             }
@@ -745,6 +764,7 @@ pub const Agent = struct {
                 return .{
                     .content = try self.allocator.dupe(u8, content orelse raw),
                     .tool_calls = tool_calls,
+                    .tool_calls_json = tool_calls_json,
                     .usage = usage,
                 };
             }
@@ -767,7 +787,7 @@ pub const Agent = struct {
                 .assistant => "assistant",
                 .tool => "tool",
             };
-            try msgs.append(self.allocator, .{ .role = role, .content = msg.content, .tool_call_id = msg.tool_call_id });
+            try msgs.append(self.allocator, .{ .role = role, .content = msg.content, .tool_call_id = msg.tool_call_id, .tool_calls_json = msg.tool_calls_json });
         }
 
         const tool_defs = try self.getToolDefs();
@@ -799,6 +819,7 @@ pub const Agent = struct {
 
         var content: ?[]const u8 = null;
         var tool_calls: ?[]ToolCallResult = null;
+        var tool_calls_json: ?[]const u8 = null;
 
         // Try to extract usage if present
         if (parsed.value == .object) {
@@ -869,6 +890,23 @@ pub const Agent = struct {
                                             }
                                         }
                                         if (parsed_tcs.items.len > 0) {
+                                            var json_buf: std.ArrayList(u8) = .empty;
+                                            defer json_buf.deinit(self.allocator);
+                                            try json_buf.appendSlice(self.allocator, "[");
+                                            for (parsed_tcs.items, 0..) |tc, i| {
+                                                if (i > 0) try json_buf.appendSlice(self.allocator, ",");
+                                                try json_buf.appendSlice(self.allocator, "{\"id\":\"");
+                                                try escapeJsonStringToBuffer(&json_buf, self.allocator, tc.id);
+                                                try json_buf.appendSlice(self.allocator, "\",\"type\":\"");
+                                                try escapeJsonStringToBuffer(&json_buf, self.allocator, tc.type);
+                                                try json_buf.appendSlice(self.allocator, "\",\"function\":{\"name\":\"");
+                                                try escapeJsonStringToBuffer(&json_buf, self.allocator, tc.function.name);
+                                                try json_buf.appendSlice(self.allocator, "\",\"arguments\":\"");
+                                                try escapeJsonStringToBuffer(&json_buf, self.allocator, tc.function.arguments);
+                                                try json_buf.appendSlice(self.allocator, "\"}}");
+                                            }
+                                            try json_buf.appendSlice(self.allocator, "]");
+                                            tool_calls_json = try json_buf.toOwnedSlice(self.allocator);
                                             tool_calls = try parsed_tcs.toOwnedSlice(self.allocator);
                                         }
                                     }
@@ -883,8 +921,23 @@ pub const Agent = struct {
         return .{
             .content = try self.allocator.dupe(u8, content orelse raw),
             .tool_calls = tool_calls,
+            .tool_calls_json = tool_calls_json,
             .usage = usage,
         };
+    }
+
+
+    fn escapeJsonStringToBuffer(buf: *std.ArrayList(u8), allocator: std.mem.Allocator, str: []const u8) !void {
+        for (str) |c| {
+            switch (c) {
+                '"' => try buf.appendSlice(allocator, "\\\""),
+                '\\' => try buf.appendSlice(allocator, "\\\\"),
+                '\n' => try buf.appendSlice(allocator, "\\n"),
+                '\r' => try buf.appendSlice(allocator, "\\r"),
+                '\t' => try buf.appendSlice(allocator, "\\t"),
+                else => try buf.append(allocator, c),
+            }
+        }
     }
 
     fn getToolDefs(self: *Agent) ![]ToolDef {

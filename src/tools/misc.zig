@@ -37,7 +37,7 @@ pub const CalculatorTool = struct {
         return .{ .ptr = @ptrCast(self), .vtable = &vtable };
     }
 
-    pub fn execute(_: *CalculatorTool, _: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
+    pub fn execute(_: *CalculatorTool, allocator: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
         const expr = getString(args, "expression") orelse {
             return ToolResult.fail("expression is required");
         };
@@ -65,8 +65,15 @@ pub const CalculatorTool = struct {
             }
         }
 
-        var output: [32]u8 = undefined;
-        const result_str = std.fmt.bufPrint(&output, "{d}", .{result}) catch "0";
+        // Process the last number in the expression
+        if (num_idx > 0) {
+            num_buf[num_idx] = 0;
+            const num = std.fmt.parseFloat(f64, &num_buf) catch 0;
+            if (op == '+') result += num else if (op == '-') result -= num else if (op == '*') result *= num else if (op == '/') result /= num;
+        }
+
+        // Use allocator to allocate result string so it survives function return
+        const result_str = try std.fmt.allocPrint(allocator, "{d}", .{result});
         return ToolResult.ok(result_str);
     }
 

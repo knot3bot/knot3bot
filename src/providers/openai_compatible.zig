@@ -18,10 +18,11 @@ fn escapeJsonString(writer_arg: anytype, str: []const u8) !void {
 
 /// Chat message structure
 pub const ChatMessage = struct {
-    role: []const u8,
-    content: []const u8,
-    name: ?[]const u8 = null,
+role: []const u8,
+content: []const u8,
+name: ?[]const u8 = null,
     tool_call_id: ?[]const u8 = null,
+    tool_calls_json: ?[]const u8 = null,
 };
 
 /// Tool call function definition
@@ -414,7 +415,7 @@ pub const LLMClient = struct {
 
         // 检查根节点是否有error字段，是则返回错误提示
         if (parsed.value.object.get("error")) |_| {
-            return try self.allocator.dupe(u8, "服务暂时不可用，请稍后再试");
+                return try self.allocator.dupe(u8, "服务暂时不可用，请稍后再试");
         }
 
         const root = parsed.value;
@@ -655,8 +656,7 @@ pub const LLMClient = struct {
         const result = std.process.run(self.allocator, shared.context.io(), .{
             .argv = argv,
         }) catch |err| {
-            std.log.warn("curl run failed: {s}", .{@errorName(err)});
-            return error.CurlSpawnError;
+                    return error.CurlSpawnError;
         };
         defer self.allocator.free(result.stdout);
         defer self.allocator.free(result.stderr);
@@ -710,6 +710,10 @@ pub const LLMClient = struct {
                 try writer.writeAll(",\"tool_call_id\":\"");
                 try writer.writeAll(tc_id);
                 try writer.writeAll("\"");
+            }
+            if (msg.tool_calls_json) |tc_json| {
+                try writer.writeAll(",\"tool_calls\":");
+                try writer.writeAll(tc_json);
             }
             try writer.writeAll("}");
         }
@@ -776,8 +780,7 @@ pub const LLMClient = struct {
         const result = std.process.run(self.allocator, shared.context.io(), .{
             .argv = argv,
         }) catch |err| {
-            std.log.warn("curl run failed: {s}", .{@errorName(err)});
-            return error.CurlSpawnError;
+                    return error.CurlSpawnError;
         };
         defer self.allocator.free(result.stdout);
         defer self.allocator.free(result.stderr);
@@ -848,8 +851,6 @@ pub const UsageTracker = struct {
     }
 };
 
-/// Perform chat with automatic retry and backoff
-/// Perform chat with automatic retry and backoff
 pub fn chatWithRetry(
     client: *LLMClient,
     messages: []const ChatMessage,

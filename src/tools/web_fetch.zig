@@ -58,7 +58,6 @@ pub const WebFetchTool = struct {
         }) catch {
             return ToolResult.fail("Failed to fetch URL");
         };
-        defer allocator.free(result.stdout);
         defer allocator.free(result.stderr);
 
         switch (result.term) {
@@ -66,10 +65,14 @@ pub const WebFetchTool = struct {
                 if (code == 0) {
                     return ToolResult.ok(result.stdout);
                 } else {
+                    allocator.free(result.stdout);
                     return ToolResult.fail(try std.fmt.allocPrint(allocator, "Fetch failed with code {d}", .{code}));
                 }
             },
-            else => return ToolResult.fail("Fetch failed"),
+            else => {
+                allocator.free(result.stdout);
+                return ToolResult.fail("Fetch failed");
+            },
         }
     }
 
