@@ -661,9 +661,15 @@ pub const Agent = struct {
                 std.debug.print("[Tool failed: {s} - {s}]\n", .{ tool_name, result.error_msg orelse "unknown" });
             }
         }
+        // Handle empty output case to avoid memcpy aliasing issues
+        if (result.output.len == 0) return "";
 
-        return self.allocator.dupe(u8, result.output) catch null;
+        // Use alloc + memcpy instead of dupe to handle potential memory overlaps safely
+        const copy_result = self.allocator.alloc(u8, result.output.len) catch return null;
+        @memcpy(copy_result, result.output);
+        return copy_result;
     }
+
 
     fn callLLMWithTools(self: *Agent) !LLMResult {
         if (!self.has_api_key or (self.client == null and self.anthropic_client == null)) {
