@@ -93,7 +93,12 @@ pub const TrajectoryRecorder = struct {
         }
         try w.writeAll("]}");
 
-        var file = try shared.context.cwdOpenFile(filename, .{ .mode = .read_write });
+        // Try to open existing file, create if it doesn't exist
+        const file_exists = shared.context.cwd().statFile(shared.context.io(), filename, .{}) catch null;
+        const file = if (file_exists != null)
+            try shared.context.cwdOpenFile(filename, .{ .mode = .read_write })
+        else
+            try shared.context.cwdCreateFile(filename, .{});
         defer file.close(shared.context.io());
         const stat = try file.stat(shared.context.io());
         try json_buf.appendSlice(self.allocator, "\n");

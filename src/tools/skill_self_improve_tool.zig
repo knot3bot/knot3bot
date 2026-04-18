@@ -70,7 +70,7 @@ pub const SkillSelfImproveTool = struct {
             return self.logImprovement(allocator, args);
         }
         if (std.mem.eql(u8, action, "get_suggestions")) {
-            return self.getSuggestions();
+            return self.getSuggestions(allocator);
         }
 
         return ToolResult.fail("Unknown action");
@@ -174,16 +174,16 @@ pub const SkillSelfImproveTool = struct {
         return ToolResult.ok("Improvement logged");
     }
 
-    fn getSuggestions(self: *SkillSelfImproveTool) !ToolResult {
+    fn getSuggestions(self: *SkillSelfImproveTool, allocator: std.mem.Allocator) !ToolResult {
         // Try to read suggestions from the file written by SkillSelfImprove engine
-        const suggestions_path = try std.fmt.allocPrint(self.memory_dir, "/skill-suggestions.json");
-        defer self.memory_dir.free(suggestions_path);
-        
-        const content = std.fs.cwd().readFileAlloc(self.memory_dir, suggestions_path, 4096) catch {
+        const suggestions_path = try std.fmt.allocPrint(allocator, "{s}/skill-suggestions.json", .{self.memory_dir});
+        defer allocator.free(suggestions_path);
+
+        const content = std.fs.cwd().readFileAlloc(allocator, suggestions_path, 4096) catch {
             return ToolResult.ok("No suggestions yet. Skill Self-Improvement is active. Use create_skill, patch_skill, or update_memory actions to improve the skill system.");
         };
-        defer self.memory_dir.free(content);
-        
+        defer allocator.free(content);
+
         return ToolResult.ok(content);
     }
 
