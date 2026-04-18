@@ -163,12 +163,12 @@ pub const CronTool = struct {
         }) catch {
             return ToolResult.fail("Failed to execute command");
         };
-        defer allocator.free(result.stdout);
         defer allocator.free(result.stderr);
 
         if (result.stdout.len > 0) {
             return ToolResult.ok(result.stdout);
         }
+        allocator.free(result.stdout);
         return ToolResult.ok("Command executed");
     }
 

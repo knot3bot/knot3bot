@@ -78,7 +78,6 @@ pub const HttpRequestTool = struct {
         }) catch {
             return ToolResult.fail("Failed to execute curl");
         };
-        defer allocator.free(result.stdout);
         defer allocator.free(result.stderr);
 
         switch (result.term) {
@@ -95,10 +94,14 @@ pub const HttpRequestTool = struct {
                     }
                     return ToolResult.ok(result.stdout);
                 } else {
+                    allocator.free(result.stdout);
                     return ToolResult.fail(try std.fmt.allocPrint(allocator, "HTTP request failed with code {d}", .{code}));
                 }
             },
-            else => return ToolResult.fail("HTTP request failed"),
+            else => {
+                allocator.free(result.stdout);
+                return ToolResult.fail("HTTP request failed");
+            },
         }
     }
 

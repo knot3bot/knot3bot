@@ -35,7 +35,6 @@ pub const ShellTool = struct {
         }) catch {
             return ToolResult.fail("Failed to execute command");
         };
-        defer allocator.free(result.stdout);
         defer allocator.free(result.stderr);
 
         const exit_code: i32 = switch (result.term) {
@@ -48,6 +47,7 @@ pub const ShellTool = struct {
         if (exit_code == 0) {
             return ToolResult.ok(result.stdout);
         } else {
+            allocator.free(result.stdout);
             const err_output = if (result.stderr.len > 0) result.stderr else try std.fmt.allocPrint(allocator, "Exit code: {d}", .{exit_code});
             return ToolResult.fail(err_output);
         }

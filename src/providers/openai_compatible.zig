@@ -655,7 +655,7 @@ pub const LLMClient = struct {
 
         const result = std.process.run(self.allocator, shared.context.io(), .{
             .argv = argv,
-        }) catch |err| {
+        }) catch {
                     return error.CurlSpawnError;
         };
         defer self.allocator.free(result.stdout);
@@ -779,7 +779,7 @@ pub const LLMClient = struct {
 
         const result = std.process.run(self.allocator, shared.context.io(), .{
             .argv = argv,
-        }) catch |err| {
+        }) catch {
                     return error.CurlSpawnError;
         };
         defer self.allocator.free(result.stdout);
