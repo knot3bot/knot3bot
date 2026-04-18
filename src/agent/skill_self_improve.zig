@@ -161,6 +161,7 @@ pub const SkillSelfImprove = struct {
     tool_calls_since_checkpoint: u32 = 0,
     last_checkpoint_suggestions: []ImprovementSuggestion,
     improvement_log_path: ?[]const u8,
+    suggestions_file_path: ?[]const u8,
 
     /// Initialize self-improvement engine
     pub fn init(allocator: std.mem.Allocator) SkillSelfImprove {
@@ -173,6 +174,7 @@ pub const SkillSelfImprove = struct {
             .history = ToolCallHistory.init(allocator),
             .last_checkpoint_suggestions = &.{},
             .improvement_log_path = null,
+            .suggestions_file_path = null,
         };
     }
 
@@ -243,8 +245,21 @@ pub const SkillSelfImprove = struct {
         }
         self.last_checkpoint_suggestions = result.suggestions;
 
+        // Write suggestions to JSON file for the tool to read
+        self.writeSuggestionsToFile(result.suggestions);
+
         return result;
     }
+
+    /// Write suggestions to JSON file for skill_self_improve tool
+    /// Currently a stub - suggestions are stored in last_checkpoint_suggestions
+    fn writeSuggestionsToFile(self: *SkillSelfImprove, suggestions: []const ImprovementSuggestion) void {
+        _ = self;
+        _ = suggestions;
+        // TODO: Write suggestions to JSON file for skill_self_improve tool to read
+        // For now, suggestions are stored in last_checkpoint_suggestions
+    }
+
 
     /// Detect successful patterns that could become skills
     fn detectSuccessfulPatterns(self: *SkillSelfImprove, suggestions: *std.array_list.AlignedManaged(ImprovementSuggestion, null)) !void {

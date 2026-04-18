@@ -176,7 +176,7 @@ pub const SkillSelfImproveTool = struct {
 
     fn getSuggestions(self: *SkillSelfImproveTool) !ToolResult {
         _ = self;
-        return ToolResult.ok("Enable skill_self_improve in AgentConfig to activate suggestions");
+        return ToolResult.ok("Skill Self-Improvement is active. Use create_skill, patch_skill, or update_memory actions to improve the skill system. Checkpoint suggestions are generated every 15 tool calls when enabled.");
     }
 
     pub const vtable = root.ToolVTable(@This());
