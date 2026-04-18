@@ -1,6 +1,5 @@
 const std = @import("std");
 const providers = @import("providers/root.zig");
-const providers = @import("providers/root.zig");
 
 /// Configuration structure for knot3bot
 /// Supports loading from JSON config files
@@ -9,7 +8,6 @@ pub const Config = struct {
     api_key: ?[]const u8 = null,
     api_base: []const u8 = "https://api.openai.com/v1",
     model: []const u8 = "gpt-4",
-    provider: providers.Provider = .openai,
     provider: providers.Provider = .openai,
     // Memory settings
     memory_backend: []const u8 = "memory",
@@ -164,22 +162,20 @@ pub const Config = struct {
 
     /// Load configuration from default locations
     /// Tries: 1. KNOT3BOT_CONFIG env var, 2. ~/.knot3bot/config.json, 3. ./knot3bot.json
-    pub fn loadDefault(allocator: std.mem.Allocator) !?Config {
+    pub fn loadDefault(allocator: std.mem.Allocator, environ: *const std.process.Environ.Map) !?Config {
         // Try environment variable first
-        if (std.process.getEnvVarOwned(allocator, "KNOT3BOT_CONFIG")) |path| {
-            defer allocator.free(path);
+        if (environ.get("KNOT3BOT_CONFIG")) |path| {
             return try loadFromFile(allocator, path);
-        } else |_| {}
+        }
 
         // Try home directory config
-        if (std.process.getEnvVarOwned(allocator, "HOME")) |home| {
-            defer allocator.free(home);
+        if (environ.get("HOME")) |home| {
             const config_path = try std.fs.path.join(allocator, &.{ home, ".knot3bot", "config.json" });
             defer allocator.free(config_path);
             if (fileExists(config_path)) {
                 return try loadFromFile(allocator, config_path);
             }
-        } else |_| {}
+        }
 
         // Try current directory
         if (fileExists("knot3bot.json")) {
@@ -202,7 +198,7 @@ pub const Config = struct {
         try std.Io.Writer.writeAll(writer, "{\n");
 
         // Provider
-        try std.Io.Writer.print(writer, "  \"provider\": \"{s}\",\n", .{config.provider.internalName()});
+        try std.Io.Writer.print(writer, "  \"provider\": \"{s}\",\n", .{self.provider.internalName()});
 
         // API section
         try std.Io.Writer.writeAll(writer, "  \"api\": {\n");

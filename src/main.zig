@@ -65,6 +65,7 @@ fn getApiKeyFromEnv(environ: *const std.process.Environ.Map) ?[]const u8 {
 }
 
 fn parseArgs(args: std.process.Args, environ: *const std.process.Environ.Map) !CliConfig {
+    // Start with defaults
     var config = CliConfig{
         .api_key = null,
         .db_path = null,
@@ -73,9 +74,18 @@ fn parseArgs(args: std.process.Args, environ: *const std.process.Environ.Map) !C
         .max_iterations = 10,
         .provider = .openai,
         .server_mode = false,
-        .port = 8080,
+        .port = 38789,
         .config_mode = false,
     };
+
+    // Override with environment variables
+    config.api_key = getApiKeyFromEnv(environ);
+
+
+    // Override with environment variables
+    if (config.api_key == null) {
+        config.api_key = getApiKeyFromEnv(environ);
+    }
 
     var args_iter = try args.iterateAllocator(std.heap.page_allocator);
     defer args_iter.deinit();

@@ -130,7 +130,7 @@ def main():
     print()
     
     # Server port
-    default_port = config.get("server", {}).get("port", 8080)
+    default_port = config.get("server", {}).get("port", 38789)
     port = get_input("Server port", str(default_port))
     try:
         port_int = int(port)
@@ -139,7 +139,6 @@ def main():
         config["server"]["port"] = port_int
     except ValueError:
         print(f"Invalid port, keeping default: {default_port}")
-    
     print()
     
     # Save config
