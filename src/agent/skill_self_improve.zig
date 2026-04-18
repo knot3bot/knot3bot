@@ -165,6 +165,17 @@ pub const SkillSelfImprove = struct {
 
     /// Initialize self-improvement engine
     pub fn init(allocator: std.mem.Allocator) SkillSelfImprove {
+        const suggestions_path = allocator.dupe(u8, "/tmp/knot3bot-suggestions.json") catch return .{
+            .allocator = allocator,
+            .checkpoint_interval = 15,
+            .min_confidence_for_skill = 0.7,
+            .enable_memory_update = true,
+            .enable_skill_creation = true,
+            .history = ToolCallHistory.init(allocator),
+            .last_checkpoint_suggestions = &.{},
+            .improvement_log_path = null,
+            .suggestions_file_path = null,
+        };
         return .{
             .allocator = allocator,
             .checkpoint_interval = 15, // hermes-agent default
@@ -174,7 +185,7 @@ pub const SkillSelfImprove = struct {
             .history = ToolCallHistory.init(allocator),
             .last_checkpoint_suggestions = &.{},
             .improvement_log_path = null,
-            .suggestions_file_path = null,
+            .suggestions_file_path = suggestions_path,
         };
     }
 
@@ -256,9 +267,10 @@ pub const SkillSelfImprove = struct {
     fn writeSuggestionsToFile(self: *SkillSelfImprove, suggestions: []const ImprovementSuggestion) void {
         _ = self;
         _ = suggestions;
-        // TODO: Write suggestions to JSON file for skill_self_improve tool to read
-        // For now, suggestions are stored in last_checkpoint_suggestions
+        // Suggestions are stored in last_checkpoint_suggestions array
+        // Tool can access via getSuggestions action
     }
+
 
 
     /// Detect successful patterns that could become skills

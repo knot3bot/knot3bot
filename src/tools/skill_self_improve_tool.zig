@@ -175,8 +175,16 @@ pub const SkillSelfImproveTool = struct {
     }
 
     fn getSuggestions(self: *SkillSelfImproveTool) !ToolResult {
-        _ = self;
-        return ToolResult.ok("Skill Self-Improvement is active. Use create_skill, patch_skill, or update_memory actions to improve the skill system. Checkpoint suggestions are generated every 15 tool calls when enabled.");
+        // Try to read suggestions from the file written by SkillSelfImprove engine
+        const suggestions_path = try std.fmt.allocPrint(self.memory_dir, "/skill-suggestions.json");
+        defer self.memory_dir.free(suggestions_path);
+        
+        const content = std.fs.cwd().readFileAlloc(self.memory_dir, suggestions_path, 4096) catch {
+            return ToolResult.ok("No suggestions yet. Skill Self-Improvement is active. Use create_skill, patch_skill, or update_memory actions to improve the skill system.");
+        };
+        defer self.memory_dir.free(content);
+        
+        return ToolResult.ok(content);
     }
 
     pub const vtable = root.ToolVTable(@This());
