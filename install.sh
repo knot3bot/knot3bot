@@ -91,6 +91,14 @@ chmod +x "$BINDIR/knot3bot"
 
 # Create k3b alias
 ln -sf "$BINDIR/knot3bot" "$BINDIR/k3b" 2>/dev/null || true
+
+# Install configuration wizard if it exists
+if [ -f "configure.py" ]; then
+    echo -e "${BLUE}Installing configuration wizard...${NC}"
+    cp configure.py "$BINDIR/k3b-configure"
+    chmod +x "$BINDIR/k3b-configure"
+fi
+
 # Install UI files if they exist
 if [ -d "ui" ]; then
     echo -e "${BLUE}Installing UI files to $DATADIR...${NC}"
@@ -124,6 +132,9 @@ echo "  knot3bot  # or: k3b"
 echo ""
 echo "  # Run server mode"
 echo "  knot3bot --server --port 8080  # or: k3b --server --port 8080"
+echo ""
+echo "  # Configure knot3bot"
+echo "  k3b-configure  # or: knot3bot configure"
 echo ""
 echo "  # Show help"
 echo "  knot3bot --help  # or: k3b --help"

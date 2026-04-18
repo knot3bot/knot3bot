@@ -1,4 +1,6 @@
 const std = @import("std");
+const providers = @import("providers/root.zig");
+const providers = @import("providers/root.zig");
 
 /// Configuration structure for knot3bot
 /// Supports loading from JSON config files
@@ -7,7 +9,8 @@ pub const Config = struct {
     api_key: ?[]const u8 = null,
     api_base: []const u8 = "https://api.openai.com/v1",
     model: []const u8 = "gpt-4",
-
+    provider: providers.Provider = .openai,
+    provider: providers.Provider = .openai,
     // Memory settings
     memory_backend: []const u8 = "memory",
     db_path: []const u8 = "knot3bot.db",
@@ -72,6 +75,13 @@ pub const Config = struct {
                         config.model = try allocator.dupe(u8, model.string);
                     }
                 }
+            }
+        }
+
+        // Parse provider
+        if (obj.get("provider")) |provider_str| {
+            if (provider_str == .string) {
+                config.provider = providers.Provider.fromStr(provider_str.string) orelse .openai;
             }
         }
 
@@ -190,6 +200,9 @@ pub const Config = struct {
 
         // Write JSON manually for better control
         try std.Io.Writer.writeAll(writer, "{\n");
+
+        // Provider
+        try std.Io.Writer.print(writer, "  \"provider\": \"{s}\",\n", .{config.provider.internalName()});
 
         // API section
         try std.Io.Writer.writeAll(writer, "  \"api\": {\n");

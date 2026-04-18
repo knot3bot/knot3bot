@@ -42,6 +42,7 @@ const CliConfig = struct {
     provider: providers.Provider,
     server_mode: bool,
     port: u16,
+    config_mode: bool,
 };
 
 fn getApiKeyFromEnv(environ: *const std.process.Environ.Map) ?[]const u8 {
@@ -73,6 +74,7 @@ fn parseArgs(args: std.process.Args, environ: *const std.process.Environ.Map) !C
         .provider = .openai,
         .server_mode = false,
         .port = 8080,
+        .config_mode = false,
     };
 
     var args_iter = try args.iterateAllocator(std.heap.page_allocator);
@@ -84,6 +86,8 @@ fn parseArgs(args: std.process.Args, environ: *const std.process.Environ.Map) !C
         if (std.mem.eql(u8, arg, "--help") or std.mem.eql(u8, arg, "-h")) {
             try printHelp();
             return error.HelpPrinted;
+        } else if (std.mem.eql(u8, arg, "--config") or std.mem.eql(u8, arg, "configure")) {
+            config.config_mode = true;
         } else if (std.mem.eql(u8, arg, "--db-path")) {
             config.db_path = args_iter.next() orelse return error.MissingDbPath;
         } else if (std.mem.eql(u8, arg, "--session")) {
@@ -126,6 +130,7 @@ fn printHelp() !void {
         \\
         \\Options:
         \\  --help, -h              Show this help message
+        \\  --config, configure     Run configuration wizard
         \\  --db-path <path>        SQLite database path (default: in-memory)
         \\  --session <id>          Session ID (default: default)
         \\  --model <name>          LLM model name
@@ -138,11 +143,9 @@ fn printHelp() !void {
         \\  OPENAI_API_KEY, KIMI_API_KEY, MINIMAX_API_KEY,
         \\  ZAI_API_KEY, BAILIAN_API_KEY, VOLCANO_API_KEY, TENCENT_API_KEY
         \\
-        \\  ZAI_API_KEY, BAILIAN_API_KEY, VOLCANO_API_KEY, TENCENT_API_KEY
-        \\  ZAI_API_KEY, BAILIAN_API_KEY, VOLCANO_API_KEY
-        \\
         \\Examples:
         \\  knot3bot                                    # Interactive mode
+        \\  knot3bot --config                         # Configuration wizard
         \\  BAILIAN_API_KEY=xxx knot3bot --provider bailian
         \\  knot3bot --db-path ./memory.db --session dev
         \\  knot3bot --server --port 8080
@@ -309,6 +312,29 @@ pub fn main(init: std.process.Init) !u8 {
         return err;
     };
 
+    // Run config mode if requested
+    if (config.config_mode) {
+        std.debug.print("\n=== knot3bot Configuration ===\n\n", .{});
+
+        const configure_script = "configure.py";
+
+        // Spawn python3 to run configure.py
+        var child = std.process.spawn(init.io, .{
+            .argv = &[_][]const u8{ "python3", configure_script },
+            .stdin = .inherit,
+            .stdout = .inherit,
+            .stderr = .inherit,
+        }) catch |err| {
+            std.debug.print("Error: failed to run configure.py: {}\n", .{err});
+            return error.ConfigScriptFailed;
+        };
+
+        _ = child.wait(init.io) catch |err| {
+            std.debug.print("Error: configure.py exited with error: {}\n", .{err});
+            return error.ConfigScriptFailed;
+        };
+        return 0;
+    }
     const gpa_state = init.gpa;
     const allocator = gpa_state;
     const workspace_dir = if (init.environ_map.get("HERMES_WORKSPACE")) |v| try allocator.dupe(u8, v) else "/tmp";
