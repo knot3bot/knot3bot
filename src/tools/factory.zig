@@ -212,6 +212,12 @@ pub fn createFullRegistry(allocator: std.mem.Allocator, workspace_dir: []const u
         try registry.register(srt.tool());
     }
     {
+        // Self-improvement tool
+        const ssit = try allocator.create(root.skill_self_improve_tool.SkillSelfImproveTool);
+        ssit.* = .{ .skills_dir = workspace_dir, .memory_dir = workspace_dir };
+        try registry.register(ssit.tool());
+    }
+    {
         const dt = try allocator.create(root.delegate.DelegateTool);
         dt.* = .{ .workspace_dir = workspace_dir };
         try registry.register(dt.tool());

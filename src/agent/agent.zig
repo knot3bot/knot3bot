@@ -2,6 +2,8 @@ const std = @import("std");
 const providers = @import("../providers/root.zig");
 const tools = @import("../root.zig");
 const skills = @import("skills.zig");
+const skill_self_improve = @import("skill_self_improve.zig");
+const SkillSelfImprove = skill_self_improve.SkillSelfImprove;
 const context_compressor = @import("context_compressor.zig");
 const trajectory = @import("trajectory.zig");
 const models = @import("../models.zig");
@@ -204,6 +206,9 @@ pub const AgentConfig = struct {
     enable_smart_routing: bool = false,
     prompt_cache: ?*prompt_cache.PromptCache = null,
     credential_pool: ?*credential_pool.CredentialPool = null,
+    enable_skill_self_improve: bool = false,
+    skill_self_improve_interval: u32 = 15, // Tool calls between checkpoints
+    skill_self_improve: ?*SkillSelfImprove = null,
 };
 
 pub const LLMResult = struct {
@@ -247,6 +252,7 @@ pub const Agent = struct {
     prompt_cache: ?*prompt_cache.PromptCache = null,
     credential_pool: ?*credential_pool.CredentialPool = null,
     anthropic_client: ?providers.anthropic.AnthropicClient = null,
+    skill_self_improve: ?*SkillSelfImprove = null,
     pub fn init(allocator: std.mem.Allocator, config: AgentConfig, registry: *const ToolRegistry) Agent {
         var messages: ArrayList(Message) = .empty;
         if (config.system_prompt) |prompt| messages.append(allocator, .{ .role = .system, .content = prompt }) catch unreachable;
@@ -293,6 +299,7 @@ pub const Agent = struct {
             .trajectory_recorder = config.trajectory_recorder,
             .model_registry = config.model_registry,
             .enable_smart_routing = config.enable_smart_routing,
+            .skill_self_improve = config.skill_self_improve,
         };
     }
 
@@ -467,6 +474,12 @@ pub const Agent = struct {
                         .content = tool_msg,
                         .tool_call_id = tc.id,
                     });
+
+                    // Skill Self-Improvement: Record tool call for pattern tracking
+                    if (self.skill_self_improve) |*si| {
+                        const success = tool_result != null;
+                        si.*.recordToolCall(tc.function.name, success, tool_duration, tc.function.arguments) catch {};
+                    }
                 }
 
                 step.observation = try all_results.toOwnedSlice(self.allocator);
@@ -482,6 +495,22 @@ pub const Agent = struct {
                     .error_msg = null,
                     .duration_ms = step.duration_ms,
                 });
+
+                // Skill Self-Improvement: Check for periodic checkpoint
+                if (self.skill_self_improve) |*si| {
+                    if (si.*.shouldRunCheckpoint()) {
+                        const checkpoint_result = si.*.runCheckpoint() catch null;
+                        if (checkpoint_result) |cr| {
+                            if (cr.should_checkpoint and self.config.verbose) {
+                                std.debug.print("[Skill Self-Improve] Checkpoint triggered: {d} suggestions\n", .{cr.suggestions.len});
+                                for (cr.suggestions) |s| {
+                                    std.debug.print("  - {s}: {s} (confidence: {d:.2})\n", .{
+                                        @tagName(s.action), s.reason, s.confidence});
+                                }
+                            }
+                        }
+                    }
+                }
 
                 continue;
             }
@@ -509,6 +538,17 @@ pub const Agent = struct {
                     std.log.warn("Failed to cache prompt: {s}", .{@errorName(err)});
                 };
             }
+
+            // Skill Self-Improvement: Run completion evaluation
+            if (self.skill_self_improve) |*si| {
+                const eval_result = si.*.runCompletionEvaluation() catch null;
+                if (eval_result) |er| {
+                    if (er.should_checkpoint and self.config.verbose) {
+                        std.debug.print("[Skill Self-Improve] Completion eval: {d} suggestions\n", .{er.suggestions.len});
+                    }
+                }
+            }
+
             return result;
         }
 

@@ -33,6 +33,9 @@ fn setupSignalHandlers() !void {
     _ = std.c.sigaction(std.c.SIG.TERM, &sa, null);
 }
 
+const skill_self_improve = @import("agent/skill_self_improve.zig");
+const SkillSelfImprove = skill_self_improve.SkillSelfImprove;
+
 const CliConfig = struct {
     api_key: ?[]const u8,
     db_path: ?[]const u8,
@@ -43,6 +46,7 @@ const CliConfig = struct {
     server_mode: bool,
     port: u16,
     config_mode: bool,
+    enable_skill_self_improve: bool,
 };
 
 fn getApiKeyFromEnv(environ: *const std.process.Environ.Map) ?[]const u8 {
@@ -76,6 +80,7 @@ fn parseArgs(args: std.process.Args, environ: *const std.process.Environ.Map) !C
         .server_mode = false,
         .port = 38789,
         .config_mode = false,
+        .enable_skill_self_improve = false,
     };
 
     // Override with environment variables
@@ -122,6 +127,8 @@ fn parseArgs(args: std.process.Args, environ: *const std.process.Environ.Map) !C
         } else if (std.mem.eql(u8, arg, "--port")) {
             const port_str = args_iter.next() orelse return error.MissingPort;
             config.port = try std.fmt.parseInt(u16, port_str, 10);
+        } else if (std.mem.eql(u8, arg, "--enable-skill-self-improve")) {
+            config.enable_skill_self_improve = true;
         }
     }
 
@@ -148,6 +155,7 @@ fn printHelp() !void {
         \\  --max-iterations <n>    Max ReAct iterations (default: 10)
         \\  --server                Run in HTTP server mode
         \\  --port <port>           Server port (default: 8080)
+        \\  --enable-skill-self-improve  Enable skill self-improvement (default: off)
         \\
         \\Environment variables:
         \\  OPENAI_API_KEY, KIMI_API_KEY, MINIMAX_API_KEY,
@@ -279,6 +287,13 @@ fn runAgentStream(allocator: std.mem.Allocator, config: *const CliConfig, regist
         );
         defer compressor.deinit();
 
+        // Create SkillSelfImprove engine if enabled
+        var si_engine: ?SkillSelfImprove = null;
+        if (config.enable_skill_self_improve) {
+            si_engine = SkillSelfImprove.init(allocator);
+        }
+        defer if (si_engine) |*si| si.deinit();
+
         const agent_config = Agent.AgentConfig{
             .max_iterations = @intCast(config.max_iterations),
             .model = config.model,
@@ -290,6 +305,8 @@ fn runAgentStream(allocator: std.mem.Allocator, config: *const CliConfig, regist
             .trajectory_recorder = &recorder,
             .model_registry = &model_registry,
             .enable_smart_routing = true,
+            .enable_skill_self_improve = config.enable_skill_self_improve,
+            .skill_self_improve = if (si_engine) |*si| si else null,
         };
 
         var agent = Agent.Agent.init(allocator, agent_config, registry);

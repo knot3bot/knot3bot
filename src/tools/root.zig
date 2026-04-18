@@ -193,6 +193,7 @@ pub const clarify_tool = @import("clarify_tool.zig");
 pub const mcp_tool = @import("mcp_tool.zig");
 pub const process_registry = @import("process_registry.zig");
 pub const code_execution_tool = @import("code_execution_tool.zig");
+pub const skill_self_improve_tool = @import("skill_self_improve_tool.zig");
 
 // ── Tool Registry ─────────────────────────────────────────────────────────────
 
