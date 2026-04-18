@@ -89,6 +89,8 @@ echo -e "${BLUE}Installing binary to $BINDIR...${NC}"
 cp zig-out/bin/knot3bot "$BINDIR/"
 chmod +x "$BINDIR/knot3bot"
 
+# Create k3b alias
+ln -sf "$BINDIR/knot3bot" "$BINDIR/k3b" 2>/dev/null || true
 # Install UI files if they exist
 if [ -d "ui" ]; then
     echo -e "${BLUE}Installing UI files to $DATADIR...${NC}"
@@ -102,7 +104,7 @@ echo -e "${GREEN}========================================${NC}"
 echo ""
 echo -e "${BLUE}knot3bot is now available at:${NC}"
 echo -e "  ${GREEN}$BINDIR/knot3bot${NC}"
-echo ""
+echo -e "  ${GREEN}$BINDIR/k3b${NC} (alias)"
 
 # Check if in PATH
 if [[ ":$PATH:" != *":$BINDIR:"* ]]; then
@@ -118,13 +120,12 @@ fi
 echo -e "${BLUE}Quick Start:${NC}"
 echo ""
 echo "  # Run in CLI mode"
-echo "  knot3bot"
+echo "  knot3bot  # or: k3b"
 echo ""
 echo "  # Run server mode"
-echo "  knot3bot --server --port 8080"
+echo "  knot3bot --server --port 8080  # or: k3b --server --port 8080"
 echo ""
 echo "  # Show help"
-echo "  knot3bot --help"
-echo ""
+echo "  knot3bot --help  # or: k3b --help"
 echo -e "${GREEN}Enjoy using knot3bot!${NC}"
 echo ""
