@@ -14,6 +14,7 @@
 
 const std = @import("std");
 const root = @import("root.zig");
+const shared = @import("../shared/root.zig");
 
 // Tool call pattern for detection
 const ToolPattern = struct {
@@ -263,12 +264,46 @@ pub const SkillSelfImprove = struct {
     }
 
     /// Write suggestions to JSON file for skill_self_improve tool
-    /// Currently a stub - suggestions are stored in last_checkpoint_suggestions
     fn writeSuggestionsToFile(self: *SkillSelfImprove, suggestions: []const ImprovementSuggestion) void {
-        _ = self;
-        _ = suggestions;
-        // Suggestions are stored in last_checkpoint_suggestions array
-        // Tool can access via getSuggestions action
+        if (self.suggestions_file_path == null) return;
+
+        // Build JSON manually without allocPrint issues
+        var json: std.ArrayList(u8) = .empty;
+        defer json.deinit(self.allocator);
+
+        json.appendSlice(self.allocator, "[") catch return;
+        
+        for (suggestions, 0..) |s, i| {
+            if (i > 0) json.appendSlice(self.allocator, ",") catch return;
+            
+            const action_name = @tagName(s.action);
+            
+            if (s.skill_name) |name| {
+                const entry = std.fmt.allocPrint(self.allocator,
+                    "\n{{\"action\":\"{s}\",\"skill_name\":\"{s}\",\"reason\":\"{s}\",\"confidence\":{d:.2},\"pattern_data\":\"{s}\"}}",
+                    .{ action_name, name, s.reason, s.confidence, s.pattern_data }
+                ) catch continue;
+                json.appendSlice(self.allocator, entry) catch {
+                    self.allocator.free(entry);
+                    continue;
+                };
+                self.allocator.free(entry);
+            } else {
+                const entry = std.fmt.allocPrint(self.allocator,
+                    "\n{{\"action\":\"{s}\",\"reason\":\"{s}\",\"confidence\":{d:.2},\"pattern_data\":\"{s}\"}}",
+                    .{ action_name, s.reason, s.confidence, s.pattern_data }
+                ) catch continue;
+                json.appendSlice(self.allocator, entry) catch {
+                    self.allocator.free(entry);
+                    continue;
+                };
+                self.allocator.free(entry);
+            }
+        }
+        
+        json.appendSlice(self.allocator, "\n]") catch return;
+
+        shared.context.cwdWriteFile(self.suggestions_file_path.?, json.items) catch return;
     }
 
 
