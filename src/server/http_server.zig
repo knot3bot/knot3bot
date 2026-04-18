@@ -906,31 +906,22 @@ pub const Server = struct {
         var json_buf = std.ArrayList(u8).empty;
         defer json_buf.deinit(self.allocator);
         try json_buf.appendSlice(self.allocator, "{\"tools\":[");
+
         for (tools, 0..) |tool, i| {
             if (i > 0) try json_buf.appendSlice(self.allocator, ",");
             try json_buf.appendSlice(self.allocator, "{\"name\":\"");
-            try json_buf.appendSlice(self.allocator, tool.spec.name);
+            try appendJsonEscaped(&json_buf, self.allocator, tool.spec.name);
+            try json_buf.appendSlice(self.allocator, "\",\"description\":\"");
             try appendJsonEscaped(&json_buf, self.allocator, tool.spec.description);
-            try json_buf.appendSlice(self.allocator, "\",\"parameters\":");
-            try appendJsonEscaped(&json_buf, self.allocator, tool.spec.description);
-            // Simple JSON escape for description
-            for (tool.spec.description) |c| {
-                switch (c) {
-                    '"' => try json_buf.appendSlice(self.allocator, "\\\""),
-                    '\\' => try json_buf.appendSlice(self.allocator, "\\\\"),
-                    '\n' => try json_buf.appendSlice(self.allocator, "\\n"),
-                    '\r' => try json_buf.appendSlice(self.allocator, "\\r"),
-                    '\t' => try json_buf.appendSlice(self.allocator, "\\t"),
-                    else => try json_buf.append(self.allocator, c),
-                }
-            }
             try json_buf.appendSlice(self.allocator, "\",\"parameters\":");
             try json_buf.appendSlice(self.allocator, tool.spec.parameters_json);
             try json_buf.appendSlice(self.allocator, "}");
         }
+
         try json_buf.appendSlice(self.allocator, "]}");
         try self.sendJson(conn, 200, try json_buf.toOwnedSlice(self.allocator), request_id);
     }
+
 
     fn handleGetConfig(self: *Server, conn: std.Io.net.Stream, request_id: []const u8) !void {
         const uptime = shared.timestamp() - self.start_time;

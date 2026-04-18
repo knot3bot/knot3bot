@@ -49,7 +49,9 @@ pub const Role = enum {
 pub const Message = struct {
     role: Role,
     content: []const u8,
+    tool_call_id: ?[]const u8 = null,
 };
+
 
 pub const ToolCall = struct {
     id: []const u8,
@@ -455,12 +457,13 @@ pub const Agent = struct {
                     try all_results.appendSlice(self.allocator, result_str);
 
                     // Add tool message to conversation
-                    const tool_msg = try std.fmt.allocPrint(self.allocator, "{{\"tool\": \"{s}\", \"result\": {s}}}", .{ tc.function.name, result_str });
+                    const tool_msg = try std.fmt.allocPrint(self.allocator, "{s}", .{result_str});
                     defer self.allocator.free(tool_msg);
 
                     try self.messages.append(self.allocator, .{
                         .role = .tool,
                         .content = tool_msg,
+                        .tool_call_id = tc.id,
                     });
                 }
 
@@ -587,9 +590,9 @@ pub const Agent = struct {
                         const result_str = if (tool_result) |tr| tr else "{\"error\":\"Tool execution failed\"}";
                         if (all_results.items.len > 0) try all_results.appendSlice(self.allocator, ", ");
                         try all_results.appendSlice(self.allocator, result_str);
-                        const tool_msg = try std.fmt.allocPrint(self.allocator, "tool: {s}, result: {s}", .{ tc.function.name, result_str });
+                        const tool_msg = try std.fmt.allocPrint(self.allocator, "{s}", .{result_str});
                         defer self.allocator.free(tool_msg);
-                        try self.messages.append(self.allocator, .{ .role = .tool, .content = tool_msg });
+                        try self.messages.append(self.allocator, .{ .role = .tool, .content = tool_msg, .tool_call_id = tc.id });
                     }
                     const indicator = try std.fmt.allocPrint(self.allocator, "[Tool(s) executed. Results: {s}]", .{try all_results.toOwnedSlice(self.allocator)});
                     defer self.allocator.free(indicator);
@@ -764,7 +767,7 @@ pub const Agent = struct {
                 .assistant => "assistant",
                 .tool => "tool",
             };
-            try msgs.append(self.allocator, .{ .role = role, .content = msg.content });
+            try msgs.append(self.allocator, .{ .role = role, .content = msg.content, .tool_call_id = msg.tool_call_id });
         }
 
         const tool_defs = try self.getToolDefs();

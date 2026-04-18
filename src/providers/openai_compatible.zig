@@ -21,6 +21,7 @@ pub const ChatMessage = struct {
     role: []const u8,
     content: []const u8,
     name: ?[]const u8 = null,
+    tool_call_id: ?[]const u8 = null,
 };
 
 /// Tool call function definition
@@ -405,14 +406,16 @@ pub const LLMClient = struct {
     }
 
     fn extractContent(self: *LLMClient, response_body: []const u8) ![]const u8 {
-        if (std.mem.indexOf(u8, response_body, "\"error\"")) |_| {
-            return try std.fmt.allocPrint(self.allocator, "API Error: {s}", .{response_body});
-        }
-
+        // 先解析JSON，再检查是否有error字段
         var parsed = std.json.parseFromSlice(std.json.Value, self.allocator, response_body, .{}) catch {
-            return try self.allocator.dupe(u8, response_body);
+            return try self.allocator.dupe(u8, "服务暂时不可用，请稍后再试");
         };
         defer parsed.deinit();
+
+        // 检查根节点是否有error字段，是则返回错误提示
+        if (parsed.value.object.get("error")) |_| {
+            return try self.allocator.dupe(u8, "服务暂时不可用，请稍后再试");
+        }
 
         const root = parsed.value;
 
@@ -536,9 +539,6 @@ pub const LLMClient = struct {
             "Content-Type: application/json",
             "-H",
             auth_header,
-            "--data-binary",
-            "@-",
-            url,
             "--data-binary",
             "@-",
             url,
@@ -705,7 +705,13 @@ pub const LLMClient = struct {
             try writer.writeAll(msg.role);
             try writer.writeAll("\",\"content\":\"");
             try escapeJsonString(writer, msg.content);
-            try writer.writeAll("\"}");
+            try writer.writeAll("\"");
+            if (msg.tool_call_id) |tc_id| {
+                try writer.writeAll(",\"tool_call_id\":\"");
+                try writer.writeAll(tc_id);
+                try writer.writeAll("\"");
+            }
+            try writer.writeAll("}");
         }
         try writer.writeAll("],\"tools\":[");
         for (tools, 0..) |tool, i| {
@@ -789,7 +795,6 @@ pub const LLMClient = struct {
             },
             else => return error.CurlFailed,
         }
-
         return try self.extractContent(result.stdout);
     }
 };
