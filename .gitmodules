@@ -1,0 +1,3 @@
+[submodule "vendor/zbox"]
+	path = vendor/zbox
+	url = https://github.com/chy3xyz/zbox.git

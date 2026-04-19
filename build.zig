@@ -105,6 +105,21 @@ pub fn build(b: *std.Build) void {
     mod.addImport("config", config_mod);
     exe.root_module.addImport("config", config_mod);
 
+    // zbox sandbox - Linux only (rootless sandbox)
+    const enable_zbox = b.option(bool, "enable-zbox", "Enable zbox sandbox support (Linux only, default: true)") orelse true;
+    const is_linux = target.result.os.tag == .linux;
+    if (enable_zbox and is_linux) {
+        const zbox_mod = b.addModule("zbox", .{
+            .root_source_file = b.path("vendor/zbox/src/lib.zig"),
+        });
+        mod.addImport("zbox", zbox_mod);
+        exe.root_module.addImport("zbox", zbox_mod);
+        exe.root_module.addCMacro("ENABLE_ZBOX", "1");
+    } else {
+        exe.root_module.addCMacro("ENABLE_ZBOX", "0");
+    }
+
+
     exe.root_module.link_libc = true;
 
 
