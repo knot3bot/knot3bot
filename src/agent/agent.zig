@@ -661,12 +661,12 @@ pub const Agent = struct {
                 std.debug.print("[Tool failed: {s} - {s}]\n", .{ tool_name, result.error_msg orelse "unknown" });
             }
         }
-        // Handle empty output case to avoid memcpy aliasing issues
+        // Handle empty output case
         if (result.output.len == 0) return "";
 
-        // Use alloc + memcpy instead of dupe to handle potential memory overlaps safely
+        // Allocate fresh memory and copy byte-by-byte to avoid aliasing issues
         const copy_result = self.allocator.alloc(u8, result.output.len) catch return null;
-        @memcpy(copy_result, result.output);
+        for (result.output, 0..) |byte, i| copy_result[i] = byte;
         return copy_result;
     }
 
