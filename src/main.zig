@@ -401,7 +401,9 @@ pub fn main(init: std.process.Init) !u8 {
             &g_shutdown_flag,
             config.db_path,
             auth_config,
-            ServerConfig{},
+            ServerConfig{
+                .enable_skill_self_improve = config.enable_skill_self_improve,
+            },
         );
 
         // Setup advanced features for server mode
@@ -414,6 +416,7 @@ pub fn main(init: std.process.Init) !u8 {
                 null,
             );
             server.trajectory_recorder = trajectory.TrajectoryRecorder.init(allocator);
+            server.enable_skill_self_improve = config.enable_skill_self_improve;
         }
         var model_registry = try models.createDefaultModelRegistry(allocator);
         server.model_registry = &model_registry;

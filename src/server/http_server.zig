@@ -14,6 +14,7 @@ const circuit_breaker = @import("circuit_breaker.zig");
 const Provider = providers.Provider;
 const context_compressor_mod = @import("../agent/context_compressor.zig");
 const trajectory_mod = @import("../agent/trajectory.zig");
+const skill_self_improve_mod = @import("../agent/skill_self_improve.zig");
 const models = @import("../models.zig");
 const MemoryManager = @import("../memory/root.zig").MemoryManager;
 const ManagerMemoryBackend = @import("../memory/root.zig").ManagerMemoryBackend;
@@ -65,6 +66,8 @@ pub const ServerConfig = struct {
     rate_limit_requests: u32 = 100,
     /// Rate limit: window size in seconds (default: 60)
     rate_limit_window_secs: u32 = 60,
+    /// Enable skill self-improvement (default: false)
+    enable_skill_self_improve: bool = false,
 };
 
 // ============================================================================
@@ -164,6 +167,11 @@ pub const Server = struct {
     in_memory: MemorySystem,
     sqlite_memory: ?SqliteMemorySystem = null,
     backends: []ManagerMemoryBackend,
+    /// Skill self-improvement engine (created per-request for server mode)
+    skill_self_improve: ?*skill_self_improve_mod.SkillSelfImprove = null,
+    /// Whether skill self-improvement is enabled
+    enable_skill_self_improve: bool = false,
+
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -416,6 +424,11 @@ pub const Server = struct {
             try self.sendJson(conn, 500, "{\"error\":{\"message\":\"Failed to create system prompt\"}}", request_id);
             return;
         };
+        // Create skill self-improve engine if enabled
+        var si_engine: ?skill_self_improve_mod.SkillSelfImprove = null;
+        if (self.enable_skill_self_improve) {
+            si_engine = skill_self_improve_mod.SkillSelfImprove.init(allocator);
+        }
 
         const agent_config = AgentConfig{
             .max_iterations = self.agent_config.max_iterations,
@@ -428,6 +441,8 @@ pub const Server = struct {
             .trajectory_recorder = if (self.trajectory_recorder) |*tr| tr else null,
             .model_registry = self.model_registry,
             .enable_smart_routing = self.model_registry != null,
+            .enable_skill_self_improve = self.enable_skill_self_improve,
+            .skill_self_improve = if (si_engine) |*si| si else null,
         };
 
         var agent = Agent.Agent.init(allocator, agent_config, self.registry);
@@ -753,9 +768,10 @@ pub const Server = struct {
         const provider = self.agent_config.provider.name();
         const model = self.agent_config.model;
         const tool_count = self.registry.count();
+        const skill_status: []const u8 = if (self.enable_skill_self_improve) "enabled" else "disabled";
         const response = try std.fmt.allocPrint(self.allocator,
-            \\{{"status":"ok","service":"knot3bot","version":"0.1.0","uptime_seconds":{d},"provider":"{s}","model":"{s}","tools":{d},"request_id":"{s}"}}
-        , .{ uptime, provider, model, tool_count, request_id });
+            "{{\"status\":\"ok\",\"service\":\"knot3bot\",\"version\":\"0.1.0\",\"uptime_seconds\":{d},\"provider\":\"{s}\",\"model\":\"{s}\",\"tools\":{d},\"skill_self_improve\":\"{s}\",\"request_id\":\"{s}\"}}",
+            .{ uptime, provider, model, tool_count, skill_status, request_id });
         defer self.allocator.free(response);
         try self.sendJson(conn, 200, response, request_id);
     }
