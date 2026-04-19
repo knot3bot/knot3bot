@@ -159,7 +159,18 @@
         .settings-label { font-size: 14px; color: var(--text-secondary); }
         .settings-value { font-size: 14px; font-weight: 500; font-family: 'SF Mono', monospace; }
         
-        .metrics-grid { flex: 1; overflow-y: auto; padding: 24px 32px; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 20px; align-content: start; }
+                .settings-select { background: var(--bg-tertiary); border: 1px solid var(--border); color: var(--text-primary); padding: 8px 12px; border-radius: 8px; font-size: 14px; min-width: 200px; cursor: pointer; }
+        .settings-select:focus { outline: none; border-color: var(--accent); }
+        .slider-row { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+        .slider-row:last-child { border-bottom: none; }
+        .slider-header { display: flex; justify-content: space-between; align-items: center; }
+        .slider-label { font-size: 14px; color: var(--text-secondary); }
+        .slider-value { font-size: 14px; font-weight: 500; font-family: 'SF Mono', monospace; color: var(--accent); }
+        .settings-slider { width: 100%; height: 6px; border-radius: 3px; background: var(--bg-tertiary); outline: none; -webkit-appearance: none; cursor: pointer; }
+        .settings-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: var(--accent); cursor: pointer; }
+        .settings-slider::-webkit-slider-thumb:hover { background: var(--accent-hover); }
+
+.metrics-grid { flex: 1; overflow-y: auto; padding: 24px 32px; display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 20px; align-content: start; }
         .metric-card { background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
         .metric-label { font-size: 12px; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
         .metric-value { font-size: 28px; font-weight: 600; }
@@ -233,6 +244,29 @@
                         <div class="settings-row"><span class="settings-label">Session ID</span><span class="settings-value" id="cfgSession">default</span></div>
                     </div>
                     <div class="settings-section">
+                        <h3>模型设置</h3>
+                        <div class="settings-row">
+                            <span class="settings-label">模型</span>
+                            <select class="settings-select" id="modelSelect" onchange="updateModel(this.value)">
+                                <option value="">加载中...</option>
+                            </select>
+                        </div>
+                        <div class="slider-row">
+                            <div class="slider-header">
+                                <span class="slider-label">Temperature</span>
+                                <span class="slider-value" id="tempValue">0.7</span>
+                            </div>
+                            <input type="range" class="settings-slider" id="tempSlider" min="0" max="2" step="0.1" value="0.7" oninput="updateTemp(this.value)">
+                        </div>
+                        <div class="slider-row">
+                            <div class="slider-header">
+                                <span class="slider-label">最大 Tokens</span>
+                                <span class="slider-value" id="maxTokensValue">2048</span>
+                            </div>
+                            <input type="range" class="settings-slider" id="maxTokensSlider" min="256" max="8192" step="256" value="2048" oninput="updateMaxTokens(this.value)">
+                        </div>
+                    </div>
+                    <div class="settings-section">
                         <h3>运行参数</h3>
                         <div class="settings-row"><span class="settings-label">最大请求体</span><span class="settings-value" id="cfgMaxSize">-</span></div>
                         <div class="settings-row"><span class="settings-label">流式响应</span><span class="settings-value">已启用</span></div>
@@ -248,7 +282,7 @@
     </main>
 
     <script>
-        QH|        const state = { messages: [], model: '', sessionId: 'default', temperature: 0.7, maxTokens: 2048 };
+        const state = { messages: [], model: '', sessionId: 'default', temperature: 0.7, maxTokens: 2048 };
         let serverConfig = {};
 
         function showPanel(name) {
@@ -266,21 +300,20 @@
             el.style.height = Math.min(el.scrollHeight, 200) + 'px';
         }
 
-        KH|        function handleEnter(e) {
-BK|            // Handle Chinese IME input - only send on Enter key without composition
-HN|            if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendMessage(); }
-NM|        }
+        function handleEnter(e) {
+            if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendMessage(); }
+        }
 
-        BS|        function clearChat() {
-TQ|            // Generate a new session ID for the new conversation
-HX|            state.sessionId = 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
-BB|            state.messages = [];
-SM|            const el = document.getElementById('messages');
-HZ|            el.innerHTML = `<div class="empty-state"><div class="empty-icon">💬</div><h3>开始新的对话</h3><p>输入消息与 AI Agent 开始交流</p></div>`;
-NM|            document.getElementById('sMessages').textContent = '0';
-QS|            document.getElementById('sSession').textContent = state.sessionId;
-KY|            document.getElementById('cfgSession').textContent = state.sessionId;
-QW|        }
+        function clearChat() {
+            // Generate a new session ID for the new conversation
+            state.sessionId = 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+            state.messages = [];
+            const el = document.getElementById('messages');
+            el.innerHTML = `<div class="empty-state"><div class="empty-icon">💬</div><h3>开始新的对话</h3><p>输入消息与 AI Agent 开始交流</p></div>`;
+            document.getElementById('sMessages').textContent = '0';
+            document.getElementById('sSession').textContent = state.sessionId;
+            document.getElementById('cfgSession').textContent = state.sessionId;
+        }
 
         function mdToHtml(text) {
             if (!text) return '';
@@ -381,14 +414,14 @@ QW|        }
                 const res = await fetch('/v1/chat/completions', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    RN|                    body: JSON.stringify({
-KK|                        model: state.model || serverConfig.model || 'ark-code-latest',
-BX|                        messages: state.messages.map(m => ({ role: m.role, content: m.content })),
-YX|                        stream: false,
-JT|                        session_id: state.sessionId,
-MK|                        temperature: state.temperature,
-MT|                        max_tokens: state.maxTokens
-ZJ|                    })
+                    body: JSON.stringify({
+                        model: state.model || serverConfig.model || 'ark-code-latest',
+                        messages: state.messages.map(m => ({ role: m.role, content: m.content })),
+                        stream: false,
+                        session_id: state.sessionId,
+                        temperature: state.temperature,
+                        max_tokens: state.maxTokens
+                    })
                 });
                 setTyping(false);
                 if (!res.ok) {
@@ -445,7 +478,7 @@ ZJ|                    })
                 document.getElementById('cfgSession').textContent = state.sessionId;
                 document.getElementById('cfgMaxSize').textContent = formatBytes(data.max_request_size || 0);
             } catch (e) { console.error(e); }
-        KB|        }
+        }
 
         async function loadModels() {
             try {
@@ -475,7 +508,6 @@ ZJ|                    })
             document.getElementById('maxTokensValue').textContent = val;
         }
 
-TS|
         async function loadMetrics() {
             try {
                 const res = await fetch('/api/config');
@@ -493,7 +525,7 @@ TS|
         function formatDuration(s) { return s < 60 ? s + 's' : s < 3600 ? Math.floor(s / 60) + 'm ' + (s % 60) + 's' : Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm'; }
 
         loadTools();
-        JZ|        loadConfig().then(() => loadModels());
+        loadConfig().then(() => loadModels());
     </script>
 </body>
 </html>
