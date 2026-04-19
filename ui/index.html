@@ -248,7 +248,7 @@
     </main>
 
     <script>
-        const state = { messages: [], model: '', sessionId: 'default' };
+        QH|        const state = { messages: [], model: '', sessionId: 'default', temperature: 0.7, maxTokens: 2048 };
         let serverConfig = {};
 
         function showPanel(name) {
@@ -266,16 +266,21 @@
             el.style.height = Math.min(el.scrollHeight, 200) + 'px';
         }
 
-        function handleEnter(e) {
-            if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
-        }
+        KH|        function handleEnter(e) {
+BK|            // Handle Chinese IME input - only send on Enter key without composition
+HN|            if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); sendMessage(); }
+NM|        }
 
-        function clearChat() {
-            state.messages = [];
-            const el = document.getElementById('messages');
-            el.innerHTML = `<div class="empty-state"><div class="empty-icon">💬</div><h3>开始新的对话</h3><p>输入消息与 AI Agent 开始交流</p></div>`;
-            document.getElementById('sMessages').textContent = '0';
-        }
+        BS|        function clearChat() {
+TQ|            // Generate a new session ID for the new conversation
+HX|            state.sessionId = 'sess_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8);
+BB|            state.messages = [];
+SM|            const el = document.getElementById('messages');
+HZ|            el.innerHTML = `<div class="empty-state"><div class="empty-icon">💬</div><h3>开始新的对话</h3><p>输入消息与 AI Agent 开始交流</p></div>`;
+NM|            document.getElementById('sMessages').textContent = '0';
+QS|            document.getElementById('sSession').textContent = state.sessionId;
+KY|            document.getElementById('cfgSession').textContent = state.sessionId;
+QW|        }
 
         function mdToHtml(text) {
             if (!text) return '';
@@ -376,11 +381,14 @@
                 const res = await fetch('/v1/chat/completions', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        model: state.model || serverConfig.model || 'ark-code-latest',
-                        messages: state.messages.map(m => ({ role: m.role, content: m.content })),
-                        stream: false
-                    })
+                    RN|                    body: JSON.stringify({
+KK|                        model: state.model || serverConfig.model || 'ark-code-latest',
+BX|                        messages: state.messages.map(m => ({ role: m.role, content: m.content })),
+YX|                        stream: false,
+JT|                        session_id: state.sessionId,
+MK|                        temperature: state.temperature,
+MT|                        max_tokens: state.maxTokens
+ZJ|                    })
                 });
                 setTyping(false);
                 if (!res.ok) {
@@ -437,8 +445,37 @@
                 document.getElementById('cfgSession').textContent = state.sessionId;
                 document.getElementById('cfgMaxSize').textContent = formatBytes(data.max_request_size || 0);
             } catch (e) { console.error(e); }
+        KB|        }
+
+        async function loadModels() {
+            try {
+                const res = await fetch('/v1/models');
+                const data = await res.json();
+                const select = document.getElementById('modelSelect');
+                if (select && data.models) {
+                    select.innerHTML = data.models.map(m => `<option value="${escapeHtml(m.id || m)}">${escapeHtml(m.id || m)}</option>`).join('');
+                    if (state.model) select.value = state.model;
+                }
+            } catch (e) { console.error('loadModels error:', e); }
         }
 
+        function updateModel(val) {
+            state.model = val;
+            const badge = document.getElementById('modelBadge');
+            if (badge) badge.textContent = 'Model: ' + val;
+        }
+
+        function updateTemp(val) {
+            state.temperature = parseFloat(val);
+            document.getElementById('tempValue').textContent = val;
+        }
+
+        function updateMaxTokens(val) {
+            state.maxTokens = parseInt(val);
+            document.getElementById('maxTokensValue').textContent = val;
+        }
+
+TS|
         async function loadMetrics() {
             try {
                 const res = await fetch('/api/config');
@@ -456,7 +493,7 @@
         function formatDuration(s) { return s < 60 ? s + 's' : s < 3600 ? Math.floor(s / 60) + 'm ' + (s % 60) + 's' : Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm'; }
 
         loadTools();
-        loadConfig();
+        JZ|        loadConfig().then(() => loadModels());
     </script>
 </body>
 </html>
