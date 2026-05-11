@@ -133,6 +133,51 @@ fn collectKeysForProvider(allocator: std.mem.Allocator, environ: *const std.proc
     return keys.toOwnedSlice(allocator) catch &.{};
 }
 
+/// Copy built-in skills from src/skills/ and src/option-skills/ to workspace
+fn setupBuiltinSkills(allocator: std.mem.Allocator, workspace_dir: []const u8) !void {
+    const builtin_dirs = [_][]const u8{ "src/skills", "src/option-skills" };
+    const target_dir = try std.fmt.allocPrint(allocator, "{s}/skills", .{workspace_dir});
+    defer allocator.free(target_dir);
+
+    // Ensure target skills directory exists
+    shared.context.cwdMakePath(target_dir) catch {};
+
+    for (builtin_dirs) |src_dir| {
+        // Check if source directory exists
+        shared.context.cwdAccess(src_dir) catch continue;
+
+        var dir = shared.context.cwdOpenDir(src_dir, .{}) catch continue;
+        defer dir.close(shared.context.io());
+
+        var iter = dir.iterate();
+        while (iter.next(shared.context.io()) catch null) |entry| {
+            if (entry.kind != .directory) continue;
+            const skill_name = entry.name;
+
+            // Source: src/skills/code-review/
+            const src_skill_dir = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ src_dir, skill_name });
+            defer allocator.free(src_skill_dir);
+
+            // Target: /tmp/skills/code-review/
+            const tgt_skill_dir = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ target_dir, skill_name });
+            defer allocator.free(tgt_skill_dir);
+
+            // Create target directory
+            shared.context.cwdMakePath(tgt_skill_dir) catch continue;
+
+            // Copy SKILL.md
+            const src_md = try std.fmt.allocPrint(allocator, "{s}/SKILL.md", .{src_skill_dir});
+            defer allocator.free(src_md);
+            const tgt_md = try std.fmt.allocPrint(allocator, "{s}/SKILL.md", .{tgt_skill_dir});
+            defer allocator.free(tgt_md);
+
+            const content = shared.context.cwdReadFileAlloc(allocator, src_md, 1024 * 1024) catch continue;
+            defer allocator.free(content);
+            shared.context.cwdWriteFile(tgt_md, content) catch continue;
+        }
+    }
+}
+
 fn parseArgs(args: std.process.Args, environ: *const std.process.Environ.Map) !CliConfig {
     // Start with defaults
     var config = CliConfig{
@@ -649,6 +694,11 @@ pub fn main(init: std.process.Init) !u8 {
     const allocator = gpa_state;
     const workspace_dir = if (init.environ_map.get("HERMES_WORKSPACE")) |v| try allocator.dupe(u8, v) else "/tmp";
     defer if (workspace_dir.len > 0 and !std.mem.eql(u8, workspace_dir, "/tmp")) allocator.free(workspace_dir);
+
+    // Copy built-in skills from source tree to workspace
+    setupBuiltinSkills(allocator, workspace_dir) catch |err| {
+        std.log.warn("Failed to setup builtin skills: {s}", .{@errorName(err)});
+    };
 
     var registry = try createDefaultRegistry(allocator, workspace_dir);
     defer registry.deinit();
