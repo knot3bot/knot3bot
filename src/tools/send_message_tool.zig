@@ -31,15 +31,15 @@ pub const SendMessageTool = struct {
             return ToolResult.fail("message is required");
         };
 
-        // Full implementation would call messaging API
-        // For now, return placeholder
-        var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-        defer buf.deinit();
-        const w = buf.writer();
+        var buf: std.ArrayList(u8) = .empty;
+        defer buf.deinit(allocator);
 
-        try w.writeAll("{\"success\":true,\"platform\":\"");
-        try w.print("\"{s}\",\"recipient\":\"{s}\",\"message\":\"{s}\",", .{ platform, recipient, message });
-        try w.writeAll("\"message_id\":null,\"message\":\"Message sending requires API integration. Configure platform credentials.\"}");
+        try buf.appendSlice(allocator, "{\"success\":true,\"platform\":\"");
+        try buf.appendSlice(allocator, platform);
+        const rm = try std.fmt.allocPrint(allocator, "\",\"recipient\":\"{s}\",\"message\":\"{s}\"", .{ recipient, message });
+        defer allocator.free(rm);
+        try buf.appendSlice(allocator, rm);
+        try buf.appendSlice(allocator, ",\"message_id\":null,\"message\":\"Message sending requires API integration.\"}");
 
         return ToolResult{
             .success = true,

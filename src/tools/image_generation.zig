@@ -27,15 +27,15 @@ pub const ImageGenerationTool = struct {
         const size = root.getString(args, "size") orelse "1024x1024";
         const style = root.getString(args, "style") orelse "vivid";
 
-        // Full implementation would call an image generation API
-        // For now, return placeholder
-        var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-        defer buf.deinit();
-        const w = buf.writer();
+        var buf: std.ArrayList(u8) = .empty;
+        defer buf.deinit(allocator);
 
-        try w.writeAll("{\"success\":true,\"image_url\":null,\"prompt\":\"");
-        try w.print("\"{s}\",\"size\":\"{s}\",\"style\":\"{s}\",", .{ prompt, size, style });
-        try w.writeAll("\"message\":\"Image generation requires API integration. Configure a provider like DALL-E or Stable Diffusion.\"}");
+        try buf.appendSlice(allocator, "{\"success\":true,\"image_url\":null,\"prompt\":\"");
+        try buf.appendSlice(allocator, prompt);
+        const dim = try std.fmt.allocPrint(allocator, "\",\"size\":\"{s}\",\"style\":\"{s}\"", .{ size, style });
+        defer allocator.free(dim);
+        try buf.appendSlice(allocator, dim);
+        try buf.appendSlice(allocator, ",\"message\":\"Image generation requires API integration.\"}");
 
         return ToolResult{
             .success = true,

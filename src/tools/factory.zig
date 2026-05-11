@@ -107,8 +107,13 @@ pub fn createDefaultRegistry(allocator: std.mem.Allocator, workspace_dir: []cons
     // URL safety
     { const ust = try allocator.create(root.url_safety.UrlSafetyTool); ust.* = .{}; try registry.register(ust.tool()); }
     // Session search
+    { const hat = try allocator.create(root.homeassistant_tool.HomeAssistantTool); hat.* = .{}; try registry.register(hat.tool()); }
     { const sst = try allocator.create(root.session_search.SessionSearchTool); sst.* = .{}; try registry.register(sst.tool()); }
 
+    { const igt = try allocator.create(root.image_generation.ImageGenerationTool); igt.* = .{}; try registry.register(igt.tool()); }
+    { const smt = try allocator.create(root.send_message_tool.SendMessageTool); smt.* = .{}; try registry.register(smt.tool()); }
+    { const trt = try allocator.create(root.transcription_tools.TranscriptionTool); trt.* = .{}; try registry.register(trt.tool()); }
+    { const tts = try allocator.create(root.tts_tool.TtsTool); tts.* = .{}; try registry.register(tts.tool()); }
     return registry;
 }
 
@@ -348,5 +353,9 @@ pub fn createFullRegistry(allocator: std.mem.Allocator, workspace_dir: []const u
         try registry.register(code_exec.tool());
     }
 
+    { const igt = try allocator.create(root.image_generation.ImageGenerationTool); igt.* = .{}; try registry.register(igt.tool()); }
+    { const smt = try allocator.create(root.send_message_tool.SendMessageTool); smt.* = .{}; try registry.register(smt.tool()); }
+    { const trt = try allocator.create(root.transcription_tools.TranscriptionTool); trt.* = .{}; try registry.register(trt.tool()); }
+    { const tts = try allocator.create(root.tts_tool.TtsTool); tts.* = .{}; try registry.register(tts.tool()); }
     return registry;
 }

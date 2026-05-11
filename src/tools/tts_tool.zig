@@ -28,15 +28,15 @@ pub const TtsTool = struct {
         const model = root.getString(args, "model") orelse "elevenlabs";
         _ = root.getString(args, "language") orelse "en"; // Recognized but requires API integration
 
-        // Full implementation would call TTS API
-        // For now, return placeholder
-        var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-        defer buf.deinit();
-        const w = buf.writer();
+        var buf: std.ArrayList(u8) = .empty;
+        defer buf.deinit(allocator);
 
-        try w.writeAll("{\"success\":true,\"audio_path\":null,\"text\":\"");
-        try w.print("\"{s}\",\"voice\":\"{s}\",\"model\":\"{s}\",", .{ text, voice, model });
-        try w.writeAll("\"message\":\"TTS requires API integration. Configure ElevenLabs, OpenAI TTS, or gTTS provider.\"}");
+        try buf.appendSlice(allocator, "{\"success\":true,\"audio_path\":null,\"text\":\"");
+        try buf.appendSlice(allocator, text);
+        const vm = try std.fmt.allocPrint(allocator, "\",\"voice\":\"{s}\",\"model\":\"{s}\"", .{ voice, model });
+        defer allocator.free(vm);
+        try buf.appendSlice(allocator, vm);
+        try buf.appendSlice(allocator, ",\"message\":\"TTS requires API integration.\"}");
 
         return ToolResult{
             .success = true,

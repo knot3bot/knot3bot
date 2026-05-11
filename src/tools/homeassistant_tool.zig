@@ -25,15 +25,12 @@ pub const HomeAssistantTool = struct {
             return ToolResult.fail("action is required (call_service, get_state, list_entities, subscribe)");
         };
 
-        // Full implementation would call HomeAssistant API
-        // For now, return placeholder
-        var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-        defer buf.deinit();
-        const w = buf.writer();
+        var buf: std.ArrayList(u8) = .empty;
+        defer buf.deinit(allocator);
 
-        try w.writeAll("{\"success\":true,\"action\":\"");
-        try w.print("\"{s}\",", .{action});
-        try w.writeAll("\"message\":\"HomeAssistant integration requires server URL and token configuration.\"}");
+        try buf.appendSlice(allocator, "{\"success\":true,\"action\":\"");
+        try buf.appendSlice(allocator, action);
+        try buf.appendSlice(allocator, "\",\"message\":\"HomeAssistant requires API integration.\"}");
 
         return ToolResult{
             .success = true,

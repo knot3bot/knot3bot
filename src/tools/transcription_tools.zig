@@ -27,15 +27,15 @@ pub const TranscriptionTool = struct {
         const language = root.getString(args, "language") orelse "auto";
         const model = root.getString(args, "model") orelse "whisper";
 
-        // Full implementation would call STT API
-        // For now, return placeholder
-        var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-        defer buf.deinit();
-        const w = buf.writer();
+        var buf: std.ArrayList(u8) = .empty;
+        defer buf.deinit(allocator);
 
-        try w.writeAll("{\"success\":true,\"text\":null,\"audio_path\":\"");
-        try w.print("\"{s}\",\"language\":\"{s}\",\"model\":\"{s}\",", .{ audio_path, language, model });
-        try w.writeAll("\"message\":\"Transcription requires STT API integration. Configure Whisper, Deepgram, or Google Speech-to-Text.\"}");
+        try buf.appendSlice(allocator, "{\"success\":true,\"text\":null,\"audio_path\":\"");
+        try buf.appendSlice(allocator, audio_path);
+        const lm = try std.fmt.allocPrint(allocator, "\",\"language\":\"{s}\",\"model\":\"{s}\"", .{ language, model });
+        defer allocator.free(lm);
+        try buf.appendSlice(allocator, lm);
+        try buf.appendSlice(allocator, ",\"message\":\"Transcription requires STT API integration.\"}");
 
         return ToolResult{
             .success = true,
