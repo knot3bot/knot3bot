@@ -363,7 +363,7 @@ pub const LLMClient = struct {
     }
 
     fn buildRequestBody(self: *LLMClient, messages: []const ChatMessage) ![]u8 {
-        var body: std.ArrayList(u8) = .empty;
+        var body = std.ArrayList(u8).initCapacity(self.allocator, 2048) catch return error.OutOfMemory;
 
         try body.appendSlice(self.allocator, "{\"model\":\"");
         try body.appendSlice(self.allocator, self.model);
