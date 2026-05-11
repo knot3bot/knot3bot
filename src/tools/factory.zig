@@ -59,8 +59,6 @@ pub fn createDefaultRegistry(allocator: std.mem.Allocator, workspace_dir: []cons
     { const mcpt = try allocator.create(root.mcp_tool.MCPTool); mcpt.* = .{}; try registry.register(mcpt.tool()); }
     { const mls = try allocator.create(root.mcp_tool.MCPListServersTool); mls.* = .{}; try registry.register(mls.tool()); }
     // checkpoint + delegate disabled (Zig 0.16 pending)
-    { const cpt = try allocator.create(root.checkpoint.CheckpointManagerTool); cpt.* = .{ .workspace_dir = workspace_dir }; try registry.register(cpt.tool()); }
-    { const dlt = try allocator.create(root.delegate.DelegateTool); dlt.* = .{ .workspace_dir = workspace_dir }; try registry.register(dlt.tool()); }
     // checkpoint + delegate disabled (Zig 0.16 pending)
     return registry;
 }
@@ -81,9 +79,6 @@ pub fn createFullRegistry(allocator: std.mem.Allocator, workspace_dir: []const u
     { const t = try allocator.create(root.skill_self_improve_tool.SkillSelfImproveTool); t.* = .{ .skills_dir = workspace_dir, .memory_dir = workspace_dir }; try registry.register(t.tool()); }
 
     // Delegate / checkpoint
-    { const t = try allocator.create(root.delegate.DelegateTool); t.* = .{ .workspace_dir = workspace_dir }; try registry.register(t.tool()); }
-    { const t = try allocator.create(root.delegate.DelegateResultTool); t.* = .{ .workspace_dir = workspace_dir }; try registry.register(t.tool()); }
-    { const t = try allocator.create(root.checkpoint.CheckpointManagerTool); t.* = .{ .workspace_dir = workspace_dir }; try registry.register(t.tool()); }
 
     // Security
     { const t = try allocator.create(root.todo.TodoTool); t.* = root.todo.TodoTool.init(allocator); errdefer t.deinit(allocator); try registry.register(t.tool()); }
@@ -104,8 +99,6 @@ pub fn createFullRegistry(allocator: std.mem.Allocator, workspace_dir: []const u
     { const mcpt = try allocator.create(root.mcp_tool.MCPTool); mcpt.* = .{}; try registry.register(mcpt.tool()); }
     { const mls = try allocator.create(root.mcp_tool.MCPListServersTool); mls.* = .{}; try registry.register(mls.tool()); }
     // checkpoint + delegate disabled (Zig 0.16 pending)
-    { const cpt = try allocator.create(root.checkpoint.CheckpointManagerTool); cpt.* = .{ .workspace_dir = workspace_dir }; try registry.register(cpt.tool()); }
-    { const dlt = try allocator.create(root.delegate.DelegateTool); dlt.* = .{ .workspace_dir = workspace_dir }; try registry.register(dlt.tool()); }
     // checkpoint + delegate disabled (Zig 0.16 pending)
     return registry;
 }
