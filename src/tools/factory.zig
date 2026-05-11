@@ -50,7 +50,7 @@ fn addExtendedTools(registry: *ToolRegistry, allocator: std.mem.Allocator, works
 
 /// Create default tool registry (30 tools)
 pub fn createDefaultRegistry(allocator: std.mem.Allocator, workspace_dir: []const u8) !ToolRegistry {
-    var registry = ToolRegistry.init(allocator);
+    var registry = try ToolRegistry.init(allocator);
     errdefer registry.deinit();
     try addCoreTools(&registry, allocator, workspace_dir);
     try addExtendedTools(&registry, allocator, workspace_dir);
@@ -59,7 +59,7 @@ pub fn createDefaultRegistry(allocator: std.mem.Allocator, workspace_dir: []cons
 
 /// Create full tool registry (50+ tools, including hermes-agent self-evolution)
 pub fn createFullRegistry(allocator: std.mem.Allocator, workspace_dir: []const u8) !ToolRegistry {
-    var registry = ToolRegistry.init(allocator);
+    var registry = try ToolRegistry.init(allocator);
     errdefer registry.deinit();
 
     try addCoreTools(&registry, allocator, workspace_dir);

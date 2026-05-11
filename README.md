@@ -1,135 +1,146 @@
 # knot3bot
 
-A high-performance AI coding agent written in Zig. Single binary, zero runtime dependencies, blazing fast.
-
-knot3bot is a rewrite of the Hermes Agent system in [Zig](https://ziglang.org/), leveraging compile-time features, zero-cost abstractions, and fine-grained memory management to build a lean, production-ready AI agent.
-
-## Features
-
-- **ReAct Agent Loop** — Reasoning + Acting pattern for robust tool use
-- **Multi-Provider Support** — OpenAI, Anthropic, Kimi, MiniMax, ZAI, Bailian, Volcano
-- **Tool Registry** — 30+ built-in tools (file ops, shell, git, browser, MCP, cron, etc.)
-- **Memory System** — In-memory + SQLite backends, automatic session persistence
-- **Context Compression** — Automatic token budget management with LLM-based summarization
-- **Trajectory Recording** — JSONL audit logs of agent reasoning traces
-- **Smart Model Routing** — Automatic provider/model selection based on task complexity
-- **Anthropic Tool Support** — Native tool-use API with OpenAI-compatible responses
-- **HTTP Server** — OpenAI-compatible REST API (`/v1/chat/completions`, `/v1/responses`)
-- **ACP Adapter** — IDE integration via Agent Client Protocol (stdio JSON-RPC)
-- **Credential Pool** — Automatic key rotation across multiple API keys
-- **Production-Grade HTTP** — Rate limiting, circuit breakers, Prometheus metrics
+A high-performance AI coding agent in Zig. Single binary, zero runtime dependencies.
 
 ## Quick Start
 
-### Prerequisites
-
-- Zig 0.15+
-- SQLite (optional, for persistent memory)
-
-### Build
-
 ```bash
+# npm (recommended)
+npm install -g knot3bot
+knot3bot --help
+
+# Build from source
 zig build
+./zig-out/bin/knot3bot --provider deepseek --model deepseek-v4-pro
+
+# Server mode with dashboard
+DEEPSEEK_API_KEY=sk-xxx ./zig-out/bin/knot3bot --server --port 8080
+# Open http://localhost:8080/dashboard
 ```
 
-### Run
+## Features
 
-```bash
-# Interactive CLI mode
-./zig-out/bin/knot3bot
+### Agent
+- **ReAct loop** with streaming and non-streaming modes
+- **Context compression** — automatic token budget management via LLM summarization
+- **Smart model routing** — automatic provider/model selection
+- **Trajectory recording** — JSONL audit logs for every agent run
+- **Skill system** — 5 default skills (plan/debug/research/review/shell-safety) with safety levels
+- **Credential pool** — multi-key rotation (`*_API_KEY`, `*_API_KEY_2`...`_5`)
+- **Memory** — in-memory + SQLite (FTS5 full-text search), conversation history persistence
 
-# With a specific provider
-BAILIAN_API_KEY=xxx ./zig-out/bin/knot3bot --provider bailian
+### CLI / TUI
+- **Slash commands**: `/help`, `/setup`, `/model`, `/provider`, `/config`, `/tools`, `/skills`, `/new`, `/quit`
+- **Interactive menus** — arrow-key navigation for model/tool/skills selection
+- **Command history** — up/down arrow recall of last 100 commands
+- **Rich prompt** — shows current model/provider/session
+- **Setup wizard** — 3-step interactive configuration (provider → API key → model)
 
-# HTTP server mode
-./zig-out/bin/knot3bot --server --port 8080
-```
+### Web Dashboard
+- **HTMX + Alpine.js + Tailwind CSS** — real-time chat interface
+- **SSE streaming** — responses appear token-by-token
+- **Provider/model switching** — select from 10 providers with latest models
+- **Settings panel** — temperature, max tokens, system prompt, localStorage persistence
+- **Metrics panel** — requests, latency, tokens, errors with 5s auto-refresh
+- **Session management** — per-session message history
 
-### Docker
+### Tools (30)
+`shell`, `read_file`, `write_file`, `list_directory`, `grep`, `glob`, `todo`, `calculator`,
+`git`, `cron`, `http_request`, `web_fetch`, `web_search`, `web_extract`, `browser`, `spawn`,
+`task_planner`, `diff`, `approval`, `url_safety`, `session_search`, `homeassistant`,
+`image_generation`, `send_message`, `transcription`, `tts`, `vision`, `screen_capture`,
+`clarify`, `env_passthrough`
 
-```bash
-docker compose up
-```
+### Providers (10)
+| Provider | Models | Env Variable |
+|----------|--------|-------------|
+| OpenAI | gpt-5.5, gpt-5.5-mini, o5-mini, gpt-4o | `OPENAI_API_KEY` |
+| DeepSeek | deepseek-v4-pro, deepseek-v4-flash, deepseek-chat | `DEEPSEEK_API_KEY` |
+| Anthropic | claude-opus-4-7, claude-sonnet-4-6, claude-haiku-4-5 | `ANTHROPIC_API_KEY` |
+| Bailian | qwen3.6-plus, qwen3.6-flash, qwen3.6-coder-plus | `BAILIAN_API_KEY` |
+| Kimi | kimi-k2.5, kimi-k2-thinking | `KIMI_API_KEY` |
+| MiniMax | MiniMax-M2.7, MiniMax-M2.5 | `MINIMAX_API_KEY` |
+| Z.ai | glm-4.7, glm-4.7-flash | `ZAI_API_KEY` |
+| OpenRouter | gpt-5.5, claude-opus-4-7, gemini-2.5-pro | `OPENROUTER_API_KEY` |
+| Volcano | doubao-seed, doubao-pro | `VOLCANO_API_KEY` |
+| Tencent | hunyuan-turbo, hunyuan-t1 | `TENCENT_API_KEY` |
+
+### Security
+- Constant-time API key comparison (timing attack prevention)
+- Shell command injection prevention (14 metacharacters, 9 dangerous prefixes)
+- SSRF protection (hostname-based URL validation, symlink resolution)
+- Path traversal prevention (null byte, `../`, absolute path blocking)
+- HTTP security headers (X-Content-Type-Options, X-Frame-Options, HSTS)
+- Sensitive env var filtering in sandboxed execution
+- Skill safety levels (low/medium/high/critical) with approval gating
+
+### Production
+- **Rate limiter** — per-key token bucket with burst support and idle cleanup
+- **Circuit breaker** — 3-state protection against provider cascading failures
+- **Graceful shutdown** — connection draining with configurable timeout
+- **Max connections** — configurable concurrent connection limit
+- **Prometheus metrics** — `/metrics` endpoint with histogram, counters, gauges
+- **Health checks** — `/health`, `/ready`, `/healthz` with provider connectivity verification
+- **Docker** — multi-stage build, non-root user, healthcheck, resource limits
+- **npm** — cross-platform binary installer with GitHub Releases fallback
 
 ## Architecture
 
 ```
 src/
-├── agent/          # ReAct loop, context compression, trajectory
-├── memory/         # In-memory + SQLite backends
-├── providers/      # LLM provider adapters (OpenAI, Anthropic, etc.)
-├── server/         # HTTP API server
-├── adapters/       # ACP IDE protocol adapter
-├── tools/          # Tool implementations (30+ tools)
-├── shared/         # Logging, JSON utilities
-└── main.zig       # CLI entry point
+├── llm/             # Provider adapters (OpenAI-compatible, Anthropic)
+├── interface/       # CLI, Gateway, ACP IDE adapter
+├── intelligence/    # Skills, memory, cron scheduler
+├── security/        # Validation, URL safety, approval
+├── agent/           # ReAct loop, context compression, trajectory
+├── memory/          # In-memory + SQLite (FTS5) backends
+├── providers/       # LLM client implementations
+├── server/          # HTTP API server + rate limiter + circuit breaker
+├── tools/           # 30 tool implementations
+├── gateway/         # Multi-platform message routing
+└── shared/          # JSON utilities, logger, context
 ```
 
-### Key Design Decisions
+## CLI Commands
 
-- **Compile-time tool registration** via Zig's comptime — no reflection overhead
-- **Arena allocators** for request-scoped memory, GPA for long-lived state
-- **Static dispatch** throughout — no virtual function tables
-- **SQLite via C ABI** — proven durability, single file storage
-- **Pure Zig JSON** — no external dependencies
+| Command | Description |
+|---------|------------|
+| `/setup` | Interactive configuration wizard (provider → key → model) |
+| `/model [name]` | Switch model or show interactive selector |
+| `/provider` | Switch AI provider |
+| `/config` | Show current configuration |
+| `/tools` | Show tool state, enable/disable tools |
+| `/skills` | Show and activate skills |
+| `/new` | Start new conversation |
+| `/help` | Show all commands |
+| `/quit` | Exit |
 
-## Configuration
+## HTTP API
 
-knot3bot looks for config in this order:
-1. `KNOT3BOT_CONFIG` env var
-2. `~/.knot3bot/config.json`
-3. `./knot3bot.json`
+OpenAI-compatible endpoints:
 
-See `.env.example` for supported environment variables.
+```bash
+# Chat completion
+curl http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4o","messages":[{"role":"user","content":"Hello"}]}'
 
-### Supported Providers
+# List models
+curl http://localhost:8080/v1/models
 
-| Provider   | Model                          | Env Variable      |
-|------------|--------------------------------|-------------------|
-| OpenAI     | gpt-4o, gpt-4, gpt-3.5-turbo   | `OPENAI_API_KEY` |
-| Anthropic  | claude-3-5-sonnet, claude-3-opus | `ANTHROPIC_API_KEY` |
-| Kimi       | moonshot-v1-8k                  | `KIMI_API_KEY`    |
-| MiniMax    | abab6-chat                      | `MINIMAX_API_KEY` |
-| ZAI        | glm-4                           | `ZAI_API_KEY`     |
-| Bailian    | qwen-plus                       | `BAILIAN_API_KEY` |
-| Volcano    | doubao-pro                       | `VOLCANO_API_KEY` |
+# Health check
+curl http://localhost:8080/health
+```
 
 ## Development
 
 ```bash
-# Build
-zig build
-
-# Test
-zig build test
-
-# Format
-zig fmt src/
+zig build              # Build (default: ReleaseSafe)
+zig build test         # Run tests (79 tests)
+zig build benchmark    # Performance benchmarks
+zig fmt src/           # Format code
 ```
-
-### Testing with Docker
-
-```bash
-./scripts/docker-test.sh
-```
-
-## Documentation
-
-Full documentation available in [`docs/`](docs/):
-
-- [Installation](docs/installation.md)
-- [Quick Start](docs/quickstart.md)
-- [CLI Reference](docs/cli.md)
-- [Configuration](docs/configuration.md)
-- [HTTP API](docs/api.md)
-- [Tools Reference](docs/tools.md)
-- [Architecture](docs/architecture.md)
-
-## Contributing
-
-
-Contributions welcome. Please read existing code style (Zig standard, snake_case functions, PascalCase types). Run `zig build test` before submitting.
 
 ## License
 
-MIT License — see [LICENSE](LICENSE) for details.
+MIT

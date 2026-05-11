@@ -208,10 +208,10 @@ pub const ToolRegistry = struct {
     allocator: std.mem.Allocator,
     entries: std.array_list.AlignedManaged(ToolEntry, null),
 
-    pub fn init(allocator: std.mem.Allocator) ToolRegistry {
+    pub fn init(allocator: std.mem.Allocator) !ToolRegistry {
         return .{
             .allocator = allocator,
-            .entries = std.array_list.AlignedManaged(ToolEntry, null).initCapacity(allocator, 16) catch unreachable,
+            .entries = try std.array_list.AlignedManaged(ToolEntry, null).initCapacity(allocator, 16),
         };
     }
 

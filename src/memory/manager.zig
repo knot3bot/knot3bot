@@ -24,7 +24,7 @@ pub const MemoryManager = struct {
     }
 
     pub fn deinit(self: *MemoryManager) void {
-        _ = self;
+        self.allocator.free(self.backends);
     }
 
     pub fn createSession(self: *MemoryManager, session_id: []const u8) !void {
