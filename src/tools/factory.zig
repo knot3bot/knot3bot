@@ -66,19 +66,18 @@ pub fn createDefaultRegistry(allocator: std.mem.Allocator, workspace_dir: []cons
     { const t = try allocator.create(root.credential_files.CredentialFilesTool); t.* = .{}; try registry.register(t.tool()); }
     { const t = try allocator.create(root.code_execution_tool.CodeExecutionTool); t.* = .{}; try registry.register(t.tool()); }
     { const t = try allocator.create(root.memory_tool.MemoryTool); t.* = try root.memory_tool.MemoryTool.init(allocator); errdefer t.deinit(); try registry.register(t.tool()); }
-    return registry;
-}
-
-/// Create full tool registry (45 tools, including skills management + process registry)
-pub fn createFullRegistry(allocator: std.mem.Allocator, workspace_dir: []const u8) !ToolRegistry {
-    var registry = try createDefaultRegistry(allocator, workspace_dir);
-    errdefer registry.deinit();
-
-    // Skills management tools (not in default registry)
+    // Skills management
     { const t = try allocator.create(root.skills.SkillsListTool); t.* = .{ .skills_dir = workspace_dir }; try registry.register(t.tool()); }
     { const t = try allocator.create(root.skills.SkillViewTool); t.* = .{ .skills_dir = workspace_dir }; try registry.register(t.tool()); }
     { const t = try allocator.create(root.skills.SkillManagerTool); t.* = .{ .skills_dir = workspace_dir }; try registry.register(t.tool()); }
     { const t = try allocator.create(root.skills.SkillRunTool); t.* = .{ .skills_dir = workspace_dir }; try registry.register(t.tool()); }
+    return registry;
+}
+
+/// Create full tool registry (48 tools, including process registry)
+pub fn createFullRegistry(allocator: std.mem.Allocator, workspace_dir: []const u8) !ToolRegistry {
+    var registry = try createDefaultRegistry(allocator, workspace_dir);
+    errdefer registry.deinit();
 
     // Process registry (background process management)
     { const t = try allocator.create(root.process_registry.ProcessRegistryTool); t.* = try root.process_registry.ProcessRegistryTool.init(allocator); errdefer t.deinit(); try registry.register(t.tool()); }

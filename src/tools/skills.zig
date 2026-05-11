@@ -104,26 +104,25 @@ pub fn loadSkillManifest(allocator: std.mem.Allocator, skill_dir: []const u8, sk
         };
 
         // Parse JSON using std.json
-        var parser = std.json.Parser.init(allocator, .{});
-        defer parser.deinit();
+        var parsed_manifest = try std.json.parseFromSlice(std.json.Value, allocator, json_content, .{});
+        defer parsed_manifest.deinit();
 
-        const json_value = try parser.parse(json_content);
-        const obj = json_value.root.object;
+        const obj = parsed_manifest.value.object;
 
         if (obj.get("name")) |val| {
-            if (val == .string) manifest.name = val.string;
+            if (val == .string) manifest.name = try allocator.dupe(u8, val.string);
         }
         if (obj.get("description")) |val| {
-            if (val == .string) manifest.description = val.string;
+            if (val == .string) manifest.description = try allocator.dupe(u8, val.string);
         }
         if (obj.get("category")) |val| {
-            if (val == .string) manifest.category = val.string;
+            if (val == .string) manifest.category = try allocator.dupe(u8, val.string);
         }
         if (obj.get("version")) |val| {
-            if (val == .string) manifest.version = val.string;
+            if (val == .string) manifest.version = try allocator.dupe(u8, val.string);
         }
         if (obj.get("author")) |val| {
-            if (val == .string) manifest.author = val.string;
+            if (val == .string) manifest.author = try allocator.dupe(u8, val.string);
         }
         if (obj.get("tags")) |val| {
             if (val == .array) {
@@ -158,17 +157,25 @@ pub fn loadSkillManifest(allocator: std.mem.Allocator, skill_dir: []const u8, sk
     defer allocator.free(skill_md_path);
 
     const content = shared.cwdReadFileAlloc(allocator, skill_md_path, 65536) catch {
-        // No manifest and no SKILL.md - return empty manifest
-        return SkillManifest{
-            .name = skill_name,
-            .description = "",
-        };
+        return SkillManifest{ .name = skill_name, .description = "" };
     };
     defer allocator.free(content);
 
-    // Parse frontmatter
+    // Parse frontmatter and dup strings (content will be freed)
     var manifest = parseSkillFrontmatterToManifest(content);
-    manifest.name = skill_name;
+    manifest.name = try allocator.dupe(u8, skill_name);
+    if (manifest.description.len > 0) {
+        manifest.description = try allocator.dupe(u8, manifest.description);
+    }
+    if (manifest.category) |cat| {
+        manifest.category = try allocator.dupe(u8, cat);
+    }
+    if (manifest.version) |ver| {
+        manifest.version = try allocator.dupe(u8, ver);
+    }
+    if (manifest.author) |auth| {
+        manifest.author = try allocator.dupe(u8, auth);
+    }
     return manifest;
 }
 
@@ -300,7 +307,7 @@ pub const SkillsListTool = struct {
         var first = true;
         var count: usize = 0;
         var iter = dir.iterate();
-        while (iter.next() catch null) |entry| : ({}) {
+        while (iter.next(shared.io()) catch null) |entry| : ({}) {
             if (entry.kind == .directory) {
                 // Check if category filter matches
                 if (category_filter) |cat| {
@@ -491,7 +498,7 @@ pub const SkillManagerTool = struct {
 
         var iter = dir.iterate();
         var count: usize = 0;
-        while (iter.next() catch null) |entry| : (count += 1) {
+        while (iter.next(shared.io()) catch null) |entry| : (count += 1) {
             if (entry.kind == .directory) {
                 try output.appendSlice(allocator, "- ");
                 try output.appendSlice(allocator, entry.name);
@@ -544,7 +551,7 @@ pub const SkillManagerTool = struct {
         const skill_path = try std.fmt.allocPrint(allocator, "{s}/skills/{s}/SKILL.md", .{ self.skills_dir, name });
         defer allocator.free(skill_path);
 
-        shared.cwdAccess(skill_path, .{}) catch {
+        shared.cwdAccess(skill_path) catch {
             return ToolResult.fail("Skill not found. Use action='create' first");
         };
 
@@ -631,12 +638,10 @@ pub const SkillManagerTool = struct {
 
     fn createManifest(self: *SkillManagerTool, allocator: std.mem.Allocator, name: []const u8, manifest_json: []const u8) !ToolResult {
         // Validate JSON
-        var parser = std.json.Parser.init(allocator, .{});
-        defer parser.deinit();
-
-        _ = parser.parse(manifest_json) catch |err| {
+        const parsed = std.json.parseFromSlice(std.json.Value, allocator, manifest_json, .{}) catch |err| {
             return ToolResult.fail(try std.fmt.allocPrint(allocator, "Invalid JSON: {}", .{err}));
         };
+        defer parsed.deinit();
 
         // Ensure skill directory exists
         const skill_dir = try std.fmt.allocPrint(allocator, "{s}/skills/{s}", .{ self.skills_dir, name });
