@@ -434,19 +434,26 @@ pub const SkillSelfImprove = struct {
     }
 
     /// Log improvement to file for history tracking
-    pub fn logImprovement(self: *SkillSelfImprove, suggestion: *const ImprovementSuggestion) !void {
+    pub fn logImprovement(self: *SkillSelfImprove, suggestion: *ImprovementSuggestion) !void {
         if (self.improvement_log_path == null) return;
 
-        const timestamp = std.time.timestamp();
+        const timestamp = std.Io.Clock.Timestamp.now(shared.context.io(), .real).raw.toSeconds();
         const log_line = try std.fmt.allocPrint(self.allocator,
-            "\\n{d} | {s} | {s} | {s} | {d:.2}",
+            "\n{} | {s} | {s} | {s} | {}",
             .{ timestamp, @tagName(suggestion.action), suggestion.reason, suggestion.pattern_data, suggestion.confidence }
         );
         defer self.allocator.free(log_line);
 
-        const file = std.fs.cwd().openFile(self.improvement_log_path.?, .{ .mode = .append_only }) catch return;
-        defer file.close();
-        file.writeAll(log_line) catch return;
+        const existing = shared.context.cwdReadFileAlloc(self.allocator, self.improvement_log_path.?, 1024 * 1024) catch "";
+        defer if (existing.len > 0) self.allocator.free(existing);
+
+        const updated = if (existing.len > 0)
+            try std.mem.concat(self.allocator, u8, &.{ existing, log_line })
+        else
+            try self.allocator.dupe(u8, log_line);
+        defer self.allocator.free(updated);
+
+        shared.context.cwdWriteFile(self.improvement_log_path.?, updated) catch return;
     }
 };
 

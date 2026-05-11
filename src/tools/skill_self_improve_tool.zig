@@ -7,20 +7,19 @@
 
 const std = @import("std");
 const root = @import("root.zig");
-
+const shared = @import("../shared/context.zig");
 const Tool = root.Tool;
 const ToolResult = root.ToolResult;
 const JsonObjectMap = root.JsonObjectMap;
 const getString = root.getString;
 
-/// Skill content template generator
-pub fn generateSkillTemplate(tool_name: []const u8, _: []const u8, success_count: u32) []const u8 {
+pub fn generateSkillTemplate(tool_name: []const u8, success_count: u32) []const u8 {
     if (tool_name.len == 0) return "";
 
     return std.fmt.comptimePrint(
         \\---
         \\name: {s}-workflow
-        \\description: Automated workflow from {d} successful executions
+        \\description: Automated workflow from {} successful executions
         \\---
         \\
         \\# {s} Workflow
@@ -39,7 +38,6 @@ pub fn generateSkillTemplate(tool_name: []const u8, _: []const u8, success_count
     , .{ tool_name, success_count, tool_name, tool_name, tool_name, tool_name });
 }
 
-/// SkillSelfImproveTool - acts on self-improvement suggestions
 pub const SkillSelfImproveTool = struct {
     skills_dir: []const u8,
     memory_dir: []const u8,
@@ -53,50 +51,37 @@ pub const SkillSelfImproveTool = struct {
     }
 
     pub fn execute(self: *SkillSelfImproveTool, allocator: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
-        const action = getString(args, "action") orelse {
-            return ToolResult.fail("action is required");
-        };
+        const action = getString(args, "action") orelse return ToolResult.fail("action is required");
 
-        if (std.mem.eql(u8, action, "create_skill")) {
-            return self.createSkillFromSuggestion(allocator, args);
-        }
-        if (std.mem.eql(u8, action, "patch_skill")) {
-            return self.patchSkillFromSuggestion(allocator, args);
-        }
-        if (std.mem.eql(u8, action, "update_memory")) {
-            return self.updateMemory(allocator, args);
-        }
-        if (std.mem.eql(u8, action, "log_improvement")) {
-            return self.logImprovement(allocator, args);
-        }
-        if (std.mem.eql(u8, action, "get_suggestions")) {
-            return self.getSuggestions(allocator);
-        }
+        if (std.mem.eql(u8, action, "create_skill")) return self.createSkillFromSuggestion(allocator, args);
+        if (std.mem.eql(u8, action, "patch_skill")) return self.patchSkillFromSuggestion(allocator, args);
+        if (std.mem.eql(u8, action, "update_memory")) return self.updateMemory(allocator, args);
+        if (std.mem.eql(u8, action, "log_improvement")) return self.logImprovement(allocator, args);
+        if (std.mem.eql(u8, action, "get_suggestions")) return self.getSuggestions(allocator);
 
         return ToolResult.fail("Unknown action");
     }
 
     fn createSkillFromSuggestion(self: *SkillSelfImproveTool, allocator: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
-        const name = getString(args, "skill_name") orelse {
-            return ToolResult.fail("skill_name is required");
-        };
+        const name = getString(args, "skill_name") orelse return ToolResult.fail("skill_name is required");
         const content = getString(args, "content") orelse "";
 
-        if (content.len > 0 and scanForDangerousPatterns(content)) |pattern| {
-            return ToolResult.fail(try std.fmt.allocPrint(allocator, "Security: dangerous pattern '{s}'", .{pattern}));
+        if (content.len > 0) {
+            if (scanForDangerousPatterns(content)) |pattern| {
+                const msg = try std.fmt.allocPrint(allocator, "Security: dangerous pattern '{s}'", .{pattern});
+                return ToolResult.fail(msg);
+            }
         }
 
         const skill_path = try std.fmt.allocPrint(allocator, "{s}/skills/{s}/SKILL.md", .{ self.skills_dir, name });
         defer allocator.free(skill_path);
 
         const dir_path = std.fs.path.dirname(skill_path) orelse return ToolResult.fail("Invalid path");
-        std.fs.cwd().makeDir(dir_path) catch {};
+        shared.cwdMakePath(dir_path) catch {};
+        shared.cwdWriteFile(skill_path, content) catch return ToolResult.fail("Failed to create skill");
 
-        std.fs.cwd().writeFile(.{ .sub_path = skill_path, .data = content }) catch {
-            return ToolResult.fail("Failed to create skill");
-        };
-
-        return ToolResult.ok(try std.fmt.allocPrint(allocator, "Skill '{s}' created", .{name}));
+        const resp = try std.fmt.allocPrint(allocator, "Skill '{s}' created", .{name});
+        return ToolResult.ok(resp);
     }
 
     fn patchSkillFromSuggestion(self: *SkillSelfImproveTool, allocator: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
@@ -107,7 +92,7 @@ pub const SkillSelfImproveTool = struct {
         const skill_path = try std.fmt.allocPrint(allocator, "{s}/skills/{s}/SKILL.md", .{ self.skills_dir, name });
         defer allocator.free(skill_path);
 
-        const content = std.fs.cwd().readFileAlloc(allocator, skill_path, 1024 * 1024) catch {
+        const content = shared.cwdReadFileAlloc(allocator, skill_path, 1024 * 1024) catch {
             return ToolResult.fail("Skill not found");
         };
         defer allocator.free(content);
@@ -119,16 +104,15 @@ pub const SkillSelfImproveTool = struct {
         const new_content = try std.mem.replaceOwned(u8, allocator, content, old_str, new_str);
         defer allocator.free(new_content);
 
-        try std.fs.cwd().writeFile(.{ .sub_path = skill_path, .data = new_content });
+        shared.cwdWriteFile(skill_path, new_content) catch return ToolResult.fail("Failed to write patched skill");
 
-        return ToolResult.ok(try std.fmt.allocPrint(allocator, "Skill '{s}' patched", .{name}));
+        const resp = try std.fmt.allocPrint(allocator, "Skill '{s}' patched", .{name});
+        return ToolResult.ok(resp);
     }
 
     fn updateMemory(self: *SkillSelfImproveTool, allocator: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
         const memory_type = getString(args, "memory_type") orelse "USER.md";
-        const memory_content = getString(args, "memory_content") orelse {
-            return ToolResult.fail("memory_content required");
-        };
+        const memory_content = getString(args, "memory_content") orelse return ToolResult.fail("memory_content required");
 
         if (!std.mem.eql(u8, memory_type, "USER.md") and !std.mem.eql(u8, memory_type, "MEMORY.md")) {
             return ToolResult.fail("memory_type must be USER.md or MEMORY.md");
@@ -137,21 +121,23 @@ pub const SkillSelfImproveTool = struct {
         const memory_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ self.memory_dir, memory_type });
         defer allocator.free(memory_path);
 
-        const existing_err = std.fs.cwd().readFileAlloc(allocator, memory_path, 1024 * 1024);
-        const existing: []u8 = if (existing_err) |data| data else "";
+        const existing = shared.cwdReadFileAlloc(allocator, memory_path, 1024 * 1024) catch "";
         defer if (existing.len > 0) allocator.free(existing);
 
-        const timestamp = std.time.timestamp();
-        const new_entry = try std.fmt.allocPrint(allocator, "\n---\n{d} | user\n---\n{s}\n", .{ timestamp, memory_content });
+        const timestamp = std.Io.Clock.Timestamp.now(shared.io(), .real).raw.toSeconds();
+        const new_entry = try std.fmt.allocPrint(allocator, "\n---\n{} | user\n---\n{s}\n", .{ timestamp, memory_content });
+        defer allocator.free(new_entry);
 
         const updated = if (existing.len > 0)
             try std.mem.concat(allocator, u8, &.{ existing, new_entry })
         else
-            new_entry;
+            try allocator.dupe(u8, new_entry);
         defer allocator.free(updated);
 
+        shared.cwdWriteFile(memory_path, updated) catch return ToolResult.fail("Failed to write memory");
 
-        return ToolResult.ok(try std.fmt.allocPrint(allocator, "Updated {s}", .{memory_type}));
+        const resp = try std.fmt.allocPrint(allocator, "Updated {s}", .{memory_type});
+        return ToolResult.ok(resp);
     }
 
     fn logImprovement(self: *SkillSelfImproveTool, allocator: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
@@ -161,25 +147,28 @@ pub const SkillSelfImproveTool = struct {
         const log_path = try std.fmt.allocPrint(allocator, "{s}/skill-improvements.md", .{self.memory_dir});
         defer allocator.free(log_path);
 
-        const timestamp = std.time.timestamp();
-        const entry = try std.fmt.allocPrint(allocator, "\n## {d} - {s}\n{s}\n", .{ timestamp, skill_name, memory_content });
+        const timestamp = std.Io.Clock.Timestamp.now(shared.io(), .real).raw.toSeconds();
+        const entry = try std.fmt.allocPrint(allocator, "\n## {} - {s}\n{s}\n", .{ timestamp, skill_name, memory_content });
         defer allocator.free(entry);
 
-        const file = std.fs.cwd().openFile(log_path, .{ .mode = .append_only }) catch {
-            return ToolResult.fail("Failed to open log");
-        };
-        defer file.close();
+        const existing = shared.cwdReadFileAlloc(allocator, log_path, 1024 * 1024) catch "";
+        defer if (existing.len > 0) allocator.free(existing);
 
-        file.writeAll(entry) catch return ToolResult.fail("Failed to write log");
+        const updated = if (existing.len > 0)
+            try std.mem.concat(allocator, u8, &.{ existing, entry })
+        else
+            try allocator.dupe(u8, entry);
+        defer allocator.free(updated);
+
+        shared.cwdWriteFile(log_path, updated) catch return ToolResult.fail("Failed to write log");
         return ToolResult.ok("Improvement logged");
     }
 
     fn getSuggestions(self: *SkillSelfImproveTool, allocator: std.mem.Allocator) !ToolResult {
-        // Try to read suggestions from the file written by SkillSelfImprove engine
         const suggestions_path = try std.fmt.allocPrint(allocator, "{s}/skill-suggestions.json", .{self.memory_dir});
         defer allocator.free(suggestions_path);
 
-        const content = std.fs.cwd().readFileAlloc(allocator, suggestions_path, 4096) catch {
+        const content = shared.cwdReadFileAlloc(allocator, suggestions_path, 4096) catch {
             return ToolResult.ok("No suggestions yet. Skill Self-Improvement is active. Use create_skill, patch_skill, or update_memory actions to improve the skill system.");
         };
         defer allocator.free(content);

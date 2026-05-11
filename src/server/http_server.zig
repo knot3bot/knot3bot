@@ -155,10 +155,9 @@ fn generateRequestId() []const u8 {
     const static = struct {
         var buf: [64]u8 = undefined;
     };
-    const result = std.fmt.bufPrint(&static.buf, "{d}-{d}", .{ timestamp, request_counter }) catch {
-        // Fallback: use a simpler format that fits in 64 bytes
-        const fallback = std.fmt.bufPrint(&static.buf, "err-{d}", .{request_counter}) catch unreachable;
-        return fallback;
+    const result = std.fmt.bufPrint(&static.buf, "{}-{}", .{ timestamp, request_counter }) catch {
+        // Fallback: use a shorter string that fits in 64 bytes
+        return "req-error";
     };
     return result;
 }
@@ -562,7 +561,11 @@ pub const Server = struct {
             .credential_pool = if (self.credential_pool) |*cp| cp else null,
         };
 
-        var agent = Agent.Agent.init(allocator, agent_config, self.registry);
+        var agent = Agent.Agent.init(allocator, agent_config, self.registry) catch |err| {
+            std.log.err("[{s}] Agent.init failed: {s}", .{ request_id, @errorName(err) });
+            try self.sendJson(conn, 500, "{\"error\":{\"message\":\"Failed to initialize agent\"}}", request_id);
+            return;
+        };
         defer agent.deinit();
 
         if (messages.len > 1) {
@@ -828,7 +831,11 @@ pub const Server = struct {
             .credential_pool = if (self.credential_pool) |*cp| cp else null,
         };
 
-        var agent = Agent.Agent.init(allocator, agent_config, self.registry);
+        var agent = Agent.Agent.init(allocator, agent_config, self.registry) catch |err| {
+            std.log.err("[{s}] Agent.init failed: {s}", .{ request_id, @errorName(err) });
+            try self.sendJson(conn, 500, "{\"error\":{\"message\":\"Failed to initialize agent\"}}", request_id);
+            return;
+        };
         defer agent.deinit();
 
         if (messages.len > 1) {

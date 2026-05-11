@@ -2,7 +2,6 @@ const std = @import("std");
 const tools = @import("root.zig");
 const ToolRegistry = tools.ToolRegistry;
 const createDefaultRegistry = tools.createDefaultRegistry;
-const createFullRegistry = tools.createFullRegistry;
 const Agent = @import("root.zig").Agent;
 const createDefaultSystemPrompt = @import("root.zig").createDefaultSystemPrompt;
 const providers = @import("root.zig").providers;
@@ -580,7 +579,7 @@ fn runAgentStream(allocator: std.mem.Allocator, config: *const CliConfig, regist
             .credential_pool = if (cp.keys.len > 0) &cp else null,
         };
 
-        var agent = Agent.Agent.init(allocator, agent_config, registry);
+        var agent = try Agent.Agent.init(allocator, agent_config, registry);
         defer agent.deinit();
 
         // Load conversation history from memory

@@ -4,6 +4,7 @@
 
 const std = @import("std");
 const root = @import("root.zig");
+const shared = @import("../shared/context.zig");
 const Tool = root.Tool;
 const ToolResult = root.ToolResult;
 const JsonObjectMap = root.JsonObjectMap;
@@ -94,7 +95,7 @@ pub fn loadSkillManifest(allocator: std.mem.Allocator, skill_dir: []const u8, sk
     const manifest_path = try std.fmt.allocPrint(allocator, "{s}/{s}/manifest.json", .{ skill_dir, skill_name });
     defer allocator.free(manifest_path);
 
-    if (std.fs.cwd().readFileAlloc(allocator, manifest_path, 65536)) |json_content| {
+    if (shared.cwdReadFileAlloc(allocator, manifest_path, 65536)) |json_content| {
         defer allocator.free(json_content);
         // Parse JSON manifest
         var manifest = SkillManifest{
@@ -156,7 +157,7 @@ pub fn loadSkillManifest(allocator: std.mem.Allocator, skill_dir: []const u8, sk
     const skill_md_path = try std.fmt.allocPrint(allocator, "{s}/{s}/SKILL.md", .{ skill_dir, skill_name });
     defer allocator.free(skill_md_path);
 
-    const content = std.fs.cwd().readFileAlloc(allocator, skill_md_path, 65536) catch {
+    const content = shared.cwdReadFileAlloc(allocator, skill_md_path, 65536) catch {
         // No manifest and no SKILL.md - return empty manifest
         return SkillManifest{
             .name = skill_name,
@@ -290,11 +291,11 @@ pub const SkillsListTool = struct {
 
         try output.appendSlice(allocator, "{\"success\":true,\"skills\":[");
 
-        var dir = std.fs.cwd().openDir(skill_path, .{}) catch {
+        var dir = shared.cwdOpenDir(skill_path, .{}) catch {
             try output.appendSlice(allocator, "],\"count\":0}");
             return ToolResult.ok(try output.toOwnedSlice(allocator));
         };
-        defer dir.close();
+        defer dir.close(shared.io());
 
         var first = true;
         var count: usize = 0;
@@ -392,7 +393,7 @@ pub const SkillViewTool = struct {
             try std.fmt.allocPrint(allocator, "{s}/skills/{s}/SKILL.md", .{ self.skills_dir, name });
         defer allocator.free(skill_md_path);
 
-        const content = std.fs.cwd().readFileAlloc(allocator, skill_md_path, 1024 * 1024) catch {
+        const content = shared.cwdReadFileAlloc(allocator, skill_md_path, 1024 * 1024) catch {
             return ToolResult.fail(try std.fmt.allocPrint(allocator, "Skill '{s}' not found", .{name}));
         };
 
@@ -411,6 +412,7 @@ pub const SkillViewTool = struct {
 pub const SkillManagerTool = struct {
     skills_dir: []const u8,
 
+    pub const tool_name = "skill_manager";
     pub const tool_description = "Manage skills - create, edit, delete, list, patch, write_file, remove_file, create_manifest";
     pub const tool_params = "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\",\"enum\":[\"create\",\"edit\",\"delete\",\"list\",\"patch\",\"write_file\",\"remove_file\",\"create_manifest\"]},\"name\":{\"type\":\"string\",\"description\":\"Skill name\"},\"content\":{\"type\":\"string\",\"description\":\"Skill content (SKILL.md format)\"},\"category\":{\"type\":\"string\",\"description\":\"Category for the skill\"},\"old_string\":{\"type\":\"string\",\"description\":\"Text to find (for patch)\"},\"new_string\":{\"type\":\"string\",\"description\":\"Replacement text (for patch)\"},\"file_path\":{\"type\":\"string\",\"description\":\"File path within skill\"},\"file_content\":{\"type\":\"string\",\"description\":\"File content (for write_file)\"},\"manifest\":{\"type\":\"string\",\"description\":\"JSON manifest content (for create_manifest)\"}},\"required\":[\"action\"]}";
 
@@ -482,10 +484,10 @@ pub const SkillManagerTool = struct {
         const skill_path = try std.fmt.allocPrint(allocator, "{s}/skills", .{self.skills_dir});
         defer allocator.free(skill_path);
 
-        var dir = std.fs.cwd().openDir(skill_path, .{}) catch {
+        var dir = shared.cwdOpenDir(skill_path, .{}) catch {
             return ToolResult.ok("No skills directory found");
         };
-        defer dir.close();
+        defer dir.close(shared.io());
 
         var iter = dir.iterate();
         var count: usize = 0;
@@ -521,9 +523,9 @@ pub const SkillManagerTool = struct {
         defer allocator.free(skill_path);
 
         const dir_path = std.fs.path.dirname(skill_path) orelse return ToolResult.fail("Invalid path");
-        std.fs.cwd().makeDir(dir_path) catch {};
+        shared.cwdMakePath(dir_path) catch {};
 
-        std.fs.cwd().writeFile(.{ .sub_path = skill_path, .data = content }) catch {
+        shared.cwdWriteFile(skill_path, content) catch {
             return ToolResult.fail("Failed to create skill file");
         };
 
@@ -542,11 +544,11 @@ pub const SkillManagerTool = struct {
         const skill_path = try std.fmt.allocPrint(allocator, "{s}/skills/{s}/SKILL.md", .{ self.skills_dir, name });
         defer allocator.free(skill_path);
 
-        std.fs.cwd().access(skill_path, .{}) catch {
+        shared.cwdAccess(skill_path, .{}) catch {
             return ToolResult.fail("Skill not found. Use action='create' first");
         };
 
-        std.fs.cwd().writeFile(.{ .sub_path = skill_path, .data = content }) catch {
+        shared.cwdWriteFile(skill_path, content) catch {
             return ToolResult.fail("Failed to write skill file");
         };
 
@@ -559,7 +561,7 @@ pub const SkillManagerTool = struct {
         const skill_dir = try std.fmt.allocPrint(allocator, "{s}/skills/{s}", .{ self.skills_dir, name });
         defer allocator.free(skill_dir);
 
-        std.fs.cwd().deleteTree(skill_dir) catch {
+        shared.cwdDeleteTree(skill_dir) catch {
             return ToolResult.fail("Skill not found");
         };
 
@@ -577,7 +579,7 @@ pub const SkillManagerTool = struct {
             try std.fmt.allocPrint(allocator, "{s}/skills/{s}/SKILL.md", .{ self.skills_dir, name });
         defer allocator.free(target_path);
 
-        const content = std.fs.cwd().readFileAlloc(allocator, target_path, 1024 * 1024) catch {
+        const content = shared.cwdReadFileAlloc(allocator, target_path, 1024 * 1024) catch {
             return ToolResult.fail("Skill file not found");
         };
         defer allocator.free(content);
@@ -589,7 +591,7 @@ pub const SkillManagerTool = struct {
         const new_content = try std.mem.replaceOwned(u8, allocator, content, old_string, new_string);
         defer allocator.free(new_content);
 
-        std.fs.cwd().writeFile(.{ .sub_path = target_path, .data = new_content }) catch {
+        shared.cwdWriteFile(target_path, new_content) catch {
             return ToolResult.fail("Failed to write patched file");
         };
 
@@ -604,9 +606,9 @@ pub const SkillManagerTool = struct {
         defer allocator.free(full_path);
 
         const dir_path = std.fs.path.dirname(full_path) orelse return ToolResult.fail("Invalid path");
-        std.fs.cwd().makeDir(dir_path) catch {};
+        shared.cwdMakePath(dir_path) catch {};
 
-        std.fs.cwd().writeFile(.{ .sub_path = full_path, .data = file_content }) catch {
+        shared.cwdWriteFile(full_path, file_content) catch {
             return ToolResult.fail("Failed to write file");
         };
 
@@ -620,7 +622,7 @@ pub const SkillManagerTool = struct {
         const full_path = try std.fmt.allocPrint(allocator, "{s}/skills/{s}/{s}", .{ self.skills_dir, name, file_path });
         defer allocator.free(full_path);
 
-        std.fs.cwd().deleteFile(full_path) catch {
+        shared.cwdDeleteFile(full_path) catch {
             return ToolResult.fail("File not found");
         };
 
@@ -639,13 +641,13 @@ pub const SkillManagerTool = struct {
         // Ensure skill directory exists
         const skill_dir = try std.fmt.allocPrint(allocator, "{s}/skills/{s}", .{ self.skills_dir, name });
         defer allocator.free(skill_dir);
-        std.fs.cwd().makeDir(skill_dir) catch {};
+        shared.cwdMakePath(skill_dir) catch {};
 
         // Write manifest.json
         const manifest_path = try std.fmt.allocPrint(allocator, "{s}/manifest.json", .{skill_dir});
         defer allocator.free(manifest_path);
 
-        std.fs.cwd().writeFile(.{ .sub_path = manifest_path, .data = manifest_json }) catch {
+        shared.cwdWriteFile(manifest_path, manifest_json) catch {
             return ToolResult.fail("Failed to write manifest.json");
         };
 
@@ -677,7 +679,7 @@ pub const SkillRunTool = struct {
         const skill_md_path = try std.fmt.allocPrint(allocator, "{s}/skills/{s}/SKILL.md", .{ self.skills_dir, name });
         defer allocator.free(skill_md_path);
 
-        const content = std.fs.cwd().readFileAlloc(allocator, skill_md_path, 1024 * 1024) catch {
+        const content = shared.cwdReadFileAlloc(allocator, skill_md_path, 1024 * 1024) catch {
             return ToolResult.fail(try std.fmt.allocPrint(allocator, "Skill '{s}' not found", .{name}));
         };
         defer allocator.free(content);

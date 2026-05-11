@@ -254,28 +254,10 @@ pub const Agent = struct {
     credential_pool: ?*credential_pool.CredentialPool = null,
     anthropic_client: ?providers.anthropic.AnthropicClient = null,
     skill_self_improve: ?*SkillSelfImprove = null,
-    pub fn init(allocator: std.mem.Allocator, config: AgentConfig, registry: *const ToolRegistry) Agent {
+    pub fn init(allocator: std.mem.Allocator, config: AgentConfig, registry: *const ToolRegistry) !Agent {
         var messages: ArrayList(Message) = .empty;
         if (config.system_prompt) |prompt| {
-            messages.append(allocator, .{ .role = .system, .content = prompt }) catch {
-                // If we can't even allocate the system message, the agent cannot function.
-                // Return an agent with empty messages; the caller should check and fail gracefully.
-                return Agent{
-                    .allocator = allocator,
-                    .messages = messages,
-                    .config = config,
-                    .registry = registry,
-                    .step_logs = .empty,
-                    .client = null,
-                    .has_api_key = false,
-                    .token_budget = TokenBudget.init(0),
-                    .iteration_budget = IterationBudget.init(0),
-                    .usage = .{},
-                    .anthropic_client = null,
-                    .model_registry = null,
-                    .skill_self_improve = null,
-                };
-            };
+            try messages.append(allocator, .{ .role = .system, .content = prompt });
         }
         var client: ?LLMClient = null;
         var anthropic_client: ?providers.anthropic.AnthropicClient = null;
@@ -475,10 +457,13 @@ pub const Agent = struct {
                     const tool_result = self.executeToolWithError(tc.function.name, tc.function.arguments);
                     const tool_duration: u64 = @intCast(std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toMilliseconds() - tool_start);
 
-                    const result_str = if (tool_result) |tr| tr else "{\"error\":\"Tool execution failed\"}";
+                    // Transfer ownership: tool_result is already an allocated copy
+                    // For null result, use a dup'd error string so deinit can free uniformly
+                    const result_str: []const u8 = if (tool_result) |tr| tr else
+                        try self.allocator.dupe(u8, "Tool execution failed");
 
                     if (self.config.verbose) {
-                        std.debug.print("[Tool {s} took {d}ms]\n", .{ tc.function.name, tool_duration });
+                        std.debug.print("[Tool {s} took {}ms]\n", .{ tc.function.name, tool_duration });
                     }
 
                     // Build observation string
@@ -487,12 +472,10 @@ pub const Agent = struct {
                     }
                     try all_results.appendSlice(self.allocator, result_str);
 
-                    // Add tool message to conversation
-                    const tool_msg = try std.fmt.allocPrint(self.allocator, "{s}", .{result_str});
-
+                    // Add tool message to conversation (reuse result_str, ownership transfers)
                     try self.messages.append(self.allocator, .{
                         .role = .tool,
-                        .content = tool_msg,
+                        .content = result_str,
                         .tool_call_id = tc.id,
                     });
 

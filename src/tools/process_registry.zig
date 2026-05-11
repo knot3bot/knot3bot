@@ -137,28 +137,22 @@ pub const ProcessRegistryTool = struct {
         if (std.mem.eql(u8, action, "list")) {
             var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
             defer buf.deinit();
-            const w = buf.writer();
 
-            try w.writeAll("{\"processes\":[");
+            try buf.appendSlice("{\"processes\":[");
             var it = self.registry.processes.iterator();
             var first = true;
             while (it.next()) |entry| {
-                if (!first) try w.writeAll(",");
+                if (!first) try buf.appendSlice(",");
                 first = false;
-                try w.print(
-                    \\{{"id":"{s}","command":"{s}","state":"{s}"}}
-                , .{
-                    entry.key_ptr.*,
-                    entry.value_ptr.command,
-                    @tagName(entry.value_ptr.state),
-                });
+                const line = try std.fmt.allocPrint(allocator,
+                    "{{\"id\":\"{s}\",\"command\":\"{s}\",\"state\":\"{s}\"}}",
+                    .{ entry.key_ptr.*, entry.value_ptr.command, @tagName(entry.value_ptr.state) });
+                defer allocator.free(line);
+                try buf.appendSlice(line);
             }
-            try w.writeAll("]}");
+            try buf.appendSlice("]}");
 
-            return ToolResult{
-                .success = true,
-                .output = try buf.toOwnedSlice(allocator),
-            };
+            return ToolResult{ .success = true, .output = try buf.toOwnedSlice() };
         }
 
         const id = root.getString(args, "id") orelse {
@@ -167,21 +161,15 @@ pub const ProcessRegistryTool = struct {
 
         if (std.mem.eql(u8, action, "poll")) {
             if (self.registry.poll(id)) |proc| {
-                var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-                defer buf.deinit();
-                try buf.writer().print(
-                    \\{{"id":"{s}","command":"{s}","state":"{s}","pid":{any},"exit_code":{any}}}
-                , .{
-                    proc.id,
-                    proc.command,
-                    @tagName(proc.state),
-                    if (proc.pid) |p| p else 0,
-                    if (proc.exit_code) |c| c else -1,
-                });
-                return ToolResult{
-                    .success = true,
-                    .output = try buf.toOwnedSlice(allocator),
-                };
+                const pid_str = if (proc.pid) |p| try std.fmt.allocPrint(allocator, "{}", .{p}) else try allocator.dupe(u8, "0");
+                defer if (proc.pid != null) allocator.free(pid_str);
+                const exit_str = if (proc.exit_code) |c| try std.fmt.allocPrint(allocator, "{}", .{c}) else try allocator.dupe(u8, "-1");
+                defer if (proc.exit_code != null) allocator.free(exit_str);
+
+                const resp = try std.fmt.allocPrint(allocator,
+                    "{{\"id\":\"{s}\",\"command\":\"{s}\",\"state\":\"{s}\",\"pid\":{s},\"exit_code\":{s}}}",
+                    .{ proc.id, proc.command, @tagName(proc.state), pid_str, exit_str });
+                return ToolResult{ .success = true, .output = resp };
             }
             return ToolResult.fail("Process not found");
         }

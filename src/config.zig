@@ -1,5 +1,6 @@
 const std = @import("std");
 const providers = @import("providers/root.zig");
+const shared = @import("shared/context.zig");
 
 /// Configuration structure for knot3bot
 /// Supports loading from JSON config files
@@ -34,14 +35,8 @@ pub const Config = struct {
         };
 
         // Read file contents
-        const file = try std.fs.cwd().openFile(path, .{});
-        defer file.close();
-
-        const stat = try file.stat();
-        const contents = try allocator.alloc(u8, stat.size);
+        const contents = try shared.cwdReadFileAlloc(allocator, path, 1024 * 1024);
         defer allocator.free(contents);
-
-        _ = try file.readAll(contents);
 
         // Parse JSON
         var parsed = try std.json.parseFromSlice(std.json.Value, allocator, contents, .{});
@@ -187,56 +182,77 @@ pub const Config = struct {
 
     /// Save configuration to a JSON file
     pub fn saveToFile(self: Config, path: []const u8) !void {
-        var file = try std.fs.cwd().createFile(path, .{});
-        defer file.close();
+        const allocator = self.allocator orelse return error.NoAllocator;
+        var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
+        defer buf.deinit();
 
-        var buffer: [4096]u8 = undefined;
-        var file_writer = file.writer(&buffer);
-        const writer = &file_writer.interface;
+        try buf.appendSlice("{\n");
+        try buf.appendSlice("  \"provider\": \"");
+        try buf.appendSlice(self.provider.internalName());
+        try buf.appendSlice("\",\n");
 
-        // Write JSON manually for better control
-        try std.Io.Writer.writeAll(writer, "{\n");
-
-        // Provider
-        try std.Io.Writer.print(writer, "  \"provider\": \"{s}\",\n", .{self.provider.internalName()});
-
-        // API section
-        try std.Io.Writer.writeAll(writer, "  \"api\": {\n");
+        try buf.appendSlice("  \"api\": {\n");
         if (self.api_key) |key| {
-            try std.Io.Writer.print(writer, "    \"key\": \"{s}\",\n", .{key});
+            try buf.appendSlice("    \"key\": \"");
+            // Mask API key: show only last 4 chars
+            if (key.len > 4) {
+                try buf.appendSlice("sk-...");
+                try buf.appendSlice(key[key.len - 4 ..]);
+            } else {
+                try buf.appendSlice("***");
+            }
+            try buf.appendSlice("\",\n");
         }
-        try std.Io.Writer.print(writer, "    \"base\": \"{s}\",\n", .{self.api_base});
-        try std.Io.Writer.print(writer, "    \"model\": \"{s}\"\n", .{self.model});
-        try std.Io.Writer.writeAll(writer, "  },\n");
+        try buf.appendSlice("    \"base\": \"");
+        try buf.appendSlice(self.api_base);
+        try buf.appendSlice("\",\n");
+        try buf.appendSlice("    \"model\": \"");
+        try buf.appendSlice(self.model);
+        try buf.appendSlice("\"\n");
+        try buf.appendSlice("  },\n");
 
-        // Memory section
-        try std.Io.Writer.writeAll(writer, "  \"memory\": {\n");
-        try std.Io.Writer.print(writer, "    \"backend\": \"{s}\",\n", .{self.memory_backend});
-        try std.Io.Writer.print(writer, "    \"db_path\": \"{s}\"\n", .{self.db_path});
-        try std.Io.Writer.writeAll(writer, "  },\n");
+        try buf.appendSlice("  \"memory\": {\n");
+        try buf.appendSlice("    \"backend\": \"");
+        try buf.appendSlice(self.memory_backend);
+        try buf.appendSlice("\",\n");
+        try buf.appendSlice("    \"db_path\": \"");
+        try buf.appendSlice(self.db_path);
+        try buf.appendSlice("\"\n");
+        try buf.appendSlice("  },\n");
 
-        // Server section
-        try std.Io.Writer.writeAll(writer, "  \"server\": {\n");
-        try std.Io.Writer.print(writer, "    \"port\": {d},\n", .{self.server_port});
-        try std.Io.Writer.print(writer, "    \"host\": \"{s}\"\n", .{self.server_host});
-        try std.Io.Writer.writeAll(writer, "  },\n");
+        try buf.appendSlice("  \"server\": {\n");
+        const port_str = try std.fmt.allocPrint(allocator, "    \"port\": {}", .{self.server_port});
+        defer allocator.free(port_str);
+        try buf.appendSlice(port_str);
+        try buf.appendSlice(",\n");
+        try buf.appendSlice("    \"host\": \"");
+        try buf.appendSlice(self.server_host);
+        try buf.appendSlice("\"\n");
+        try buf.appendSlice("  },\n");
 
-        // Logging section
-        try std.Io.Writer.writeAll(writer, "  \"logging\": {\n");
-        try std.Io.Writer.print(writer, "    \"level\": \"{s}\"", .{self.log_level});
+        try buf.appendSlice("  \"logging\": {\n");
+        try buf.appendSlice("    \"level\": \"");
+        try buf.appendSlice(self.log_level);
+        try buf.appendSlice("\"");
         if (self.log_file) |log_file| {
-            try std.Io.Writer.print(writer, ",\n    \"file\": \"{s}\"", .{log_file});
+            try buf.appendSlice(",\n    \"file\": \"");
+            try buf.appendSlice(log_file);
+            try buf.appendSlice("\"");
         }
-        try std.Io.Writer.writeAll(writer, "\n  },\n");
+        try buf.appendSlice("\n  },\n");
 
-        // Behavior section
-        try std.Io.Writer.writeAll(writer, "  \"behavior\": {\n");
-        try std.Io.Writer.print(writer, "    \"max_iterations\": {d},\n", .{self.max_iterations});
-        try std.Io.Writer.print(writer, "    \"timeout_seconds\": {d}\n", .{self.timeout_seconds});
-        try std.Io.Writer.writeAll(writer, "  }\n");
+        try buf.appendSlice("  \"behavior\": {\n");
+        const max_iter_str = try std.fmt.allocPrint(allocator, "    \"max_iterations\": {}", .{self.max_iterations});
+        defer allocator.free(max_iter_str);
+        try buf.appendSlice(max_iter_str);
+        try buf.appendSlice(",\n");
+        const timeout_str = try std.fmt.allocPrint(allocator, "    \"timeout_seconds\": {}", .{self.timeout_seconds});
+        defer allocator.free(timeout_str);
+        try buf.appendSlice(timeout_str);
+        try buf.appendSlice("\n  }\n");
 
-        try std.Io.Writer.writeAll(writer, "}\n");
-        try std.Io.Writer.flush(writer);
+        try buf.appendSlice("}\n");
+        try shared.cwdWriteFile(path, buf.items);
     }
 
     /// Create default config file at the specified path
@@ -268,7 +284,7 @@ pub const Config = struct {
 };
 
 fn fileExists(path: []const u8) bool {
-    std.fs.cwd().access(path, .{}) catch return false;
+    shared.cwdAccess(path) catch return false;
     return true;
 }
 
@@ -316,5 +332,5 @@ test "Config load and save" {
     try std.testing.expectEqualStrings("debug", loaded.log_level);
 
     // Cleanup
-    try std.fs.cwd().deleteFile(test_path);
+    shared.cwdDeleteFile(test_path) catch {};
 }

@@ -16,8 +16,7 @@ fn addCoreTools(registry: *ToolRegistry, allocator: std.mem.Allocator, workspace
     { const t = try allocator.create(root.file_ops.ListDirectoryTool); t.* = .{ .workspace_dir = workspace_dir }; try registry.register(t.tool()); }
     { const t = try allocator.create(root.file_ops.GrepTool); t.* = .{ .workspace_dir = workspace_dir }; try registry.register(t.tool()); }
     { const t = try allocator.create(root.file_ops.GlobTool); t.* = .{ .workspace_dir = workspace_dir }; try registry.register(t.tool()); }
-    // Misc
-    { const t = try allocator.create(root.misc.TodoTool); t.* = .{}; try registry.register(t.tool()); }
+    // Misc (note: todo tool is registered separately with full init/deinit)
     { const t = try allocator.create(root.misc.CalculatorTool); t.* = .{}; try registry.register(t.tool()); }
     // Network
     { const t = try allocator.create(root.git.GitTool); t.* = .{ .workspace_dir = workspace_dir }; try registry.register(t.tool()); }
@@ -48,7 +47,7 @@ fn addExtendedTools(registry: *ToolRegistry, allocator: std.mem.Allocator, works
     { const t = try allocator.create(root.env_passthrough.EnvPassthroughTool); t.* = .{}; try registry.register(t.tool()); }
 }
 
-/// Create default tool registry (30 tools)
+/// Create default tool registry (40 tools)
 pub fn createDefaultRegistry(allocator: std.mem.Allocator, workspace_dir: []const u8) !ToolRegistry {
     var registry = try ToolRegistry.init(allocator);
     errdefer registry.deinit();
@@ -58,47 +57,31 @@ pub fn createDefaultRegistry(allocator: std.mem.Allocator, workspace_dir: []cons
     { const tdt = try allocator.create(root.todo.TodoTool); tdt.* = root.todo.TodoTool.init(allocator); errdefer tdt.deinit(allocator); try registry.register(tdt.tool()); }
     { const mcpt = try allocator.create(root.mcp_tool.MCPTool); mcpt.* = .{}; try registry.register(mcpt.tool()); }
     { const mls = try allocator.create(root.mcp_tool.MCPListServersTool); mls.* = .{}; try registry.register(mls.tool()); }
-    // checkpoint + delegate disabled (Zig 0.16 pending)
-    // checkpoint + delegate disabled (Zig 0.16 pending)
+    // checkpoint + delegate
+    { const cpt = try allocator.create(root.checkpoint.CheckpointManagerTool); cpt.* = .{ .workspace_dir = workspace_dir }; try registry.register(cpt.tool()); }
+    { const dlt = try allocator.create(root.delegate.DelegateTool); dlt.* = .{ .workspace_dir = workspace_dir }; try registry.register(dlt.tool()); }
+    { const drt = try allocator.create(root.delegate.DelegateResultTool); drt.* = .{ .workspace_dir = workspace_dir }; try registry.register(drt.tool()); }
+    // Self-evolution / memory / sandbox
+    { const t = try allocator.create(root.skill_self_improve_tool.SkillSelfImproveTool); t.* = .{ .skills_dir = workspace_dir, .memory_dir = workspace_dir }; try registry.register(t.tool()); }
+    { const t = try allocator.create(root.credential_files.CredentialFilesTool); t.* = .{}; try registry.register(t.tool()); }
+    { const t = try allocator.create(root.code_execution_tool.CodeExecutionTool); t.* = .{}; try registry.register(t.tool()); }
+    { const t = try allocator.create(root.memory_tool.MemoryTool); t.* = try root.memory_tool.MemoryTool.init(allocator); errdefer t.deinit(); try registry.register(t.tool()); }
     return registry;
 }
 
-/// Create full tool registry (50+ tools, including hermes-agent self-evolution)
+/// Create full tool registry (45 tools, including skills management + process registry)
 pub fn createFullRegistry(allocator: std.mem.Allocator, workspace_dir: []const u8) !ToolRegistry {
-    var registry = try ToolRegistry.init(allocator);
+    var registry = try createDefaultRegistry(allocator, workspace_dir);
     errdefer registry.deinit();
 
-    try addCoreTools(&registry, allocator, workspace_dir);
-    try addExtendedTools(&registry, allocator, workspace_dir);
-
-    // Self-evolution / skills
+    // Skills management tools (not in default registry)
     { const t = try allocator.create(root.skills.SkillsListTool); t.* = .{ .skills_dir = workspace_dir }; try registry.register(t.tool()); }
     { const t = try allocator.create(root.skills.SkillViewTool); t.* = .{ .skills_dir = workspace_dir }; try registry.register(t.tool()); }
     { const t = try allocator.create(root.skills.SkillManagerTool); t.* = .{ .skills_dir = workspace_dir }; try registry.register(t.tool()); }
     { const t = try allocator.create(root.skills.SkillRunTool); t.* = .{ .skills_dir = workspace_dir }; try registry.register(t.tool()); }
-    { const t = try allocator.create(root.skill_self_improve_tool.SkillSelfImproveTool); t.* = .{ .skills_dir = workspace_dir, .memory_dir = workspace_dir }; try registry.register(t.tool()); }
 
-    // Delegate / checkpoint
-
-    // Security
-    { const t = try allocator.create(root.todo.TodoTool); t.* = root.todo.TodoTool.init(allocator); errdefer t.deinit(allocator); try registry.register(t.tool()); }
-    { const t = try allocator.create(root.interrupt.InterruptTool); t.* = .{}; try registry.register(t.tool()); }
-    { const t = try allocator.create(root.credential_files.CredentialFilesTool); t.* = .{}; try registry.register(t.tool()); }
-
-    // MCP / Process / Code
-    { const t = try allocator.create(root.mcp_tool.MCPTool); t.* = .{}; try registry.register(t.tool()); }
-    { const t = try allocator.create(root.mcp_tool.MCPListServersTool); t.* = .{}; try registry.register(t.tool()); }
+    // Process registry (background process management)
     { const t = try allocator.create(root.process_registry.ProcessRegistryTool); t.* = try root.process_registry.ProcessRegistryTool.init(allocator); errdefer t.deinit(); try registry.register(t.tool()); }
-    { const t = try allocator.create(root.code_execution_tool.CodeExecutionTool); t.* = .{}; try registry.register(t.tool()); }
 
-    // Memory
-    { const t = try allocator.create(root.memory_tool.MemoryTool); t.* = try root.memory_tool.MemoryTool.init(allocator); errdefer t.deinit(); try registry.register(t.tool()); }
-
-    { const itt = try allocator.create(root.interrupt.InterruptTool); itt.* = .{}; try registry.register(itt.tool()); }
-    { const tdt = try allocator.create(root.todo.TodoTool); tdt.* = root.todo.TodoTool.init(allocator); errdefer tdt.deinit(allocator); try registry.register(tdt.tool()); }
-    { const mcpt = try allocator.create(root.mcp_tool.MCPTool); mcpt.* = .{}; try registry.register(mcpt.tool()); }
-    { const mls = try allocator.create(root.mcp_tool.MCPListServersTool); mls.* = .{}; try registry.register(mls.tool()); }
-    // checkpoint + delegate disabled (Zig 0.16 pending)
-    // checkpoint + delegate disabled (Zig 0.16 pending)
     return registry;
 }
