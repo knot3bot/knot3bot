@@ -32,7 +32,8 @@ jobs:
 
       - name: Build
         run: |
-          zig build -Dtarget=${{ matrix.target }} -Drelease=true
+          chmod +x $(which zig) 2>/dev/null || true
+          zig build -Dtarget=${{ matrix.target }} -Drelease=true -Denable-sqlite=false
           mkdir -p release
           cp zig-out/bin/knot3bot release/knot3bot-${{ matrix.target }}
           ls -lh release/
@@ -68,7 +69,8 @@ jobs:
 
       - name: Build
         run: |
-          zig build -Dtarget=${{ matrix.target }} -Drelease=true
+          chmod +x $(which zig) 2>/dev/null || true
+          zig build -Dtarget=${{ matrix.target }} -Drelease=true -Denable-sqlite=false
           mkdir -p release
           cp zig-out/bin/knot3bot release/knot3bot-${{ matrix.target }}
           ls -lh release/
