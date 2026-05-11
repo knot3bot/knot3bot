@@ -16,6 +16,7 @@ const context_compressor_mod = @import("../agent/context_compressor.zig");
 const trajectory_mod = @import("../agent/trajectory.zig");
 const skill_self_improve_mod = @import("../agent/skill_self_improve.zig");
 const credential_pool_mod = @import("../agent/credential_pool.zig");
+const json_mod = @import("../shared/json.zig");
 const models = @import("../models.zig");
 const MemoryManager = @import("../memory/root.zig").MemoryManager;
 const ManagerMemoryBackend = @import("../memory/root.zig").ManagerMemoryBackend;
@@ -176,16 +177,7 @@ fn streamWriteAll(conn: std.Io.net.Stream, data: []const u8) !void {
 }
 
 fn appendJsonEscaped(list: *std.ArrayList(u8), allocator: std.mem.Allocator, text: []const u8) !void {
-    for (text) |c| {
-        switch (c) {
-            '"' => try list.appendSlice(allocator, "\\\""),
-            '\\' => try list.appendSlice(allocator, "\\\\"),
-            '\n' => try list.appendSlice(allocator, "\\n"),
-            '\r' => try list.appendSlice(allocator, "\\r"),
-            '\t' => try list.appendSlice(allocator, "\\t"),
-            else => try list.append(allocator, c),
-        }
-    }
+    return json_mod.appendJsonEscaped(list, allocator, text);
 }
 
 // ============================================================================

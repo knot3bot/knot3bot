@@ -9,6 +9,7 @@ const trajectory = @import("trajectory.zig");
 const models = @import("../models.zig");
 const prompt_cache = @import("prompt_cache.zig");
 const credential_pool = @import("credential_pool.zig");
+const json_mod = @import("../shared/json.zig");
 const ToolRegistry = tools.ToolRegistry;
 const SkillRegistry = skills.SkillRegistry;
 const Skill = skills.Skill;
@@ -1017,16 +1018,7 @@ pub const Agent = struct {
 
 
     fn escapeJsonStringToBuffer(buf: *std.ArrayList(u8), allocator: std.mem.Allocator, str: []const u8) !void {
-        for (str) |c| {
-            switch (c) {
-                '"' => try buf.appendSlice(allocator, "\\\""),
-                '\\' => try buf.appendSlice(allocator, "\\\\"),
-                '\n' => try buf.appendSlice(allocator, "\\n"),
-                '\r' => try buf.appendSlice(allocator, "\\r"),
-                '\t' => try buf.appendSlice(allocator, "\\t"),
-                else => try buf.append(allocator, c),
-            }
-        }
+        return json_mod.appendJsonEscaped(buf, allocator, str);
     }
 
     fn getToolDefs(self: *Agent) ![]ToolDef {

@@ -27,7 +27,17 @@ pub const Gateway = struct {
         const nc = try self.allocator.dupe(u8, name);
         try self.platforms.put(nc, adapter);
     }
-    pub fn routeMessage(self: *Gateway, platform: []const u8, msg: Message) !void { _ = self; _ = platform; _ = msg; }
+    pub fn routeMessage(self: *Gateway, platform: []const u8, msg: Message) !void {
+        const adapter = self.platforms.get(platform) orelse return error.PlatformNotFound;
+        // Build a simple response (full implementation: run agent with message)
+        const response = Response{
+            .message_id = msg.id,
+            .content = "Message routed through gateway",
+            .role = .assistant,
+            .finish_reason = .stop,
+        };
+        adapter.onResponse(adapter.ptr, response);
+    }
     pub fn bindSession(self: *Gateway, session_id: []const u8, platform_id: []const u8) !void {
         const sid = try self.allocator.dupe(u8, session_id);
         const pid = try self.allocator.dupe(u8, platform_id);

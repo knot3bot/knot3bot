@@ -82,3 +82,17 @@ pub fn jsonOk(allocator: std.mem.Allocator, message: []const u8) ![]const u8 {
 pub fn jsonError(allocator: std.mem.Allocator, message: []const u8) ![]const u8 {
     return std.fmt.allocPrint(allocator, "{{\"error\":{{\"message\":\"{s}\"}}}}", .{message});
 }
+
+/// Append JSON-escaped text to an ArrayList. Shared by server and agent.
+pub fn appendJsonEscaped(list: *std.ArrayList(u8), allocator: std.mem.Allocator, text: []const u8) !void {
+    for (text) |c| {
+        switch (c) {
+            '"' => try list.appendSlice(allocator, "\\\""),
+            '\\' => try list.appendSlice(allocator, "\\\\"),
+            '\n' => try list.appendSlice(allocator, "\\n"),
+            '\r' => try list.appendSlice(allocator, "\\r"),
+            '\t' => try list.appendSlice(allocator, "\\t"),
+            else => try list.append(allocator, c),
+        }
+    }
+}
