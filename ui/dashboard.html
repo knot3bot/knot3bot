@@ -113,6 +113,9 @@
       <div x-show="currentMessages.length===0 && !streaming" class="flex items-center justify-center h-full">
         <div class="text-center text-gray-600">
           <div class="text-4xl mb-3">⚡</div>
+          <div x-show="!apiKey" class="bg-yellow-900/30 border border-yellow-700 rounded-xl px-4 py-3 mb-4 text-sm text-yellow-300 max-w-md mx-auto">
+            ⚠️ No API key configured. Go to <b>Settings</b> tab to set your API key.
+          </div>
           <div class="text-sm">Send a message to get started</div>
           <div class="text-xs mt-1">Provider: <span x-text="provider"></span> · Model: <span x-text="model"></span></div>
         </div>
@@ -126,7 +129,7 @@
         <button type="submit" :disabled="!input.trim()||sending"
           class="bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed px-6 py-2.5 rounded-xl text-sm font-medium transition shadow-lg shadow-cyan-900/20">
           <span x-show="!sending">Send</span>
-          <span x-show="seding" class="flex items-center gap-1"><span class="animate-spin">⏳</span> Sending</span>
+          <span x-show="sending" class="flex items-center gap-1"><span class="animate-spin">⏳</span> Sending</span>
         </button>
       </form>
     </div>
@@ -341,10 +344,9 @@ function app() {
       const content = this.input.trim();
       this.input = '';
       if (!this.sessionMessages[this.activeSession]) this.sessionMessages[this.activeSession] = [];
-      this.sessionMessages[this.activeSession].push({id:Date.now(),role:'user',content,time:new Date().toLocaleTimeString()});
+      const msgs = this.sessionMessages[this.activeSession];
+      msgs.push({id:Date.now(),role:'user',content,time:new Date().toLocaleTimeString()});
       this.sending = true;
-      this.streaming = true;
-      this.streamContent = '';
 
       try {
         const headers = {'Content-Type':'application/json'};
@@ -352,7 +354,7 @@ function app() {
 
         const body = {
           model: this.model,
-          messages: this.sessionMessages[this.activeSession].map(m=>({role:m.role,content:m.content})),
+          messages: msgs.map(m=>({role:m.role,content:m.content})),
           stream: this.streamEnabled,
           temperature: parseFloat(this.temperature),
           max_tokens: parseInt(this.maxTokens),
@@ -362,32 +364,57 @@ function app() {
 
         const r = await fetch('/v1/chat/completions', {method:'POST',headers,body:JSON.stringify(body)});
 
+        // Handle non-200: read error as JSON
+        if (!r.ok) {
+          let errMsg = `HTTP ${r.status}`;
+          try { const ej = await r.json(); errMsg = ej.error?.message || errMsg; } catch(e){}
+          msgs.push({id:Date.now(),role:'assistant',content:'Error: '+errMsg,time:new Date().toLocaleTimeString()});
+          this.sending = false;
+          return;
+        }
+
         if (this.streamEnabled) {
+          this.streaming = true;
+          this.streamContent = '';
           const reader = r.body.getReader();
           const decoder = new TextDecoder();
           let full = '';
+          let buffer = '';
           while (true) {
             const {done,value} = await reader.read();
             if (done) break;
-            for (const line of decoder.decode(value).split('\n')) {
+            buffer += decoder.decode(value, {stream: true});
+            const lines = buffer.split('\n');
+            buffer = lines.pop(); // keep last partial line
+            for (const line of lines) {
               if (line.startsWith('data: ')) {
                 const data = line.slice(6);
-                if (data==='[DONE]') break;
-                try { full += JSON.parse(data).choices?.[0]?.delta?.content || ''; this.streamContent = full; } catch(e){}
+                if (data==='[DONE]') continue;
+                try { const chunk = JSON.parse(data).choices?.[0]?.delta?.content; if (chunk) { full += chunk; this.streamContent = full; } } catch(e){}
               }
             }
           }
-          this.sessionMessages[this.activeSession].push({id:Date.now(),role:'assistant',content:full,time:new Date().toLocaleTimeString()});
+          // Flush remaining buffer
+          if (buffer.startsWith('data: ') && buffer.slice(6)!=='[DONE]') {
+            try { const chunk = JSON.parse(buffer.slice(6)).choices?.[0]?.delta?.content; if (chunk) { full += chunk; this.streamContent = full; } } catch(e){}
+          }
+          this.streaming = false;
+          if (full) {
+            msgs.push({id:Date.now(),role:'assistant',content:full,time:new Date().toLocaleTimeString()});
+          } else {
+            // SSE produced no content — try parsing body as plain JSON fallback
+            msgs.push({id:Date.now(),role:'assistant',content:'Error: Empty response from server',time:new Date().toLocaleTimeString()});
+          }
         } else {
           const j = await r.json();
           const msg = j.choices?.[0]?.message?.content || 'Error: '+(j.error?.message||'Unknown');
           const tokens = j.usage?.total_tokens || 0;
-          this.sessionMessages[this.activeSession].push({id:Date.now(),role:'assistant',content:msg,time:new Date().toLocaleTimeString(),tokens});
+          msgs.push({id:Date.now(),role:'assistant',content:msg,time:new Date().toLocaleTimeString(),tokens});
         }
       } catch(e) {
-        this.sessionMessages[this.activeSession].push({id:Date.now(),role:'assistant',content:'Error: '+e.message,time:new Date().toLocaleTimeString()});
+        msgs.push({id:Date.now(),role:'assistant',content:'Error: '+e.message,time:new Date().toLocaleTimeString()});
+        this.streaming = false;
       }
-      this.streaming = false;
       this.sending = false;
       this.$nextTick(()=>{const el=document.getElementById('chat-messages');if(el)el.scrollTop=el.scrollHeight;});
     },
