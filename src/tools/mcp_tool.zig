@@ -52,33 +52,11 @@ pub const MCPTool = struct {
             return ToolResult.fail("tool is required");
         };
 
-        // Get optional arguments
-        var args_json: []const u8 = "{}";
-        if (args.get("arguments")) |args_val| {
-            if (args_val == .object) {
-                // Serialize arguments object to JSON string
-                var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-                defer buf.deinit();
-                try std.json.stringify(buf.writer(), args_val.object.?, .{});
-                args_json = try buf.toOwnedSlice(allocator);
-            }
-        }
-
-        // Build response indicating MCP requires async infrastructure
-        var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-        defer buf.deinit();
-        const w = buf.writer();
-
-        try w.print(
-            \\{{"error":"MCP tool calls require async infrastructure. 
-            \\Server '{s}' tool '{s}' called with args: {s}
-            \\Full MCP support requires: async event loop, MCP SDK integration, and configured mcp_servers in config.yaml."}}
-        , .{ server, mcp_tool_name, args_json });
-
-        return ToolResult{
-            .success = false,
-            .output = try buf.toOwnedSlice(allocator),
-        };
+        // Build response
+        const resp = try std.fmt.allocPrint(allocator,
+            "{{\"error\":\"MCP tool calls require async infrastructure. Server '{s}' tool '{s}'. Full MCP support requires async event loop and MCP SDK integration.\"}}",
+            .{ server, mcp_tool_name });
+        return ToolResult{ .success = false, .output = resp };
     }
 
     pub const vtable = root.ToolVTable(@This());
@@ -94,31 +72,8 @@ pub const MCPListServersTool = struct {
         return .{ .ptr = @ptrCast(self), .vtable = &vtable };
     }
 
-    pub fn execute(_: *MCPListServersTool, allocator: std.mem.Allocator, _: JsonObjectMap) !ToolResult {
-        var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-        defer buf.deinit();
-        const w = buf.writer();
-
-        try w.writeAll(
-            \\{"servers":[],"message":"MCP servers must be configured in config.yaml under mcp_servers. 
-            \\Example configuration:
-            \\mcp_servers:
-            \\  filesystem:
-            \\    command: npx
-            \\    args: [-y, @modelcontextprotocol/server-filesystem, /tmp]
-            \\  github:
-            \\    command: npx  
-            \\    args: [-y, @modelcontextprotocol/server-github]
-            \\    env:
-            \\      GITHUB_PERSONAL_ACCESS_TOKEN: your_token
-            \\
-            \\Full MCP support requires async infrastructure."}
-        );
-
-        return ToolResult{
-            .success = true,
-            .output = try buf.toOwnedSlice(allocator),
-        };
+    pub fn execute(_: *MCPListServersTool, _: std.mem.Allocator, _: JsonObjectMap) !ToolResult {
+        return ToolResult.ok("{\"servers\":[],\"message\":\"MCP servers must be configured in config.yaml.\"}");
     }
 
     pub const vtable = root.ToolVTable(@This());

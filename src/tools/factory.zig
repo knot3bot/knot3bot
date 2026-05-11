@@ -56,6 +56,8 @@ pub fn createDefaultRegistry(allocator: std.mem.Allocator, workspace_dir: []cons
     try addExtendedTools(&registry, allocator, workspace_dir);
     { const itt = try allocator.create(root.interrupt.InterruptTool); itt.* = .{}; try registry.register(itt.tool()); }
     { const tdt = try allocator.create(root.todo.TodoTool); tdt.* = root.todo.TodoTool.init(allocator); errdefer tdt.deinit(allocator); try registry.register(tdt.tool()); }
+    { const mcpt = try allocator.create(root.mcp_tool.MCPTool); mcpt.* = .{}; try registry.register(mcpt.tool()); }
+    { const mls = try allocator.create(root.mcp_tool.MCPListServersTool); mls.* = .{}; try registry.register(mls.tool()); }
     return registry;
 }
 
@@ -95,5 +97,7 @@ pub fn createFullRegistry(allocator: std.mem.Allocator, workspace_dir: []const u
 
     { const itt = try allocator.create(root.interrupt.InterruptTool); itt.* = .{}; try registry.register(itt.tool()); }
     { const tdt = try allocator.create(root.todo.TodoTool); tdt.* = root.todo.TodoTool.init(allocator); errdefer tdt.deinit(allocator); try registry.register(tdt.tool()); }
+    { const mcpt = try allocator.create(root.mcp_tool.MCPTool); mcpt.* = .{}; try registry.register(mcpt.tool()); }
+    { const mls = try allocator.create(root.mcp_tool.MCPListServersTool); mls.* = .{}; try registry.register(mls.tool()); }
     return registry;
 }
