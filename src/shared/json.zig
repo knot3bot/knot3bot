@@ -1,11 +1,11 @@
-//! JSON utilities for working with OpenAI-compatible API schemas
+//! Shared JSON utilities — escape, build, parse.
 
 const std = @import("std");
 
-/// Escapes a string for safe inclusion in JSON
+/// Escapes a string for safe inclusion in JSON values.
 pub fn escapeJsonString(allocator: std.mem.Allocator, input: []const u8) ![]const u8 {
-    var result = try std.array_list.AlignedManaged(u8, null).initCapacity(allocator, 0);
-
+    var result: std.ArrayList(u8) = .empty;
+    errdefer result.deinit(allocator);
     for (input) |char| {
         switch (char) {
             '"' => try result.appendSlice(allocator, "\\\""),
@@ -16,72 +16,69 @@ pub fn escapeJsonString(allocator: std.mem.Allocator, input: []const u8) ![]cons
             else => try result.append(allocator, char),
         }
     }
-
-    return try result.toOwnedSlice(allocator);
+    return result.toOwnedSlice(allocator);
 }
 
-/// Builds a JSON error response
+/// Simple chainable JSON builder — eliminates the appendSlice+allocPrint pattern.
+pub const JsonBuilder = struct {
+    allocator: std.mem.Allocator,
+    buf: std.ArrayList(u8),
+    need_comma: bool = false,
+
+    pub fn init(allocator: std.mem.Allocator) !JsonBuilder {
+        return .{ .allocator = allocator, .buf = try std.ArrayList(u8).initCapacity(allocator, 256) };
+    }
+
+    pub fn deinit(self: *JsonBuilder) void { self.buf.deinit(self.allocator); }
+
+    pub fn begin(self: *JsonBuilder) !void {
+        try self.buf.appendSlice(self.allocator, "{");
+        self.need_comma = false;
+    }
+
+    pub fn field(self: *JsonBuilder, key: []const u8, value: []const u8) !void {
+        try self.comma();
+        try self.buf.appendSlice(self.allocator, "\"");
+        try self.buf.appendSlice(self.allocator, key);
+        try self.buf.appendSlice(self.allocator, "\":\"");
+        try self.buf.appendSlice(self.allocator, value);
+        try self.buf.appendSlice(self.allocator, "\"");
+    }
+
+    pub fn fieldRaw(self: *JsonBuilder, key: []const u8, value: []const u8) !void {
+        try self.comma();
+        try self.buf.appendSlice(self.allocator, "\"");
+        try self.buf.appendSlice(self.allocator, key);
+        try self.buf.appendSlice(self.allocator, "\":");
+        try self.buf.appendSlice(self.allocator, value);
+    }
+
+    pub fn fieldFmt(self: *JsonBuilder, key: []const u8, comptime fmt: []const u8, args: anytype) !void {
+        try self.comma();
+        try self.buf.appendSlice(self.allocator, "\"");
+        try self.buf.appendSlice(self.allocator, key);
+        try self.buf.appendSlice(self.allocator, "\":");
+        const val = try std.fmt.allocPrint(self.allocator, fmt, args);
+        defer self.allocator.free(val);
+        try self.buf.appendSlice(self.allocator, val);
+    }
+
+    fn comma(self: *JsonBuilder) !void {
+        if (self.need_comma) try self.buf.appendSlice(self.allocator, ",");
+        self.need_comma = true;
+    }
+
+    pub fn finish(self: *JsonBuilder) ![]const u8 {
+        try self.buf.appendSlice(self.allocator, "}");
+        return self.buf.toOwnedSlice(self.allocator);
+    }
+};
+
+/// Simple JSON success response.
+pub fn jsonOk(allocator: std.mem.Allocator, message: []const u8) ![]const u8 {
+    return std.fmt.allocPrint(allocator, "{{\"success\":true,\"message\":\"{s}\"}}", .{message});
+}
+
 pub fn jsonError(allocator: std.mem.Allocator, message: []const u8) ![]const u8 {
-    const escaped = try escapeJsonString(allocator, message);
-    defer allocator.free(escaped);
-
-    return std.fmt.allocPrint(allocator, "{{\"error\":{{\"message\":\"{s}\"}}}}", .{escaped});
-}
-
-/// Builds a JSON success response with a message
-pub fn jsonSuccess(allocator: std.mem.Allocator, message: []const u8) ![]const u8 {
-    const escaped = try escapeJsonString(allocator, message);
-    defer allocator.free(escaped);
-
-    return std.fmt.allocPrint(allocator, "{{\"status\":\"ok\",\"message\":\"{s}\"}}", .{escaped});
-}
-
-/// Extracts a string value from a JSON object, returning null if not found or not a string
-pub fn getJsonString(obj: *const std.json.ObjectMap, key: []const u8) ?[]const u8 {
-    const val = obj.get(key) orelse return null;
-    return switch (val) {
-        .string => |s| s,
-        else => null,
-    };
-}
-
-/// Extracts an optional string value from a JSON object
-pub fn getOptionalString(obj: *const std.json.ObjectMap, key: []const u8) ?[]const u8 {
-    return getJsonString(obj, key);
-}
-
-/// Extracts a boolean value from a JSON object, returning null if not found or not a bool
-pub fn getJsonBool(obj: *const std.json.ObjectMap, key: []const u8) ?bool {
-    const val = obj.get(key) orelse return null;
-    return switch (val) {
-        .bool => |b| b,
-        else => null,
-    };
-}
-
-/// Extracts an integer value from a JSON object, returning null if not found or not an integer
-pub fn getJsonInt(obj: *const std.json.ObjectMap, key: []const u8) ?i64 {
-    const val = obj.get(key) orelse return null;
-    return switch (val) {
-        .integer => |i| i,
-        else => null,
-    };
-}
-
-/// Extracts a float value from a JSON object, returning null if not found or not a number
-pub fn getJsonFloat(obj: *const std.json.ObjectMap, key: []const u8) ?f64 {
-    const val = obj.get(key) orelse return null;
-    return switch (val) {
-        .float => |f| f,
-        .integer => |i| @as(f64, @floatFromInt(i)),
-        else => null,
-    };
-}
-
-/// Parses a JSON value and returns an ObjectMap if it's an object, otherwise null
-pub fn getJsonObject(val: std.json.Value) ?std.json.ObjectMap {
-    return switch (val) {
-        .object => |obj| obj,
-        else => null,
-    };
+    return std.fmt.allocPrint(allocator, "{{\"error\":{{\"message\":\"{s}\"}}}}", .{message});
 }
