@@ -175,6 +175,7 @@ pub fn build(b: *std.Build) void {
         "src/validation.zig",
         "src/agent/agent_unit_test.zig",
         "src/tools/shell_test.zig",
+        "src/architecture_test.zig",
         "src/cli.zig",
     }) |test_file| {
         const test_cmd = b.addSystemCommand(&.{ zig_exe, "test", test_file });
