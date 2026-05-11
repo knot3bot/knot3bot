@@ -820,7 +820,8 @@ pub const LLMClient = struct {
             },
             else => return error.CurlFailed,
         }
-        return try self.extractContent(result.stdout);
+        // Return raw body so agent can parse tool_calls from full response
+        return try self.allocator.dupe(u8, result.stdout);
     }
 };
 

@@ -1085,6 +1085,7 @@ pub const Agent = struct {
 };
 
 pub fn createDefaultSystemPrompt(allocator: std.mem.Allocator, registry: *const ToolRegistry) ![]const u8 {
+    _ = registry;
     var list: std.ArrayList(u8) = .empty;
     defer list.deinit(allocator);
     var allocating = std.Io.Writer.Allocating.fromArrayList(allocator, &list);
@@ -1093,17 +1094,13 @@ pub fn createDefaultSystemPrompt(allocator: std.mem.Allocator, registry: *const 
         \\You are knot3bot, an intelligent AI assistant built with Zig.
         \\
         \\Guidelines:
-        \\- Use tools when you need to perform actions or get information
+        \\- Use the available functions to perform actions or get real-time information
         \\- Be concise and helpful in your responses
-        \\- When using tools, wait for results before responding
-        \\- If a tool fails, try an alternative approach or explain the issue
+        \\- When using functions, wait for results before responding
+        \\- If a function fails, try an alternative approach or explain the issue
+        \\- Always respond in the user's language
         \\
     );
-
-    try allocating.writer.writeAll("\nAvailable tools:\n");
-    for (registry.list()) |entry| {
-        try allocating.writer.print("  - {s}: {s}\n", .{ entry.spec.name, entry.spec.description });
-    }
 
     list = allocating.toArrayList();
     return try list.toOwnedSlice(allocator);
@@ -1111,6 +1108,7 @@ pub fn createDefaultSystemPrompt(allocator: std.mem.Allocator, registry: *const 
 
 /// Create an enhanced system prompt with ReAct reasoning
 pub fn createReActSystemPrompt(allocator: std.mem.Allocator, registry: *const ToolRegistry) ![]const u8 {
+    _ = registry;
     var list: std.ArrayList(u8) = .empty;
     defer list.deinit(allocator);
     var allocating = std.Io.Writer.Allocating.fromArrayList(allocator, &list);
@@ -1120,23 +1118,18 @@ pub fn createReActSystemPrompt(allocator: std.mem.Allocator, registry: *const To
         \\
         \\Your reasoning process:
         \\1. THOUGHT: Analyze the request and decide what to do
-        \\2. ACTION: Select and call a tool if needed (format: tool_name({"arg": "value"}))
-        \\3. OBSERVATION: Review the tool's result
+        \\2. ACTION: Call a function when needed
+        \\3. OBSERVATION: Review the function result
         \\4. Repeat until you can give a final answer
         \\5. Final Answer: [your response]
         \\
         \\Guidelines:
-        \\- Always show your reasoning process
-        \\- Use tools proactively when they can help
-        \\- Handle tool errors gracefully and try alternatives
+        \\- Call functions proactively when they can help
+        \\- Handle function errors gracefully and try alternatives
         \\- Be concise but thorough
+        \\- Always respond in the user's language
         \\
     );
-
-    try allocating.writer.writeAll("\nAvailable tools:\n");
-    for (registry.list()) |entry| {
-        try allocating.writer.print("  - {s}: {s}\n", .{ entry.spec.name, entry.spec.description });
-    }
 
     list = allocating.toArrayList();
     return try list.toOwnedSlice(allocator);
