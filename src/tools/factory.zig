@@ -117,6 +117,7 @@ pub fn createDefaultRegistry(allocator: std.mem.Allocator, workspace_dir: []cons
     { const vt = try allocator.create(root.vision_tools.VisionTool); vt.* = .{}; try registry.register(vt.tool()); }
     { const sct = try allocator.create(root.vision_tools.ScreenCaptureTool); sct.* = .{}; try registry.register(sct.tool()); }
     { const clt = try allocator.create(root.clarify_tool.ClarifyTool); clt.* = .{}; try registry.register(clt.tool()); }
+    { const ept = try allocator.create(root.env_passthrough.EnvPassthroughTool); ept.* = .{}; try registry.register(ept.tool()); }
     return registry;
 }
 
@@ -363,5 +364,6 @@ pub fn createFullRegistry(allocator: std.mem.Allocator, workspace_dir: []const u
     { const vt = try allocator.create(root.vision_tools.VisionTool); vt.* = .{}; try registry.register(vt.tool()); }
     { const sct = try allocator.create(root.vision_tools.ScreenCaptureTool); sct.* = .{}; try registry.register(sct.tool()); }
     { const clt = try allocator.create(root.clarify_tool.ClarifyTool); clt.* = .{}; try registry.register(clt.tool()); }
+    { const ept = try allocator.create(root.env_passthrough.EnvPassthroughTool); ept.* = .{}; try registry.register(ept.tool()); }
     return registry;
 }

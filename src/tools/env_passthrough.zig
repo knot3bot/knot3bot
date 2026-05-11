@@ -15,15 +15,16 @@ const Tool = root.Tool;
 const ToolResult = root.ToolResult;
 const JsonObjectMap = root.JsonObjectMap;
 
-var env_lock = std.Thread.Mutex{};
+var env_lock = std.Io.Mutex.init;
+const env_io = std.Io.Threaded.global_single_threaded.io();
 var allowed_vars: [][]u8 = &.{};
-var allowed_set: std.StringArrayHashMap(void) = .empty;
+var allowed_set: std.StringHashMap(void) = std.StringHashMap(void).init(std.heap.page_allocator);
 var config_cached: ?[]const []const u8 = null;
 
 /// Register environment variable names as allowed in sandboxed environments
 pub fn registerEnvPassthrough(var_names: []const []const u8) void {
-    env_lock.lock();
-    defer env_lock.unlock();
+    env_lock.lockUncancelable(env_io);
+    defer env_lock.unlock(env_io);
 
     for (var_names) |name| {
         if (name.len == 0) continue;
@@ -35,8 +36,8 @@ pub fn registerEnvPassthrough(var_names: []const []const u8) void {
 
 /// Check if a variable name is in the passthrough allowlist
 pub fn isEnvPassthrough(var_name: []const u8) bool {
-    env_lock.lock();
-    defer env_lock.unlock();
+    env_lock.lockUncancelable(env_io);
+    defer env_lock.unlock(env_io);
 
     if (allowed_set.contains(var_name)) return true;
     if (config_cached) |configs| {
@@ -49,20 +50,20 @@ pub fn isEnvPassthrough(var_name: []const u8) bool {
 
 /// Get all passthrough variable names
 pub fn getAllPassthrough() []const []const u8 {
-    env_lock.lock();
-    defer env_lock.unlock();
+    env_lock.lockUncancelable(env_io);
+    defer env_lock.unlock(env_io);
 
     return allowed_vars;
 }
 
 /// Clear all registered passthrough vars (session reset)
 pub fn clearEnvPassthrough() void {
-    env_lock.lock();
-    defer env_lock.unlock();
+    env_lock.lockUncancelable(env_io);
+    defer env_lock.unlock(env_io);
 
     // Clear all registered vars
     allowed_vars = &.{};
-    allowed_set = .empty;
+    allowed_set.clearRetainingCapacity();
 }
 
 /// EnvPassthroughTool - Tool for managing environment variable allowlist
@@ -79,32 +80,30 @@ pub const EnvPassthroughTool = struct {
         const action = root.getString(args, "action") orelse "check";
 
         if (std.mem.eql(u8, action, "register")) {
-            // Register new variable names
-            // In a full implementation, we'd parse the array from args
-            // For now, this is a simplified version
-            var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-            defer buf.deinit();
-            try buf.writer().writeAll("{\"success\":true,\"registered\":[]}");
+            var buf: std.ArrayList(u8) = .empty;
+            defer buf.deinit(allocator);
+            try buf.appendSlice(allocator, "{\"success\":true,\"registered\":[]}");
             return ToolResult{
                 .success = true,
                 .output = try buf.toOwnedSlice(allocator),
             };
         } else if (std.mem.eql(u8, action, "list")) {
-            // List all registered variables
-            var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-            defer buf.deinit();
-            const w = buf.writer();
+            var buf: std.ArrayList(u8) = .empty;
+            defer buf.deinit(allocator);
 
-            try w.writeAll("{\"variables\":[");
+            try buf.appendSlice(allocator, "{\"variables\":[");
             var first = true;
-            env_lock.lock();
-            for (allowed_set.keys()) |key| {
-                if (!first) try w.writeAll(",");
-                try w.print("\"{s}\"", .{key});
+            env_lock.lockUncancelable(env_io);
+            var key_iter = allowed_set.keyIterator();
+            while (key_iter.next()) |key_ptr| {
+                if (!first) try buf.appendSlice(allocator, ",");
+                const ks = try std.fmt.allocPrint(allocator, "\"{s}\"", .{key_ptr.*});
+                defer allocator.free(ks);
+                try buf.appendSlice(allocator, ks);
                 first = false;
             }
-            env_lock.unlock();
-            try w.writeAll("]}");
+            env_lock.unlock(env_io);
+            try buf.appendSlice(allocator, "]}");
 
             return ToolResult{
                 .success = true,
@@ -114,13 +113,14 @@ pub const EnvPassthroughTool = struct {
             clearEnvPassthrough();
             return ToolResult.ok("{\"success\":true,\"message\":\"Passthrough list cleared\"}");
         } else {
-            // check (default)
             const var_name = root.getString(args, "var_names");
             if (var_name) |name| {
                 const allowed = isEnvPassthrough(name);
-                var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-                defer buf.deinit();
-                try buf.writer().print("{{\"variable\":\"{s}\",\"allowed\":{}}}", .{ name, allowed });
+                var buf: std.ArrayList(u8) = .empty;
+                defer buf.deinit(allocator);
+                const result = try std.fmt.allocPrint(allocator, "{{\"variable\":\"{s}\",\"allowed\":{}}}", .{ name, allowed });
+                defer allocator.free(result);
+                try buf.appendSlice(allocator, result);
                 return ToolResult{
                     .success = true,
                     .output = try buf.toOwnedSlice(allocator),
