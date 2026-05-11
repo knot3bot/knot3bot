@@ -8,18 +8,11 @@ const ToolResult = root.ToolResult;
 const JsonObjectMap = root.JsonObjectMap;
 
 /// Check if a URL is safe (not pointing to private/internal addresses)
-pub fn isSafeUrl(url: []const u8) bool {
-    // Parse URL to extract hostname
+pub fn isSafeUrl(allocator: std.mem.Allocator, url: []const u8) bool {
     const hostname = extractHostname(url) orelse return false;
-
-    // Check blocked hostnames
-    if (isBlockedHostname(hostname)) return false;
-
-    // Check if hostname is localhost or similar
-    if (isLocalhost(hostname)) return false;
-
-    // Try to resolve and check IP
-    return checkResolvedIp(hostname);
+    if (isBlockedHostname(allocator, hostname)) return false;
+    if (isLocalhost(allocator, hostname)) return false;
+    return checkResolvedIp(allocator, hostname);
 }
 
 /// Extract hostname from URL
@@ -50,9 +43,9 @@ fn extractHostname(url: []const u8) ?[]const u8 {
 }
 
 /// Check if hostname is in the blocked list
-fn isBlockedHostname(hostname: []const u8) bool {
-    const lower = toLower(hostname);
-    defer std.heap.page_allocator.free(lower);
+fn isBlockedHostname(allocator: std.mem.Allocator, hostname: []const u8) bool {
+    const lower = toLower(allocator, hostname);
+    defer allocator.free(lower);
 
     const blocked = &[_][]const u8{
         "metadata.google.internal",
@@ -69,9 +62,9 @@ fn isBlockedHostname(hostname: []const u8) bool {
 }
 
 /// Check if hostname refers to localhost
-fn isLocalhost(hostname: []const u8) bool {
-    const lower = toLower(hostname);
-    defer std.heap.page_allocator.free(lower);
+fn isLocalhost(allocator: std.mem.Allocator, hostname: []const u8) bool {
+    const lower = toLower(allocator, hostname);
+    defer allocator.free(lower);
 
     const localhosts = &[_][]const u8{
         "localhost",
@@ -89,16 +82,10 @@ fn isLocalhost(hostname: []const u8) bool {
 }
 
 /// Check resolved IP against private ranges
-fn checkResolvedIp(hostname: []const u8) bool {
-    // For now, do simple pattern matching on the hostname
-    // A full implementation would use DNS resolution
-
-    // Check if it's an IP address directly
+fn checkResolvedIp(allocator: std.mem.Allocator, hostname: []const u8) bool {
     if (isPrivateIp(hostname)) return false;
-
-    // Check hostname patterns that might resolve to private IPs
-    const lower = toLower(hostname);
-    defer std.heap.page_allocator.free(lower);
+    const lower = toLower(allocator, hostname);
+    defer allocator.free(lower);
 
     // Internal network hostnames
     if (std.mem.indexOf(u8, lower, "internal") != null) return false;
@@ -157,8 +144,8 @@ fn isPrivateIpv4(ip: []const u8) bool {
 }
 
 /// Convert string to lowercase
-fn toLower(s: []const u8) []u8 {
-    var result = std.heap.page_allocator.alloc(u8, s.len) catch return &.{};
+fn toLower(allocator: std.mem.Allocator, s: []const u8) []u8 {
+    var result = allocator.alloc(u8, s.len) catch return &.{};
     for (s, 0..) |c, i| {
         result[i] = std.ascii.toLower(c);
     }
@@ -180,7 +167,7 @@ pub const UrlSafetyTool = struct {
             return ToolResult.fail("url is required");
         };
 
-        const safe = isSafeUrl(url);
+        const safe = isSafeUrl(allocator, url);
 
         // Build JSON response
         var buf: std.ArrayList(u8) = .empty;
