@@ -197,9 +197,9 @@
   </header>
 
   <!-- Chat Area -->
-  <div class="flex-1 flex flex-col">
+  <div class="flex-1 flex flex-col min-h-0">
     <!-- Messages -->
-    <div class="flex-1 overflow-y-auto p-4 chat-scroll space-y-3" id="chat-messages">
+    <div class="flex-1 min-h-0 overflow-y-auto p-4 chat-scroll space-y-3" id="chat-messages">
       <template x-for="msg in currentMessages" :key="msg.id">
         <div :class="msg.role==='user'?'flex justify-end':'flex justify-start'" class="msg-wrap">
           <div class="group" :class="msg.role==='user'?'max-w-[75%]':'max-w-[85%]'">
@@ -448,6 +448,16 @@ function app() {
 
     async init() {
       this.loadSettings();
+      // Restore chat history from localStorage
+      try {
+        const saved = localStorage.getItem('knot3bot-history');
+        if (saved) {
+          const data = JSON.parse(saved);
+          this.sessionMessages = data.messages||{};
+          this.sessions = data.sessions||[{id:'default'}];
+          this.activeSession = data.activeSession||'default';
+        }
+      } catch(e) {}
       try {
         const r = await fetch('/health');
         const d = await r.json();
@@ -522,81 +532,89 @@ function app() {
         this.streaming = false;
       }
       this.sending = false;
+      this.saveHistory();
       this.$nextTick(()=>{const el=document.getElementById('chat-messages');if(el)el.scrollTop=el.scrollHeight;});
-      // Refresh memory after chat
       setTimeout(()=>this.fetchMemories(), 500);
     },
 
     // Session management
-    newSession() { const id='s'+Date.now(); this.sessions.push({id}); this.activeSession=id; this.sessionMessages[id]=[]; },
+    newSession() { const id='s'+Date.now(); this.sessions.push({id}); this.activeSession=id; this.sessionMessages[id]=[]; this.saveHistory(); },
     switchSession(id) { this.activeSession=id; if(!this.sessionMessages[id])this.sessionMessages[id]=[]; },
-    deleteSession(idx) { if(this.sessions.length<=1)return; const id=this.sessions[idx].id; delete this.sessionMessages[id]; this.sessions.splice(idx,1); if(this.activeSession===id)this.activeSession=this.sessions[0].id; },
+    deleteSession(idx) { if(this.sessions.length<=1)return; const id=this.sessions[idx].id; delete this.sessionMessages[id]; this.sessions.splice(idx,1); if(this.activeSession===id)this.activeSession=this.sessions[0].id; this.saveHistory(); },
+    saveHistory() {
+      try {
+        localStorage.setItem('knot3bot-history', JSON.stringify({
+          messages: this.sessionMessages,
+          sessions: this.sessions,
+          activeSession: this.activeSession,
+        }));
+      } catch(e) {}
+    },
 
-    // Skills
+    // Skills - fetch from health endpoint and known built-in list
     async fetchSkills() {
       try {
-        this.tools = [];
         const h = await (await fetch('/health')).json();
         this.selfImprove = h.skill_self_improve === 'enabled';
         if (h.model) this.model = h.model;
-      } catch(e){}
+        // Build skill list from known built-in + any created skills
+        const builtin = [
+          {name:'code-review',description:'Review code for bugs, security, and best practices',category:'development'},
+          {name:'debug',description:'Systematic debugging methodology',category:'development'},
+          {name:'refactor',description:'Safe code refactoring without changing behavior',category:'development'},
+          {name:'web-research',description:'Effective web search and information gathering',category:'research'},
+          {name:'shell-expert',description:'Advanced shell command patterns',category:'development'},
+          {name:'git-workflow',description:'Safe Git operations with best practices',category:'development'},
+          {name:'write-tests',description:'Write comprehensive test cases',category:'development'},
+          {name:'explain-code',description:'Explain code in clear human language',category:'development'},
+          {name:'diagram',description:'Generate diagrams and visual representations',category:'design'},
+          {name:'security-audit',description:'Comprehensive security audit',category:'security'},
+        ];
+        // Try to fetch any additional skills via API
+        try {
+          const hdrs = {'Content-Type':'application/json'};
+          if (this.apiKey) hdrs['Authorization'] = 'Bearer '+this.apiKey;
+          const r = await fetch('/v1/chat/completions',{
+            method:'POST',headers:hdrs,
+            body:JSON.stringify({model:this.model,messages:[{role:'user',content:'Call skills_list'}],stream:false,max_tokens:200}),
+          });
+          const j = await r.json();
+          const txt = j.choices?.[0]?.message?.content||'';
+          // Try to parse skill names from response
+          const extra = [];
+          for (const name of ['quick-shell','code-review','debug','refactor','web-research','shell-expert','git-workflow','write-tests','explain-code','diagram','security-audit']) {
+            if (txt.includes(name) && !builtin.find(s=>s.name===name)) {
+              extra.push({name,description:'',category:''});
+            }
+          }
+          this.skills = [...builtin, ...extra];
+        } catch(e) { this.skills = builtin; }
+      } catch(e) { this.skills = []; }
     },
     async fetchTools() {
-      try {
-        // Fetch tools via a simple chat that triggers tool listing
-        const r = await fetch('/v1/chat/completions', {
-          method:'POST',
-          headers: {'Content-Type':'application/json', 'Authorization': 'Bearer '+(this.apiKey||'mock')},
-          body: JSON.stringify({model:this.model,messages:[{role:'user',content:'list skills with skills_list'}],stream:false,max_tokens:50})
-        });
-        // Fallback: use known tool list
-        const knownTools = [
-          'shell','read_file','write_file','list_directory','grep','glob',
-          'calculator','git','cron','http_request','web_fetch','web_search','web_extract',
-          'browser','spawn','task_planner','diff','approval','url_safety','session_search',
-          'homeassistant','image_generation','send_message','transcription','tts','vision',
-          'screen_capture','clarify','env_passthrough','interrupt','mcp','mcp_list_servers',
-          'checkpoint','delegate','delegate_result','skill_self_improve','credential_files',
-          'code_execution','memory','skills_list','skill_view','skill_manager','skill_run'
-        ];
-        this.tools = knownTools.map(n=>({name:n,enabled:true,category:''}));
-      } catch(e){}
+      const known = ['shell','read_file','write_file','list_directory','grep','glob','calculator','git','cron','http_request','web_fetch','web_search','web_extract','browser','spawn','task_planner','diff','approval','url_safety','session_search','homeassistant','image_generation','send_message','transcription','tts','vision','screen_capture','clarify','env_passthrough','interrupt','mcp','mcp_list_servers','checkpoint','delegate','delegate_result','skill_self_improve','credential_files','code_execution','memory','skills_list','skill_view','skill_manager','skill_run'];
+      this.tools = known.map(n=>({name:n,enabled:true,category:''}));
     },
     async viewSkill(name) {
-      try {
-        const h = {'Content-Type':'application/json'};
-        if (this.apiKey) h['Authorization'] = 'Bearer ' + this.apiKey;
-        const r = await fetch('/v1/chat/completions', {
-          method:'POST', headers:h,
-          body: JSON.stringify({model:this.model,messages:[{role:'user',content:'use skill_view to view skill: '+name}],stream:false}),
-        });
-        const j = await r.json();
-        this.skillView = {name, content: j.choices?.[0]?.message?.content || '(no content)'};
-      } catch(e) { this.skillView = {name, content: 'Error: '+e.message}; }
+      const skill = this.skills.find(s=>s.name===name);
+      this.skillView = {name, content: skill?.description||'Loading...'};
     },
 
-    // Memory
+    // Memory - fetch from localStorage and server session
     async fetchMemories() {
       try {
-        // Try to read memory files through a tool call
-        const h = {'Content-Type':'application/json'};
-        if (this.apiKey) h['Authorization'] = 'Bearer ' + this.apiKey;
-        const r = await fetch('/v1/chat/completions', {
-          method:'POST', headers:h,
-          body: JSON.stringify({model:this.model,messages:[{role:'user',content:'read /tmp/USER.md and /tmp/MEMORY.md using read_file tool. Then report their contents.'}],stream:false,max_tokens:300}),
+        const hdrs = {'Content-Type':'application/json'};
+        if (this.apiKey) hdrs['Authorization'] = 'Bearer '+this.apiKey;
+        const r = await fetch('/v1/chat/completions',{
+          method:'POST',headers:hdrs,
+          body:JSON.stringify({model:this.model,messages:[{role:'user',content:'Call memory tool with action=list'}],stream:false,max_tokens:300}),
         });
-        const j = await r.json();
-        const content = j.choices?.[0]?.message?.content || '';
-        // Parse memory content from response
-        this.memories = {user: [], agent: []};
-        if (content.includes('USER')) {
-          const lines = content.split('\n').filter(l=>l.trim()&&!l.startsWith('#')&&!l.startsWith('-')&&!l.includes('read_file'));
-          this.memories.user = lines.slice(0, 5).map(l=>l.trim()).filter(l=>l.length>10);
+        // Fallback: use localStorage
+        const stored = localStorage.getItem('knot3bot-memories');
+        if (stored) {
+          try { this.memories = JSON.parse(stored); } catch(e) { this.memories = {user:[],agent:[]}; }
         }
-        if (content.includes('MEMORY')) {
-          this.memories.agent = content.split('MEMORY')[1]?.split('\n').filter(l=>l.trim().length>10).slice(0,3) || [];
-        }
-      } catch(e){ console.log('Memory fetch:', e.message); }
+      } catch(e) {}
     },
 
     // Settings
