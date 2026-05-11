@@ -46,3 +46,9 @@ pub const trajectory = @import("agent/trajectory.zig");
 pub const acp_adapter = @import("adapters/acp_adapter.zig");
 pub const ACAdapter = acp_adapter.ACAdapter;
 pub const gateway = @import("gateway/root.zig");
+
+// New module structure (re-exports from original locations)
+pub const llm = @import("llm/root.zig");
+pub const interface = @import("interface/root.zig");
+pub const intelligence = @import("intelligence/root.zig");
+pub const security = @import("security/root.zig");
