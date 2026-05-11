@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const root = @import("root.zig");
+const shared = @import("../shared/context.zig");
 const Tool = root.Tool;
 const ToolResult = root.ToolResult;
 const JsonObjectMap = root.JsonObjectMap;
@@ -31,7 +32,7 @@ pub const CheckpointManagerTool = struct {
         const checkpoint_dir = try std.fmt.allocPrint(allocator, "{s}/.checkpoints", .{self.workspace_dir});
         defer allocator.free(checkpoint_dir);
 
-        std.fs.cwd().makeDir(checkpoint_dir) catch {};
+        shared.cwd().makePath(checkpoint_dir) catch {};
 
         if (std.mem.eql(u8, action, "save")) {
             const cid = checkpoint_id orelse "default";
@@ -40,7 +41,7 @@ pub const CheckpointManagerTool = struct {
             const checkpoint_file = try std.fmt.allocPrint(allocator, "{s}/{s}.json", .{ checkpoint_dir, cid });
             defer allocator.free(checkpoint_file);
 
-            std.fs.cwd().writeFile(.{ .sub_path = checkpoint_file, .data = state_data }) catch {
+            shared.cwd().writeFile(.{ .sub_path = checkpoint_file, .data = state_data }) catch {
                 return ToolResult.fail("Failed to save checkpoint");
             };
 
@@ -61,7 +62,7 @@ pub const CheckpointManagerTool = struct {
             const checkpoint_file = try std.fmt.allocPrint(allocator, "{s}/{s}.json", .{ checkpoint_dir, cid });
             defer allocator.free(checkpoint_file);
 
-            const content = std.fs.cwd().readFileAlloc(allocator, checkpoint_file, 1024 * 1024) catch {
+            const content = shared.cwd().readFileAlloc(allocator, checkpoint_file, 1024 * 1024) catch {
                 return ToolResult.fail("Checkpoint not found");
             };
 
@@ -69,7 +70,7 @@ pub const CheckpointManagerTool = struct {
         }
 
         if (std.mem.eql(u8, action, "list")) {
-            var dir = std.fs.cwd().openDir(checkpoint_dir, .{}) catch {
+            var dir = shared.cwd().openDir(checkpoint_dir, .{}) catch {
                 return ToolResult.ok("{\"success\":true,\"checkpoints\":[]}");
             };
             defer dir.close();
@@ -101,7 +102,7 @@ pub const CheckpointManagerTool = struct {
             const checkpoint_file = try std.fmt.allocPrint(allocator, "{s}/{s}.json", .{ checkpoint_dir, cid });
             defer allocator.free(checkpoint_file);
 
-            std.fs.cwd().deleteFile(checkpoint_file) catch {
+            shared.cwd().deleteFile(checkpoint_file) catch {
                 return ToolResult.fail("Checkpoint not found");
             };
 

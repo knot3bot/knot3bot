@@ -3,6 +3,7 @@
 
 const std = @import("std");
 const root = @import("root.zig");
+const shared = @import("../shared/context.zig");
 const Tool = root.Tool;
 const ToolResult = root.ToolResult;
 const JsonObjectMap = root.JsonObjectMap;
@@ -30,7 +31,7 @@ pub const DelegateTool = struct {
         const timeout_secs: u32 = @intCast(getInt(args, "timeout") orelse 60);
 
         const delegate_dir = try std.fmt.allocPrint(allocator, "{s}/.delegate", .{self.workspace_dir});
-        std.fs.cwd().makeDir(delegate_dir) catch {};
+        shared.cwd().makeDir(delegate_dir) catch {};
         allocator.free(delegate_dir);
 
         const task_file = try std.fmt.allocPrint(allocator, "{s}/.delegate/{s}.json", .{ self.workspace_dir, task_id });
@@ -52,7 +53,7 @@ pub const DelegateTool = struct {
         const task_record = try json_buf.toOwnedSlice(allocator);
         defer allocator.free(task_record);
 
-        std.fs.cwd().writeFile(.{ .sub_path = task_file, .data = task_record }) catch {
+        shared.cwd().writeFile(.{ .sub_path = task_file, .data = task_record }) catch {
             return ToolResult.fail("Failed to create delegation record");
         };
 
@@ -91,7 +92,7 @@ pub const DelegateResultTool = struct {
         const task_file = try std.fmt.allocPrint(allocator, "{s}/.delegate/{s}.json", .{ self.workspace_dir, task_id });
         defer allocator.free(task_file);
 
-        const content = std.fs.cwd().readFileAlloc(allocator, task_file, 1024 * 1024) catch {
+        const content = shared.cwd().readFileAlloc(allocator, task_file, 1024 * 1024) catch {
             return ToolResult.fail("Task not found or not yet completed");
         };
 
