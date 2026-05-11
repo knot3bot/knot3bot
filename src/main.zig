@@ -51,6 +51,7 @@ fn setupSignalHandlers() !void {
 const skill_self_improve = @import("agent/skill_self_improve.zig");
 const skills = @import("agent/skills.zig");
 const credential_pool = @import("agent/credential_pool.zig");
+const gateway_mod = @import("gateway/root.zig");
 const SkillSelfImprove = skill_self_improve.SkillSelfImprove;
 
 const CliConfig = struct {
@@ -660,6 +661,10 @@ pub fn main(init: std.process.Init) !u8 {
         if (config.db_path) |p| p else "in-memory",
         registry.count(),
     });
+
+    // Initialize gateway for multi-platform routing
+    var gw = gateway_mod.Gateway.init(allocator);
+    defer gw.deinit();
 
     // Validate API key format
     if (config.api_key) |key| {

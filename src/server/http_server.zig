@@ -98,7 +98,7 @@ pub const ServerMetrics = struct {
     rate_limit_exceeded: u64 = 0,
     circuit_breaker_rejections: u64 = 0,
     /// Latency histogram buckets (ms): 10, 50, 100, 250, 500, 1000, 5000, +Inf
-    latency_buckets: [8]u64 = .{0} ** 8,
+    latency_buckets: [8]u64 = .{0}**8,
     /// Cumulative token usage across all requests
     prompt_tokens_total: u64 = 0,
     completion_tokens_total: u64 = 0,

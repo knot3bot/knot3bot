@@ -1,7 +1,5 @@
 const std = @import("std");
 
-const c = @cImport(@cInclude("sqlite3.h"));
-
 // Re-export SqliteMemorySystem for external use
 pub const SqliteMemorySystem = @import("memory/sqlite.zig").SqliteMemorySystem;
 pub const SqlError = @import("memory/sqlite.zig").SqlError;
