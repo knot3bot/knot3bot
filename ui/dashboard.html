@@ -15,6 +15,28 @@
 .panel-card{transition:all .15s}
 .panel-card:hover{border-color:#6b7280}
 .tab-btn.active{color:#22d3ee;border-color:#22d3ee}
+
+/* Markdown rendered styles */
+.md-body { line-height: 1.65; word-break: break-word; }
+.md-body h1 { font-size: 1.25rem; font-weight: 700; color: #e2e8f0; margin: 0.75rem 0 0.4rem; border-bottom: 1px solid #374151; padding-bottom: 0.25rem; }
+.md-body h2 { font-size: 1.1rem; font-weight: 700; color: #e2e8f0; margin: 0.6rem 0 0.35rem; }
+.md-body h3 { font-size: 1rem; font-weight: 600; color: #cbd5e1; margin: 0.5rem 0 0.3rem; }
+.md-body p { margin: 0.35rem 0; }
+.md-body ul, .md-body ol { margin: 0.35rem 0; padding-left: 1.25rem; }
+.md-body li { margin: 0.15rem 0; }
+.md-body li::marker { color: #6b7280; }
+.md-body code { background: #1f2937; color: #f472b6; padding: 0.1rem 0.3rem; border-radius: 0.25rem; font-size: 0.85em; font-family: ui-monospace, monospace; }
+.md-body pre { background: #111827; border: 1px solid #374151; border-radius: 0.5rem; padding: 0.75rem 1rem; overflow-x: auto; margin: 0.5rem 0; }
+.md-body pre code { background: none; color: #e2e8f0; padding: 0; font-size: 0.8rem; line-height: 1.5; }
+.md-body blockquote { border-left: 3px solid #06b6d4; padding-left: 0.75rem; color: #9ca3af; margin: 0.5rem 0; font-style: italic; }
+.md-body table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; font-size: 0.85rem; }
+.md-body th { background: #1f2937; color: #e2e8f0; font-weight: 600; padding: 0.4rem 0.6rem; text-align: left; border: 1px solid #374151; }
+.md-body td { padding: 0.35rem 0.6rem; border: 1px solid #374151; color: #d1d5db; }
+.md-body tr:nth-child(even) td { background: #11182730; }
+.md-body a { color: #22d3ee; text-decoration: underline; }
+.md-body strong { color: #f3f4f6; font-weight: 700; }
+.md-body hr { border: none; border-top: 1px solid #374151; margin: 0.5rem 0; }
+.md-body em { font-style: italic; color: #d1d5db; }
 </style>
 </head>
 <body class="h-full bg-gray-950 text-gray-100" x-data="app()" x-cloak>
@@ -175,7 +197,7 @@
         <div :class="msg.role==='user'?'flex justify-end':'flex justify-start'">
           <div :class="msg.role==='user'?'bg-cyan-700 text-white rounded-2xl rounded-br-md':'bg-gray-800 text-gray-200 rounded-2xl rounded-bl-md'"
             class="px-4 py-2.5 max-w-[75%] text-sm leading-relaxed">
-            <div class="whitespace-pre-wrap" x-text="msg.content"></div>
+            <div class="md-body" x-html="msg.role==='user' ? escapeHtml(msg.content) : renderMarkdown(msg.content)"></div>
             <div class="text-xs opacity-50 mt-1 flex items-center gap-2">
               <span x-text="msg.time"></span>
               <span x-show="msg.tokens" class="text-cyan-300" x-text="'tokens:'+msg.tokens"></span>
@@ -185,7 +207,7 @@
       </template>
       <div x-show="streaming" class="flex justify-start">
         <div class="bg-gray-800 text-gray-200 rounded-2xl rounded-bl-md max-w-[75%] px-4 py-2.5 text-sm">
-          <span class="whitespace-pre-wrap" x-text="streamContent"></span><span class="stream-cursor text-cyan-400"></span>
+          <span class="md-body" x-html="renderMarkdown(streamContent)"></span><span class="stream-cursor text-cyan-400"></span>
         </div>
       </div>
       <div x-show="currentMessages.length===0 && !streaming" class="flex items-center justify-center h-full">
@@ -264,6 +286,86 @@
 </div>
 
 <script>
+// Markdown to HTML renderer (lightweight, no dependencies)
+function renderMarkdown(text) {
+  if (!text) return '';
+  let html = text;
+
+  // Escape HTML first (except what we'll generate)
+  html = html.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  // Code blocks (```...```)
+  html = html.replace(/```(\w*)\n([\s\S]*?)```/g, function(_,lang,code) {
+    return '<pre><code>' + code.replace(/\n$/, '') + '</code></pre>';
+  });
+
+  // Inline code (`...`)
+  html = html.replace(/`([^`]+)`/g, '<code>$1</code>');
+
+  // Bold (**...** or __...__)
+  html = html.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+  html = html.replace(/__([^_]+)__/g, '<strong>$1</strong>');
+
+  // Italic (*...* or _..._) - but not inside words
+  html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
+  html = html.replace(/(?<![a-zA-Z0-9])_([^_]+)_(?![a-zA-Z0-9])/g, '<em>$1</em>');
+
+  // Images
+  html = html.replace(/!\[([^\]]*)\]\(([^)]+)\)/g, '<img src="$2" alt="$1" class="max-w-full rounded-lg my-2">');
+
+  // Links
+  html = html.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank">$1</a>');
+
+  // Headers
+  html = html.replace(/^#### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^### (.+)$/gm, '<h3>$1</h3>');
+  html = html.replace(/^## (.+)$/gm, '<h2>$1</h2>');
+  html = html.replace(/^# (.+)$/gm, '<h1>$1</h1>');
+
+  // Horizontal rules
+  html = html.replace(/^---$/gm, '<hr>');
+
+  // Blockquotes
+  html = html.replace(/^&gt; (.+)$/gm, '<blockquote>$1</blockquote>');
+
+  // Tables
+  html = html.replace(/^\|(.+)\|$/gm, function(line) {
+    const cells = line.split('|').filter(c => c.trim()).map(c => c.trim());
+    if (cells.every(c => /^[-:]+$/.test(c))) return '<!--sep-->'; // separator row
+    const isHeader = line.includes('---');
+    const tag = isHeader ? 'th' : 'td';
+    return '<tr>' + cells.map(c => '<'+tag+'>' + c + '</'+tag+'>').join('') + '</tr>';
+  });
+  // Wrap table rows
+  html = html.replace(/(<tr>.*?<\/tr>\s*)+/gs, function(m) {
+    if (m.includes('<!--sep-->')) {
+      const parts = m.split('<!--sep-->');
+      return '<table><thead>' + (parts[0]||'') + '</thead><tbody>' + (parts[1]||'') + '</tbody></table>';
+    }
+    return '<table>' + m + '</table>';
+  });
+
+  // Ordered lists
+  html = html.replace(/^(\d+)\. (.+)$/gm, '<li>$2</li>');
+  // Unordered lists
+  html = html.replace(/^[-*] (.+)$/gm, '<li>$1</li>');
+  // Wrap adjacent <li> in <ol>/<ul>
+  html = html.replace(/((?:<li>.*?<\/li>\s*)+)/gs, function(m) {
+    // Check if any item starts with a number pattern (was ordered)
+    return '<ul>' + m + '</ul>';
+  });
+
+  // Line breaks
+  html = html.replace(/\n\n/g, '</p><p>');
+  html = html.replace(/\n/g, '<br>');
+
+  return '<p>' + html + '</p>';
+}
+
+function escapeHtml(text) {
+  return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+}
+
 function app() {
   return {
     // State
