@@ -114,6 +114,9 @@ pub fn createDefaultRegistry(allocator: std.mem.Allocator, workspace_dir: []cons
     { const smt = try allocator.create(root.send_message_tool.SendMessageTool); smt.* = .{}; try registry.register(smt.tool()); }
     { const trt = try allocator.create(root.transcription_tools.TranscriptionTool); trt.* = .{}; try registry.register(trt.tool()); }
     { const tts = try allocator.create(root.tts_tool.TtsTool); tts.* = .{}; try registry.register(tts.tool()); }
+    { const vt = try allocator.create(root.vision_tools.VisionTool); vt.* = .{}; try registry.register(vt.tool()); }
+    { const sct = try allocator.create(root.vision_tools.ScreenCaptureTool); sct.* = .{}; try registry.register(sct.tool()); }
+    { const clt = try allocator.create(root.clarify_tool.ClarifyTool); clt.* = .{}; try registry.register(clt.tool()); }
     return registry;
 }
 
@@ -357,5 +360,8 @@ pub fn createFullRegistry(allocator: std.mem.Allocator, workspace_dir: []const u
     { const smt = try allocator.create(root.send_message_tool.SendMessageTool); smt.* = .{}; try registry.register(smt.tool()); }
     { const trt = try allocator.create(root.transcription_tools.TranscriptionTool); trt.* = .{}; try registry.register(trt.tool()); }
     { const tts = try allocator.create(root.tts_tool.TtsTool); tts.* = .{}; try registry.register(tts.tool()); }
+    { const vt = try allocator.create(root.vision_tools.VisionTool); vt.* = .{}; try registry.register(vt.tool()); }
+    { const sct = try allocator.create(root.vision_tools.ScreenCaptureTool); sct.* = .{}; try registry.register(sct.tool()); }
+    { const clt = try allocator.create(root.clarify_tool.ClarifyTool); clt.* = .{}; try registry.register(clt.tool()); }
     return registry;
 }

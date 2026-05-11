@@ -36,15 +36,13 @@ pub const VisionTool = struct {
         // 2. Encode to base64
         // 3. Call vision-capable LLM
         // For now, return placeholder
-        var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-        defer buf.deinit();
-        const w = buf.writer();
+        var buf: std.ArrayList(u8) = .empty;
+        defer buf.deinit(allocator);
 
-        try w.writeAll("{\"success\":true,\"analysis\":\"[Vision analysis would be here]");
-        try w.writeAll(" in a full implementation with a vision-capable LLM.");
-        try w.writeAll(" This requires an API call to a multimodal model.");
-        try w.writeAll("\",\"prompt\":\"");
-        try w.print("\"{s}\"}}", .{prompt});
+        try buf.appendSlice(allocator, "{\"success\":true,\"analysis\":\"[Vision analysis requires a multimodal LLM API]");
+        try buf.appendSlice(allocator, "\",\"prompt\":\"");
+        try buf.appendSlice(allocator, prompt);
+        try buf.appendSlice(allocator, "\"}}");
 
         return ToolResult{
             .success = true,
@@ -58,8 +56,8 @@ pub const VisionTool = struct {
 /// ScreenCaptureTool - Capture and analyze screen content
 pub const ScreenCaptureTool = struct {
     pub const tool_name = "screen_capture";
-    pub const tool_description = "Capture the screen or a specific window and analyze its contents using vision. Useful for checking UI state, verifying render output, or monitoring changes.";
-    pub const tool_params = "{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\",\"description\":\"Question or instruction about the screen capture\"},\"region\":{\"type\":\"string\",\"description\":\"Screen region to capture (e.g., '1920x1080+0+0' or 'full')\"}},\"required\":[\"prompt\"]}";
+    pub const tool_description = "Capture the screen or a specific window and analyze its contents using vision.";
+    pub const tool_params = "{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\",\"description\":\"Question or instruction about the screen capture\"},\"region\":{\"type\":\"string\",\"description\":\"Screen region to capture\"}},\"required\":[\"prompt\"]}";
 
     pub fn tool(self: *ScreenCaptureTool) Tool {
         return .{ .ptr = @ptrCast(self), .vtable = &vtable };
@@ -70,14 +68,13 @@ pub const ScreenCaptureTool = struct {
             return ToolResult.fail("prompt is required for screen capture analysis");
         };
 
-        var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-        defer buf.deinit();
-        const w = buf.writer();
+        var buf: std.ArrayList(u8) = .empty;
+        defer buf.deinit(allocator);
 
-        try w.writeAll("{\"success\":true,\"analysis\":\"[Screen capture analysis would be here]");
-        try w.writeAll(" This requires platform-specific screen capture APIs");
-        try w.writeAll(" and a vision-capable LLM.\",\"prompt\":\"");
-        try w.print("\"{s}\"}}", .{prompt});
+        try buf.appendSlice(allocator, "{\"success\":true,\"analysis\":\"[Screen capture requires platform API]");
+        try buf.appendSlice(allocator, "\",\"prompt\":\"");
+        try buf.appendSlice(allocator, prompt);
+        try buf.appendSlice(allocator, "\"}}");
 
         return ToolResult{
             .success = true,

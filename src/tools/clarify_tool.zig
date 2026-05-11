@@ -40,45 +40,46 @@ pub const ClarifyTool = struct {
                 // Limit to MAX_CHOICES
                 const count = @min(arr.items.len, MAX_CHOICES);
                 if (count > 0) {
-                    var choices = std.array_list.AlignedManaged([]const u8, null).init(allocator);
-                    errdefer choices.deinit();
+                    var choices: std.ArrayList([]const u8) = .empty;
+                    defer choices.deinit(allocator);
                     for (arr.items[0..count]) |item| {
                         if (item == .string) {
                             const trimmed = std.mem.trim(u8, item.string, " \t\n");
                             if (trimmed.len > 0) {
-                                try choices.append(trimmed);
+                                choices.append(allocator, trimmed) catch continue;
                             }
                         }
                     }
                     if (choices.items.len > 0) {
-                        choices_opt = try choices.toOwnedSlice();
+                        choices_opt = choices.toOwnedSlice(allocator) catch null;
                     }
                 }
             }
         }
 
         // Build response
-        var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-        defer buf.deinit();
-        const w = buf.writer();
+        var buf: std.ArrayList(u8) = .empty;
+        defer buf.deinit(allocator);
 
-        try w.writeAll("{\"question\":\"");
-        try w.writeAll(question);
-        try w.writeAll("\",\"choices_offered\":");
+        try buf.appendSlice(allocator, "{\"question\":\"");
+        try buf.appendSlice(allocator, question);
+        try buf.appendSlice(allocator, "\",\"choices_offered\":");
 
         if (choices_opt) |choices| {
-            try w.writeAll("[");
+            try buf.appendSlice(allocator, "[");
             for (choices, 0..) |choice, i| {
-                if (i > 0) try w.writeAll(",");
-                try w.print("\"{s}\"", .{choice});
+                if (i > 0) try buf.appendSlice(allocator, ",");
+                const c = try std.fmt.allocPrint(allocator, "\"{s}\"", .{choice});
+                defer allocator.free(c);
+                try buf.appendSlice(allocator, c);
             }
-            try w.writeAll("]");
+            try buf.appendSlice(allocator, "]");
             allocator.free(choices);
         } else {
-            try w.writeAll("null");
+            try buf.appendSlice(allocator, "null");
         }
 
-        try w.writeAll(",\"message\":\"Clarify tool requires platform integration. In CLI mode, use terminal for user interaction.\"}");
+        try buf.appendSlice(allocator, ",\"message\":\"Clarify tool requires platform interaction.\"}");
 
         return ToolResult{
             .success = true,
