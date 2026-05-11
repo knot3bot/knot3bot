@@ -101,29 +101,32 @@ pub const ApprovalTool = struct {
         const result = checkDangerousCommand(command);
 
         // Build JSON response manually
-        var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-        errdefer buf.deinit();
-        const w = buf.writer();
+        var buf: std.ArrayList(u8) = .empty;
+        errdefer buf.deinit(allocator);
 
-        try w.writeAll("{\"approved\":");
+        try buf.appendSlice(allocator, "{\"approved\":");
         if (result.approved) {
-            try w.writeAll("true");
+            try buf.appendSlice(allocator, "true");
         } else {
-            try w.writeAll("false");
+            try buf.appendSlice(allocator, "false");
         }
-        try w.writeAll(",\"pattern_key\":");
+        try buf.appendSlice(allocator, ",\"pattern_key\":");
         if (result.pattern_key) |key| {
-            try w.print("\"{s}\"", .{key});
+            const k = try std.fmt.allocPrint(allocator, "\"{s}\"", .{key});
+            defer allocator.free(k);
+            try buf.appendSlice(allocator, k);
         } else {
-            try w.writeAll("null");
+            try buf.appendSlice(allocator, "null");
         }
-        try w.writeAll(",\"description\":");
+        try buf.appendSlice(allocator, ",\"description\":");
         if (result.description) |desc| {
-            try w.print("\"{s}\"", .{desc});
+            const d = try std.fmt.allocPrint(allocator, "\"{s}\"", .{desc});
+            defer allocator.free(d);
+            try buf.appendSlice(allocator, d);
         } else {
-            try w.writeAll("null");
+            try buf.appendSlice(allocator, "null");
         }
-        try w.writeAll("}");
+        try buf.appendSlice(allocator, "}");
 
         return ToolResult{
             .success = true,

@@ -1,0 +1,466 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>knot3bot Dashboard</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+<script src="https://unpkg.com/htmx.org@1.9.11"></script>
+<style>
+.chat-messages::-webkit-scrollbar{width:6px;}
+.chat-messages::-webkit-scrollbar-thumb{background:#4b5563;border-radius:3px;}
+.streaming-cursor::after{content:'▊';animation:blink 1s step-end infinite;}
+@keyframes blink{50%{opacity:0}}
+[x-cloak]{display:none!important}
+.metric-card{transition:all .2s}
+.metric-card:hover{transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,.3)}
+</style>
+</head>
+<body class="h-full bg-gray-950 text-gray-100" x-data="app()" x-cloak>
+<div class="flex h-full">
+
+<!-- Sidebar -->
+<aside class="w-64 bg-gray-900 border-r border-gray-800 flex flex-col shrink-0">
+  <div class="p-4 border-b border-gray-800">
+    <h1 class="text-lg font-bold text-cyan-400">⚡ knot3bot</h1>
+    <p class="text-xs text-gray-500 mt-1" x-text="status"></p>
+    <div class="flex gap-1 mt-2">
+      <span class="w-2 h-2 rounded-full" :class="connected?'bg-green-500':'bg-red-500'"></span>
+      <span class="text-xs text-gray-600" x-text="connected?'Connected':'Disconnected'"></span>
+    </div>
+  </div>
+
+  <div class="p-3 border-b border-gray-800">
+    <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Sessions</h2>
+    <button @click="newSession()" class="w-full text-left px-3 py-2 rounded-lg hover:bg-gray-800 text-sm transition border border-dashed border-gray-700 text-gray-400 hover:text-gray-200">
+      + New Session
+    </button>
+    <div class="mt-2 space-y-1 max-h-48 overflow-y-auto" id="session-list">
+      <template x-for="(s,idx) in sessions" :key="s.id">
+        <div class="flex items-center group">
+          <div @click="switchSession(s.id)"
+               :class="{'bg-cyan-900/40 text-cyan-300 border-cyan-700': s.id===activeSession, 'hover:bg-gray-800 border-transparent': s.id!==activeSession}"
+               class="flex-1 px-3 py-2 rounded-lg text-sm cursor-pointer transition truncate border"
+               x-text="s.id"></div>
+          <button @click="deleteSession(idx)" class="hidden group-hover:block px-1 text-gray-600 hover:text-red-400 text-xs shrink-0" title="Delete">✕</button>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <div class="p-3 border-b border-gray-800 flex-1 overflow-y-auto">
+    <h2 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Tools (18)</h2>
+    <div class="space-y-0.5">
+      <template x-for="t in tools" :key="t">
+        <div class="flex items-center gap-2 px-2 py-1 rounded text-xs">
+          <span class="w-1.5 h-1.5 rounded-full" :class="t.enabled?'bg-green-500':'bg-gray-700'"></span>
+          <span :class="t.enabled?'text-gray-300':'text-gray-600'" x-text="t"></span>
+        </div>
+      </template>
+    </div>
+  </div>
+
+  <div class="p-3 border-t border-gray-800 flex gap-1">
+    <button @click="tab='chat'"    :class="tab==='chat'?'bg-cyan-600 text-white':'bg-gray-800 text-gray-400'" class="flex-1 px-2 py-1.5 rounded text-xs transition font-medium">Chat</button>
+    <button @click="tab='settings'" :class="tab==='settings'?'bg-cyan-600 text-white':'bg-gray-800 text-gray-400'" class="flex-1 px-2 py-1.5 rounded text-xs transition font-medium">Settings</button>
+    <button @click="tab='metrics'" :class="tab==='metrics'?'bg-cyan-600 text-white':'bg-gray-800 text-gray-400'" class="flex-1 px-2 py-1.5 rounded text-xs transition font-medium">Metrics</button>
+  </div>
+</aside>
+
+<!-- Main -->
+<main class="flex-1 flex flex-col min-w-0">
+
+  <header class="h-12 bg-gray-900 border-b border-gray-800 flex items-center px-4 shrink-0 gap-3">
+    <span class="text-xs text-gray-500">Provider</span>
+    <select x-model="provider" @change="switchProvider()" class="bg-gray-800 text-sm px-2 py-1 rounded border border-gray-700 focus:border-cyan-500 outline-none">
+      <option value="openai">OpenAI</option><option value="deepseek">DeepSeek</option>
+      <option value="kimi">Kimi</option><option value="bailian">Bailian</option>
+      <option value="minimax">MiniMax</option><option value="zai">Z.ai</option>
+      <option value="openrouter">OpenRouter</option><option value="volcano">Volcano</option>
+      <option value="tencent">Tencent</option><option value="anthropic">Anthropic</option>
+    </select>
+    <span class="text-xs text-gray-500">Model</span>
+    <select x-model="model" class="bg-gray-800 text-sm px-2 py-1 rounded border border-gray-700 focus:border-cyan-500 outline-none min-w-[180px]">
+      <template x-for="m in currentModels" :key="m">
+        <option :value="m" x-text="m"></option>
+      </template>
+    </select>
+    <span class="flex-1"></span>
+    <span class="text-xs text-gray-600" x-text="'Session: '+activeSession"></span>
+  </header>
+
+  <!-- Chat -->
+  <div x-show="tab==='chat'" class="flex-1 flex flex-col">
+    <div class="flex-1 overflow-y-auto p-4 chat-messages space-y-3" id="chat-messages">
+      <template x-for="msg in currentMessages" :key="msg.id">
+        <div :class="msg.role==='user'?'flex justify-end':'flex justify-start'">
+          <div :class="msg.role==='user'?'bg-cyan-700 text-white rounded-2xl rounded-br-md':'bg-gray-800 text-gray-200 rounded-2xl rounded-bl-md'"
+               class="px-4 py-2.5 max-w-[80%] text-sm leading-relaxed shadow-lg">
+            <div class="whitespace-pre-wrap" x-text="msg.content"></div>
+            <div class="text-xs opacity-50 mt-1 flex items-center gap-2">
+              <span x-text="msg.time"></span>
+              <span x-show="msg.tokens" class="text-cyan-300" x-text="(tokens: '+msg.tokens+')"></span>
+            </div>
+          </div>
+        </div>
+      </template>
+      <div x-show="streaming" class="flex justify-start">
+        <div class="bg-gray-800 text-gray-200 rounded-2xl rounded-bl-md max-w-[80%] px-4 py-2.5 text-sm shadow-lg">
+          <span class="whitespace-pre-wrap" x-text="streamContent"></span><span class="streaming-cursor text-cyan-400"></span>
+        </div>
+      </div>
+      <div x-show="currentMessages.length===0 && !streaming" class="flex items-center justify-center h-full">
+        <div class="text-center text-gray-600">
+          <div class="text-4xl mb-3">⚡</div>
+          <div class="text-sm">Send a message to get started</div>
+          <div class="text-xs mt-1">Provider: <span x-text="provider"></span> · Model: <span x-text="model"></span></div>
+        </div>
+      </div>
+    </div>
+    <div class="p-4 border-t border-gray-800 bg-gray-900 shrink-0">
+      <form @submit.prevent="sendMessage()" class="flex gap-3">
+        <textarea x-model="input" @keydown.enter.prevent="if(!$event.shiftKey)sendMessage()" rows="1"
+          placeholder="Type a message... (Enter to send, Shift+Enter for newline)"
+          class="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-2.5 text-sm focus:border-cyan-500 focus:outline-none transition resize-none"></textarea>
+        <button type="submit" :disabled="!input.trim()||sending"
+          class="bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 disabled:cursor-not-allowed px-6 py-2.5 rounded-xl text-sm font-medium transition shadow-lg shadow-cyan-900/20">
+          <span x-show="!sending">Send</span>
+          <span x-show="seding" class="flex items-center gap-1"><span class="animate-spin">⏳</span> Sending</span>
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <!-- Settings -->
+  <div x-show="tab==='settings'" class="flex-1 p-6 overflow-y-auto">
+    <div class="max-w-2xl mx-auto space-y-6">
+
+      <div class="bg-gray-900 rounded-2xl p-6 border border-gray-800">
+        <h3 class="text-lg font-semibold mb-1">Model Settings</h3>
+        <p class="text-xs text-gray-500 mb-4">Configure generation parameters for the LLM</p>
+        <div class="grid grid-cols-2 gap-5">
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">Temperature: <span class="text-cyan-400" x-text="temperature"></span></label>
+            <input type="range" min="0" max="2" step="0.05" x-model="temperature" class="w-full accent-cyan-500">
+            <div class="flex justify-between text-xs text-gray-600"><span>0 (deterministic)</span><span>2 (creative)</span></div>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">Top P</label>
+            <input type="number" x-model="topP" min="0" max="1" step="0.05" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:border-cyan-500 outline-none">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">Max Output Tokens</label>
+            <input type="number" x-model="maxTokens" min="1" max="128000" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:border-cyan-500 outline-none">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">Max Agent Iterations</label>
+            <input type="number" x-model="maxIterations" min="1" max="100" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:border-cyan-500 outline-none">
+          </div>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">Request Timeout (seconds)</label>
+            <input type="number" x-model="timeout" min="10" max="600" class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:border-cyan-500 outline-none">
+          </div>
+          <div class="flex flex-col gap-2 justify-end">
+            <label class="flex items-center gap-2 text-sm"><input type="checkbox" x-model="streamEnabled" class="accent-cyan-500">Enable Streaming</label>
+            <label class="flex items-center gap-2 text-sm"><input type="checkbox" x-model="autoTools" class="accent-cyan-500">Auto Tool Selection</label>
+          </div>
+        </div>
+      </div>
+
+      <div class="bg-gray-900 rounded-2xl p-6 border border-gray-800">
+        <h3 class="text-lg font-semibold mb-1">API Configuration</h3>
+        <p class="text-xs text-gray-500 mb-4">Set your provider API key</p>
+        <div class="space-y-4">
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">API Key</label>
+            <div class="flex gap-2">
+              <input :type="showKey?'text':'password'" x-model="apiKey" placeholder="sk-..." class="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:border-cyan-500 outline-none">
+              <button @click="showKey=!showKey" class="px-3 py-2 bg-gray-800 rounded-lg text-xs text-gray-400 hover:text-gray-200 transition" x-text="showKey?'Hide':'Show'"></button>
+            </div>
+            <p class="text-xs text-gray-600 mt-1">Stored in browser localStorage only. Never sent to our servers.</p>
+          </div>
+          <div>
+            <label class="block text-xs text-gray-400 mb-1">System Prompt (optional)</label>
+            <textarea x-model="systemPrompt" rows="3" placeholder="You are a helpful AI assistant..." class="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm focus:border-cyan-500 outline-none resize-none"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- Save button -->
+      <div class="flex gap-3 items-center">
+        <button @click="saveSettings()" class="bg-cyan-600 hover:bg-cyan-500 px-8 py-3 rounded-xl text-sm font-medium transition shadow-lg shadow-cyan-900/20 flex items-center gap-2">
+          <span>💾</span> Save Settings
+        </button>
+        <button @click="loadSettings()" class="bg-gray-800 hover:bg-gray-700 px-4 py-3 rounded-xl text-sm text-gray-400 transition">Reset</button>
+        <span x-show="saved" class="text-xs text-green-400" x-text="savedMsg"></span>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Metrics -->
+  <div x-show="tab==='metrics'" class="flex-1 p-6 overflow-y-auto" @click="fetchMetrics()">
+    <div class="max-w-5xl mx-auto">
+      <div class="flex items-center justify-between mb-4">
+        <h3 class="text-lg font-semibold">System Metrics</h3>
+        <span class="text-xs text-gray-500">Auto-refresh: 5s</span>
+      </div>
+
+      <!-- Top stats -->
+      <div class="grid grid-cols-4 gap-4 mb-6">
+        <div class="metric-card bg-gray-900 rounded-2xl p-5 border border-gray-800 text-center">
+          <div class="text-3xl font-bold text-cyan-400" x-text="metrics.totalRequests">0</div>
+          <div class="text-xs text-gray-500 mt-1">Total Requests</div>
+          <div class="mt-2 h-1 bg-gray-800 rounded-full overflow-hidden"><div class="h-full bg-cyan-500 rounded-full" :style="'width:'+Math.min(100,metrics.totalRequests/10*100)+'%'"></div></div>
+        </div>
+        <div class="metric-card bg-gray-900 rounded-2xl p-5 border border-gray-800 text-center">
+          <div class="text-3xl font-bold text-emerald-400" x-text="metrics.uptimeFmt">0</div>
+          <div class="text-xs text-gray-500 mt-1">Uptime</div>
+          <div class="mt-2 h-1 bg-gray-800 rounded-full overflow-hidden"><div class="h-full bg-emerald-500 rounded-full" :style="'width:100%'"></div></div>
+        </div>
+        <div class="metric-card bg-gray-900 rounded-2xl p-5 border border-gray-800 text-center">
+          <div class="text-3xl font-bold text-amber-400" x-text="metrics.avgLatency+'ms'">0ms</div>
+          <div class="text-xs text-gray-500 mt-1">Avg Latency</div>
+          <div class="mt-2 h-1 bg-gray-800 rounded-full overflow-hidden"><div class="h-full bg-amber-500 rounded-full" :style="'width:'+Math.min(100,metrics.avgLatency/50*100)+'%'"></div></div>
+        </div>
+        <div class="metric-card bg-gray-900 rounded-2xl p-5 border border-gray-800 text-center">
+          <div class="text-3xl font-bold" :class="metrics.errorCount>0?'text-red-400':'text-green-400'" x-text="metrics.errorCount">0</div>
+          <div class="text-xs text-gray-500 mt-1">Errors</div>
+          <div class="mt-2 h-1 bg-gray-800 rounded-full overflow-hidden"><div class="h-full rounded-full" :class="metrics.errorCount>0?'bg-red-500':'bg-green-500'" :style="'width:'+Math.min(100,metrics.errorCount*20)+'%'"></div></div>
+        </div>
+      </div>
+
+      <!-- Detail rows -->
+      <div class="grid grid-cols-2 gap-4">
+        <div class="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+          <h4 class="text-sm font-semibold mb-3 text-gray-300">Token Usage</h4>
+          <div class="space-y-3">
+            <div class="flex justify-between text-sm"><span class="text-gray-400">Prompt Tokens</span><span class="text-cyan-300 font-mono" x-text="metrics.promptTokens||0">0</span></div>
+            <div class="flex justify-between text-sm"><span class="text-gray-400">Completion Tokens</span><span class="text-green-300 font-mono" x-text="metrics.completionTokens||0">0</span></div>
+            <div class="flex justify-between text-sm border-t border-gray-800 pt-2"><span class="text-gray-400">Total</span><span class="text-white font-mono font-semibold" x-text="(metrics.promptTokens||0)+(metrics.completionTokens||0)">0</span></div>
+          </div>
+        </div>
+        <div class="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+          <h4 class="text-sm font-semibold mb-3 text-gray-300">Server Info</h4>
+          <div class="space-y-3">
+            <div class="flex justify-between text-sm"><span class="text-gray-400">Version</span><span class="font-mono text-gray-300" x-text="metrics.version||'-'">-</span></div>
+            <div class="flex justify-between text-sm"><span class="text-gray-400">Circuit Breaker</span><span :class="metrics.circuitState==='closed'?'text-green-400':'text-red-400'" x-text="metrics.circuitState||'closed'">closed</span></div>
+            <div class="flex justify-between text-sm"><span class="text-gray-400">Rate Limits Hit</span><span class="font-mono text-yellow-300" x-text="metrics.rateLimited||0">0</span></div>
+          </div>
+        </div>
+        <div class="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+          <h4 class="text-sm font-semibold mb-3 text-gray-300">Request Breakdown</h4>
+          <div class="space-y-3">
+            <div class="flex justify-between text-sm"><span class="text-gray-400">Chat Completions</span><span class="font-mono text-gray-300" x-text="metrics.chatRequests||0">0</span></div>
+            <div class="flex justify-between text-sm"><span class="text-gray-400">Streaming</span><span class="font-mono text-gray-300" x-text="metrics.streamingRequests||0">0</span></div>
+            <div class="flex justify-between text-sm"><span class="text-gray-400">Provider Calls</span><span class="font-mono text-cyan-300" x-text="metrics.providerCalls||0">0</span></div>
+          </div>
+        </div>
+        <div class="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+          <h4 class="text-sm font-semibold mb-3 text-gray-300">Memory</h4>
+          <div class="space-y-3">
+            <div class="flex justify-between text-sm"><span class="text-gray-400">RSS</span><span class="font-mono text-gray-300" x-text="formatBytes(metrics.rss||0)">0</span></div>
+            <div class="flex justify-between text-sm"><span class="text-gray-400">Active Sessions</span><span class="font-mono text-gray-300" x-text="sessions.length">1</span></div>
+            <div class="flex justify-between text-sm"><span class="text-gray-400">Tools Loaded</span><span class="font-mono text-gray-300">18</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</main>
+</div>
+
+<script>
+function app() {
+  return {
+    tab: 'chat',
+    status: 'Connecting...',
+    connected: false,
+    provider: 'openai',
+    model: 'gpt-4o',
+    input: '',
+    sending: false,
+    streaming: false,
+    streamContent: '',
+    activeSession: 'default',
+    showKey: false,
+    saved: false,
+    savedMsg: '',
+    // Per-session message store
+    sessionMessages: {},
+    sessions: [{id:'default'}],
+    tools: ['shell','read_file','write_file','list_directory','grep','glob','todo','calculator','git','cron','http_request','web_fetch','web_search','web_extract','browser','spawn','task_planner','diff'],
+    temperature: 0.7,
+    topP: 1.0,
+    maxTokens: 4096,
+    maxIterations: 10,
+    timeout: 120,
+    streamEnabled: true,
+    autoTools: true,
+    apiKey: '',
+    systemPrompt: '',
+    metrics: { totalRequests:0, uptime:0, avgLatency:0, errorCount:0, promptTokens:0, completionTokens:0, version:'', circuitState:'closed', rateLimited:0, chatRequests:0, streamingRequests:0, providerCalls:0, rss:0 },
+
+    get currentModels() {
+      const map = {
+        openai: ['gpt-5.5','gpt-5.5-mini','gpt-5.1','o5-mini','o4-mini','gpt-4o'],
+        deepseek: ['deepseek-v4-pro','deepseek-v4-flash','deepseek-chat','deepseek-reasoner','deepseek-coder'],
+        kimi: ['kimi-k2.5','kimi-k2-thinking','kimi-k2-turbo-preview','moonshot-v1-auto','moonshot-v1-128k'],
+        bailian: ['qwen3.6-plus','qwen3.6-flash','qwen3.6-coder-plus','qwen3-max-plus','qwen-vl-max'],
+        minimax: ['MiniMax-M2.7','MiniMax-M2.5','MiniMax-M2.1','MiniMax-M2','abab7-chat'],
+        zai: ['glm-4.7','glm-4.7-flash','glm-4.6','glm-4-plus','glm-4-flash-x'],
+        openrouter: ['openai/gpt-5.5','anthropic/claude-opus-4.7','anthropic/claude-sonnet-4.6','google/gemini-2.5-pro','meta-llama/llama-4-maverick','deepseek/deepseek-v4-pro'],
+        volcano: ['doubao-seed-1-8-251228','doubao-seed-1-6-251015','doubao-pro-256k','doubao-pro-32k','doubao-lite-32k'],
+        tencent: ['hunyuan-turbo-latest','hunyuan-t1-latest','hunyuan-standard','hunyuan-lite','hunyuan-vision'],
+        anthropic: ['claude-opus-4-7','claude-sonnet-4-6','claude-haiku-4-5','claude-3-5-sonnet-20241022'],
+      };
+      return map[this.provider] || [this.model];
+    },
+
+    get currentMessages() {
+      if (!this.sessionMessages[this.activeSession]) this.sessionMessages[this.activeSession] = [];
+      return this.sessionMessages[this.activeSession];
+    },
+
+    async init() {
+      this.loadSettings();
+      try {
+        const r = await fetch('/health');
+        const d = await r.json();
+        this.status = d.provider + ' · ' + d.model + ' · ' + d.tools + ' tools';
+        this.connected = true;
+        if (d.model) this.model = d.model;
+      } catch(e) { this.status = 'Server unreachable'; this.connected = false; }
+      this.fetchMetrics();
+      setInterval(()=>this.fetchMetrics(), 5000);
+    },
+
+    async sendMessage() {
+      if (!this.input.trim() || this.sending) return;
+      const content = this.input.trim();
+      this.input = '';
+      if (!this.sessionMessages[this.activeSession]) this.sessionMessages[this.activeSession] = [];
+      this.sessionMessages[this.activeSession].push({id:Date.now(),role:'user',content,time:new Date().toLocaleTimeString()});
+      this.sending = true;
+      this.streaming = true;
+      this.streamContent = '';
+
+      try {
+        const headers = {'Content-Type':'application/json'};
+        if (this.apiKey) headers['Authorization'] = 'Bearer ' + this.apiKey;
+
+        const body = {
+          model: this.model,
+          messages: this.sessionMessages[this.activeSession].map(m=>({role:m.role,content:m.content})),
+          stream: this.streamEnabled,
+          temperature: parseFloat(this.temperature),
+          max_tokens: parseInt(this.maxTokens),
+          top_p: parseFloat(this.topP),
+        };
+        if (this.systemPrompt) body.messages.unshift({role:'system',content:this.systemPrompt});
+
+        const r = await fetch('/v1/chat/completions', {method:'POST',headers,body:JSON.stringify(body)});
+
+        if (this.streamEnabled) {
+          const reader = r.body.getReader();
+          const decoder = new TextDecoder();
+          let full = '';
+          while (true) {
+            const {done,value} = await reader.read();
+            if (done) break;
+            for (const line of decoder.decode(value).split('\n')) {
+              if (line.startsWith('data: ')) {
+                const data = line.slice(6);
+                if (data==='[DONE]') break;
+                try { full += JSON.parse(data).choices?.[0]?.delta?.content || ''; this.streamContent = full; } catch(e){}
+              }
+            }
+          }
+          this.sessionMessages[this.activeSession].push({id:Date.now(),role:'assistant',content:full,time:new Date().toLocaleTimeString()});
+        } else {
+          const j = await r.json();
+          const msg = j.choices?.[0]?.message?.content || 'Error: '+(j.error?.message||'Unknown');
+          const tokens = j.usage?.total_tokens || 0;
+          this.sessionMessages[this.activeSession].push({id:Date.now(),role:'assistant',content:msg,time:new Date().toLocaleTimeString(),tokens});
+        }
+      } catch(e) {
+        this.sessionMessages[this.activeSession].push({id:Date.now(),role:'assistant',content:'Error: '+e.message,time:new Date().toLocaleTimeString()});
+      }
+      this.streaming = false;
+      this.sending = false;
+      this.$nextTick(()=>{const el=document.getElementById('chat-messages');if(el)el.scrollTop=el.scrollHeight;});
+    },
+
+    newSession() {
+      const id = 'session-'+Date.now();
+      this.sessions.push({id});
+      this.activeSession = id;
+      this.sessionMessages[id] = [];
+    },
+    switchSession(id) {
+      this.activeSession = id;
+      if (!this.sessionMessages[id]) this.sessionMessages[id] = [];
+      this.$nextTick(()=>{const el=document.getElementById('chat-messages');if(el)el.scrollTop=el.scrollHeight;});
+    },
+    deleteSession(idx) {
+      if (this.sessions.length<=1) return;
+      const id = this.sessions[idx].id;
+      delete this.sessionMessages[id];
+      this.sessions.splice(idx,1);
+      if (this.activeSession===id) this.activeSession = this.sessions[0].id;
+    },
+    switchProvider() { this.model = this.currentModels[0]; },
+
+    saveSettings() {
+      const s = {provider:this.provider,model:this.model,temperature:this.temperature,topP:this.topP,maxTokens:this.maxTokens,maxIterations:this.maxIterations,timeout:this.timeout,streamEnabled:this.streamEnabled,autoTools:this.autoTools,apiKey:this.apiKey,systemPrompt:this.systemPrompt};
+      localStorage.setItem('knot3bot-settings',JSON.stringify(s));
+      this.saved = true; this.savedMsg = 'Settings saved!';
+      setTimeout(()=>this.saved=false,2000);
+    },
+    loadSettings() {
+      try {
+        const s = JSON.parse(localStorage.getItem('knot3bot-settings'));
+        if (!s) return;
+        Object.keys(s).forEach(k=>{if(this[k]!==undefined)this[k]=s[k];});
+      } catch(e){}
+    },
+
+    async fetchMetrics() {
+      try {
+        const t = await (await fetch('/metrics')).text();
+        const m = {};
+        for (const line of t.split('\n')) {
+          if (!line.startsWith('#') && line.trim()) {
+            const [k,v] = line.split(/\s+/);
+            if (k&&v) m[k]=parseFloat(v)||0;
+          }
+        }
+        this.metrics.totalRequests = m.knot3bot_total_requests||0;
+        this.metrics.uptime = m.knot3bot_uptime_seconds||0;
+        this.metrics.uptimeFmt = this.formatUptime(this.metrics.uptime);
+        this.metrics.errorCount = m.knot3bot_errors||0;
+        this.metrics.avgLatency = Math.round(m.knot3bot_request_duration_ms||0);
+        this.metrics.promptTokens = m.knot3bot_prompt_tokens_total||0;
+        this.metrics.completionTokens = m.knot3bot_completion_tokens_total||0;
+        this.metrics.rateLimited = m.knot3bot_rate_limit_exceeded||0;
+        this.metrics.chatRequests = m.knot3bot_chat_requests||0;
+        this.metrics.streamingRequests = m.knot3bot_streaming_requests||0;
+        this.metrics.providerCalls = m.knot3bot_provider_calls_total||0;
+        this.metrics.rss = m.knot3bot_memory_rss_bytes||0;
+        this.metrics.circuitState = m.knot3bot_circuit_breaker_state===1?'open':m.knot3bot_circuit_breaker_state===2?'half_open':'closed';
+      } catch(e){}
+    },
+
+    formatUptime(s) {
+      if (s<60) return s+'s';
+      if (s<3600) return Math.floor(s/60)+'m';
+      if (s<86400) return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';
+      return Math.floor(s/86400)+'d '+Math.floor((s%86400)/3600)+'h';
+    },
+    formatBytes(b) { return b>1e6?(b/1e6).toFixed(1)+' MB':b>1e3?(b/1e3).toFixed(1)+' KB':b+' B'; }
+  }
+}
+</script>
+</body>
+</html>

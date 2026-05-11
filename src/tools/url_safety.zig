@@ -111,7 +111,7 @@ fn checkResolvedIp(hostname: []const u8) bool {
 /// Check if an IP address is in private ranges
 fn isPrivateIp(ip: []const u8) bool {
     // Try to parse as IPv4
-    if (std.net.Address.parseIp4(ip, 0)) |_| {
+    if (std.Io.net.IpAddress.parseIp4(ip, 0)) |_| {
         return isPrivateIpv4(ip);
     } else |_| {
         // Not an IPv4 address, might be IPv6 or hostname
@@ -122,7 +122,7 @@ fn isPrivateIp(ip: []const u8) bool {
 /// Check IPv4 address against private ranges
 fn isPrivateIpv4(ip: []const u8) bool {
     // Simple parsing - check first octet
-    const parts = std.mem.split(u8, ip, ".");
+    var parts = std.mem.splitScalar(u8, ip, '.');
     var octets: [4]u32 = .{ 0, 0, 0, 0 };
     var idx: usize = 0;
 
@@ -158,7 +158,7 @@ fn isPrivateIpv4(ip: []const u8) bool {
 
 /// Convert string to lowercase
 fn toLower(s: []const u8) []u8 {
-    var result = std.heap.page_allocator.alloc(u8, s.len) catch return s;
+    var result = std.heap.page_allocator.alloc(u8, s.len) catch return &.{};
     for (s, 0..) |c, i| {
         result[i] = std.ascii.toLower(c);
     }
@@ -183,19 +183,20 @@ pub const UrlSafetyTool = struct {
         const safe = isSafeUrl(url);
 
         // Build JSON response
-        var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-        errdefer buf.deinit();
-        const w = buf.writer();
+        var buf: std.ArrayList(u8) = .empty;
+        errdefer buf.deinit(allocator);
 
-        try w.writeAll("{\"safe\":");
+        try buf.appendSlice(allocator, "{\"safe\":");
         if (safe) {
-            try w.writeAll("true");
+            try buf.appendSlice(allocator, "true");
         } else {
-            try w.writeAll("false");
+            try buf.appendSlice(allocator, "false");
         }
-        try w.writeAll(",\"url\":");
-        try w.print("\"{s}\"", .{url});
-        try w.writeAll("}");
+        try buf.appendSlice(allocator, ",\"url\":");
+        const u = try std.fmt.allocPrint(allocator, "\"{s}\"", .{url});
+        defer allocator.free(u);
+        try buf.appendSlice(allocator, u);
+        try buf.appendSlice(allocator, "}");
 
         return ToolResult{
             .success = true,

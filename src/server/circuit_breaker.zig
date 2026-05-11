@@ -22,15 +22,24 @@ pub const CircuitBreaker = struct {
     success_count: u32 = 0,
     last_failure_time: i64 = 0,
     total_trips: u64 = 0,
+    mutex: std.Io.Mutex,
+    io: std.Io,
 
     pub fn init(config: CircuitBreakerConfig) CircuitBreaker {
+        const io = std.Io.Threaded.global_single_threaded.io();
         return .{
             .config = config,
+            .mutex = std.Io.Mutex.init,
+            .io = io,
         };
     }
 
     /// Check if a request is allowed. Returns false if circuit is open.
+    /// Thread-safe.
     pub fn allowRequest(self: *CircuitBreaker) bool {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+
         switch (self.state) {
             .closed => return true,
             .open => {
@@ -47,8 +56,11 @@ pub const CircuitBreaker = struct {
         }
     }
 
-    /// Record a successful call
+    /// Record a successful call. Thread-safe.
     pub fn recordSuccess(self: *CircuitBreaker) void {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+
         switch (self.state) {
             .closed => {
                 self.failure_count = 0;
@@ -65,8 +77,11 @@ pub const CircuitBreaker = struct {
         }
     }
 
-    /// Record a failed call
+    /// Record a failed call. Thread-safe.
     pub fn recordFailure(self: *CircuitBreaker) void {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+
         switch (self.state) {
             .closed => {
                 self.failure_count += 1;
@@ -85,13 +100,17 @@ pub const CircuitBreaker = struct {
         }
     }
 
-    /// Get current state
+    /// Get current state. Thread-safe.
     pub fn getState(self: *CircuitBreaker) CircuitState {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
         return self.state;
     }
 
-    /// Get remaining seconds until half-open (0 if not open)
+    /// Get remaining seconds until half-open (0 if not open). Thread-safe.
     pub fn remainingTimeout(self: *CircuitBreaker) u32 {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
         if (self.state != .open) return 0;
         const now = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds();
         const elapsed = now - self.last_failure_time;

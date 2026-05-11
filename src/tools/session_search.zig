@@ -32,12 +32,11 @@ pub const SessionSearchTool = struct {
 
         // If no query, return recent sessions
         if (query.len == 0) {
-            var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-            defer buf.deinit();
-            const w = buf.writer();
+            var buf: std.ArrayList(u8) = .empty;
+            defer buf.deinit(allocator);
 
-            try w.writeAll("{\"success\":true,\"mode\":\"recent\",\"results\":[],");
-            try w.print("\"count\":0,\"message\":\"No recent sessions available. Provide a query to search.\"}}", .{});
+            try buf.appendSlice(allocator, "{\"success\":true,\"mode\":\"recent\",\"results\":[],");
+            try buf.appendSlice(allocator, "\"count\":0,\"message\":\"Provide a query to search.\"}}");
 
             return ToolResult{
                 .success = true,
@@ -46,19 +45,17 @@ pub const SessionSearchTool = struct {
         }
 
         // Full search implementation would query SQLite FTS5 here
-        // For now, return a placeholder result
-        var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-        defer buf.deinit();
-        const w = buf.writer();
+        var buf2: std.ArrayList(u8) = .empty;
+        defer buf2.deinit(allocator);
 
-        try w.writeAll("{\"success\":true,\"query\":\"");
-        try w.writeAll(query);
-        try w.writeAll("\",\"results\":[],");
-        try w.print("\"count\":0,\"message\":\"Full-text search requires SQLite FTS5 integration. This tool provides the interface for session search.\"}}", .{});
+        try buf2.appendSlice(allocator, "{\"success\":true,\"query\":\"");
+        try buf2.appendSlice(allocator, query);
+        try buf2.appendSlice(allocator, "\",\"results\":[],");
+        try buf2.appendSlice(allocator, "\"count\":0,\"message\":\"Search requires FTS5 integration.\"}}");
 
         return ToolResult{
             .success = true,
-            .output = try buf.toOwnedSlice(allocator),
+            .output = try buf2.toOwnedSlice(allocator),
         };
     }
 

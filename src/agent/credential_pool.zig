@@ -15,7 +15,10 @@ pub const CredentialPool = struct {
     }
 
     pub fn deinit(self: *CredentialPool) void {
-        for (self.keys) |k| self.allocator.free(k);
+        for (self.keys) |k| {
+            @memset(@constCast(k), 0);
+            self.allocator.free(k);
+        }
         self.allocator.free(self.keys);
     }
 

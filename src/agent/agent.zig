@@ -184,9 +184,9 @@ pub const UsageStats = struct {
     errors: u32 = 0,
 
     pub fn update(self: *UsageStats, prompt: u32, completion: u32) void {
-        self.prompt_tokens = prompt;
-        self.completion_tokens = completion;
-        self.total_tokens = prompt + completion;
+        self.prompt_tokens += prompt;
+        self.completion_tokens += completion;
+        self.total_tokens += prompt + completion;
     }
 };
 
@@ -255,7 +255,27 @@ pub const Agent = struct {
     skill_self_improve: ?*SkillSelfImprove = null,
     pub fn init(allocator: std.mem.Allocator, config: AgentConfig, registry: *const ToolRegistry) Agent {
         var messages: ArrayList(Message) = .empty;
-        if (config.system_prompt) |prompt| messages.append(allocator, .{ .role = .system, .content = prompt }) catch unreachable;
+        if (config.system_prompt) |prompt| {
+            messages.append(allocator, .{ .role = .system, .content = prompt }) catch {
+                // If we can't even allocate the system message, the agent cannot function.
+                // Return an agent with empty messages; the caller should check and fail gracefully.
+                return Agent{
+                    .allocator = allocator,
+                    .messages = messages,
+                    .config = config,
+                    .registry = registry,
+                    .step_logs = .empty,
+                    .client = null,
+                    .has_api_key = false,
+                    .token_budget = TokenBudget.init(0),
+                    .iteration_budget = IterationBudget.init(0),
+                    .usage = .{},
+                    .anthropic_client = null,
+                    .model_registry = null,
+                    .skill_self_improve = null,
+                };
+            };
+        }
         var client: ?LLMClient = null;
         var anthropic_client: ?providers.anthropic.AnthropicClient = null;
         var resolved_model: []const u8 = config.model;
@@ -641,7 +661,19 @@ pub const Agent = struct {
                     continue;
                 }
             }
+            // Save trajectory for streaming path
+            if (self.enable_trajectory_recording) {
+                if (self.trajectory_recorder) |recorder| {
+                    recorder.save(self.config.model, true, self.step_logs.items, self.messages.items) catch {};
+                }
+            }
             return llm_result.content;
+        }
+        // Save failed trajectory
+        if (self.enable_trajectory_recording) {
+            if (self.trajectory_recorder) |recorder| {
+                recorder.save(self.config.model, false, self.step_logs.items, self.messages.items) catch {};
+            }
         }
         return "Max iterations reached";
     }
@@ -776,7 +808,7 @@ pub const Agent = struct {
                                                                 .name = try self.allocator.dupe(u8, fn_n),
                                                                 .arguments = try self.allocator.dupe(u8, fn_a),
                                                             },
-                                                        }) catch unreachable;
+                                                        }) catch continue;
                                                     }
                                                 }
                                                 if (parsed_tcs.items.len > 0) {
@@ -932,7 +964,12 @@ pub const Agent = struct {
                                                         .name = try self.allocator.dupe(u8, fn_n),
                                                         .arguments = try self.allocator.dupe(u8, fn_a),
                                                     },
-                                                }) catch unreachable;
+                                                }) catch {
+                                                    // Allocation failure mid-parse — skip this tool call
+                                                    // rather than panicking. The agent will continue with
+                                                    // whatever tool calls were successfully parsed.
+                                                    continue;
+                                                };
                                             }
                                         }
                                         if (parsed_tcs.items.len > 0) {

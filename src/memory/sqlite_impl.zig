@@ -65,13 +65,48 @@ pub const SqliteMemorySystem = struct {
             \\    session_id TEXT NOT NULL,
             \\    role TEXT NOT NULL,
             \\    content TEXT NOT NULL,
+            \\    importance REAL DEFAULT 0.5,
             \\    timestamp INTEGER NOT NULL,
             \\    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE
             \\)
         ;
 
+        // FTS5 virtual table for full-text search across messages
+        const create_fts =
+            \\CREATE VIRTUAL TABLE IF NOT EXISTS messages_fts USING fts5(
+            \\    content,
+            \\    session_id,
+            \\    content_rowid='id',
+            \\    content='messages'
+            \\)
+        ;
+
+        // Triggers to keep FTS in sync with messages table
+        const create_fts_insert =
+            \\CREATE TRIGGER IF NOT EXISTS messages_ai AFTER INSERT ON messages BEGIN
+            \\    INSERT INTO messages_fts(rowid, content, session_id) VALUES (new.id, new.content, new.session_id);
+            \\END
+        ;
+
+        const create_fts_delete =
+            \\CREATE TRIGGER IF NOT EXISTS messages_ad AFTER DELETE ON messages BEGIN
+            \\    INSERT INTO messages_fts(messages_fts, rowid, content, session_id) VALUES('delete', old.id, old.content, old.session_id);
+            \\END
+        ;
+
+        const create_fts_update =
+            \\CREATE TRIGGER IF NOT EXISTS messages_au AFTER UPDATE ON messages BEGIN
+            \\    INSERT INTO messages_fts(messages_fts, rowid, content, session_id) VALUES('delete', old.id, old.content, old.session_id);
+            \\    INSERT INTO messages_fts(rowid, content, session_id) VALUES (new.id, new.content, new.session_id);
+            \\END
+        ;
+
         try self.exec(create_sessions);
         try self.exec(create_messages);
+        try self.exec(create_fts);
+        try self.exec(create_fts_insert);
+        try self.exec(create_fts_delete);
+        try self.exec(create_fts_update);
     }
 
     fn exec(self: *const SqliteMemorySystem, sql: [:0]const u8) SqlError!void {
@@ -81,6 +116,119 @@ pub const SqliteMemorySystem = struct {
             if (err_msg) |msg| c.sqlite3_free(msg);
             return SqlError.StepFailed;
         }
+    }
+
+    pub const SearchResult = struct {
+        session_id: []const u8,
+        content: []const u8,
+        relevance_score: f64,
+        timestamp: i64,
+        importance: f32,
+    };
+
+    /// Full-text search across all messages with FTS5 ranking.
+    /// Returns results sorted by relevance (bm25).
+    pub fn searchMessages(self: *SqliteMemorySystem, allocator: std.mem.Allocator, query: []const u8, limit: u32) SqlError![]SearchResult {
+        const sql =
+            \\SELECT m.session_id, m.content, m.timestamp, m.importance, rank
+            \\FROM messages_fts f
+            \\JOIN messages m ON f.rowid = m.id
+            \\WHERE messages_fts MATCH ?
+            \\ORDER BY rank
+            \\LIMIT ?
+        ;
+
+        var stmt: ?*c.sqlite3_stmt = null;
+        const rc = c.sqlite3_prepare_v2(self.db, sql, -1, &stmt, null);
+        if (rc != c.SQLITE_OK) return SqlError.PrepareFailed;
+        defer _ = c.sqlite3_finalize(stmt);
+
+        const query_heap = try self.heapAllocString(query);
+        defer self.allocator.free(query_heap);
+        _ = c.sqlite3_bind_text(stmt, 1, query_heap.ptr, -1, SQLITE_TRANSIENT);
+        _ = c.sqlite3_bind_int64(stmt, 2, @intCast(limit));
+
+        var results = std.ArrayList(SearchResult).initCapacity(allocator, limit) catch return SqlError.OutOfMemory;
+        errdefer {
+            for (results.items) |r| {
+                allocator.free(r.session_id);
+                allocator.free(r.content);
+            }
+            results.deinit(allocator);
+        }
+
+        while (c.sqlite3_step(stmt) == c.SQLITE_ROW) {
+            const session_id_ptr = c.sqlite3_column_text(stmt, 0);
+            const content_ptr = c.sqlite3_column_text(stmt, 1);
+            const timestamp = c.sqlite3_column_int64(stmt, 2);
+            const importance = @as(f32, @floatCast(c.sqlite3_column_double(stmt, 3)));
+            const rank = c.sqlite3_column_int64(stmt, 4);
+
+            if (session_id_ptr) |sid| {
+                const session_id = try allocator.dupe(u8, std.mem.sliceTo(sid, 0));
+                errdefer allocator.free(session_id);
+                const content = try allocator.dupe(u8, std.mem.sliceTo(content_ptr orelse "", 0));
+                results.append(SearchResult{
+                    .session_id = session_id,
+                    .content = content,
+                    .relevance_score = @as(f64, @floatFromInt(rank)),
+                    .timestamp = timestamp,
+                    .importance = importance,
+                }) catch SqlError.OutOfMemory;
+            }
+        }
+        return results.toOwnedSlice(allocator);
+    }
+
+    /// Update importance score for a message.
+    pub fn setImportance(self: *SqliteMemorySystem, message_id: i64, importance: f32) SqlError!void {
+        const sql = "UPDATE messages SET importance = ? WHERE id = ?";
+        var stmt: ?*c.sqlite3_stmt = null;
+        if (c.sqlite3_prepare_v2(self.db, sql, -1, &stmt, null) != c.SQLITE_OK) return SqlError.PrepareFailed;
+        defer _ = c.sqlite3_finalize(stmt);
+        _ = c.sqlite3_bind_double(stmt, 1, @floatCast(importance));
+        _ = c.sqlite3_bind_int64(stmt, 2, message_id);
+        if (c.sqlite3_step(stmt) != c.SQLITE_DONE) return SqlError.StepFailed;
+    }
+
+    /// Get high-importance messages across sessions for knowledge retention.
+    pub fn getImportantMessages(self: *SqliteMemorySystem, allocator: std.mem.Allocator, min_importance: f32, limit: u32) SqlError![]SearchResult {
+        const sql = "SELECT session_id, content, timestamp, importance FROM messages WHERE importance >= ? ORDER BY importance DESC LIMIT ?";
+        var stmt: ?*c.sqlite3_stmt = null;
+        if (c.sqlite3_prepare_v2(self.db, sql, -1, &stmt, null) != c.SQLITE_OK) return SqlError.PrepareFailed;
+        defer _ = c.sqlite3_finalize(stmt);
+        _ = c.sqlite3_bind_double(stmt, 1, min_importance);
+        _ = c.sqlite3_bind_int64(stmt, 2, limit);
+
+        var results = std.ArrayList(SearchResult).initCapacity(allocator, limit) catch return SqlError.OutOfMemory;
+        errdefer {
+            for (results.items) |r| {
+                allocator.free(r.session_id);
+                allocator.free(r.content);
+            }
+            results.deinit(allocator);
+        }
+
+        while (c.sqlite3_step(stmt) == c.SQLITE_ROW) {
+            const session_id_ptr = c.sqlite3_column_text(stmt, 0);
+            const content_ptr = c.sqlite3_column_text(stmt, 1);
+            const timestamp = c.sqlite3_column_int64(stmt, 2);
+            const importance = @as(f32, @floatCast(c.sqlite3_column_double(stmt, 3)));
+
+            if (session_id_ptr) |sid| {
+                const session_id = try allocator.dupe(u8, std.mem.sliceTo(sid, 0));
+                errdefer allocator.free(session_id);
+                const content = try allocator.dupe(u8, std.mem.sliceTo(content_ptr orelse "", 0));
+                results.append(SearchResult{
+                    .session_id = session_id,
+                    .content = content,
+                    .relevance_score = importance,
+                    .timestamp = timestamp,
+                    .importance = importance,
+                }) catch SqlError.OutOfMemory;
+            }
+        }
+        return results.toOwnedSlice(allocator);
     }
 
     pub fn deinit(self: *SqliteMemorySystem) void {
@@ -188,8 +336,10 @@ pub const SqliteMemorySystem = struct {
                 try messages.appendSlice(allocator, "\",\"content\":\"");
                 try messages.appendSlice(allocator, content[0..content_len]);
                 try messages.appendSlice(allocator, "\",\"timestamp\":");
-                try messages.writer(allocator).print("{d}", .{timestamp});
-                try messages.append(allocator, '}');
+                const ts_str = try std.fmt.allocPrint(allocator, "{d}", .{timestamp});
+                defer allocator.free(ts_str);
+                try messages.appendSlice(allocator, ts_str);
+                try messages.appendSlice(allocator, "}");
             }
         }
         return try messages.toOwnedSlice(allocator);

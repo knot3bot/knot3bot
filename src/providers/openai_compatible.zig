@@ -194,11 +194,13 @@ pub const ChatResponse = struct {
 pub const Provider = enum {
     openai,
     anthropic,
+    deepseek,
     kimi,
     minimax,
     zai,
     bailian,
     volcano,
+    openrouter,
     kimi_plan,
     minimax_plan,
     bailian_plan,
@@ -209,26 +211,30 @@ pub const Provider = enum {
         return switch (self) {
             .openai => "https://api.openai.com/v1",
             .anthropic => "https://api.anthropic.com/v1",
+            .deepseek => "https://api.deepseek.com/v1",
             .kimi, .kimi_plan => "https://api.kimi.com/coding/v1",
             .minimax, .minimax_plan => "https://api.minimaxi.com/v1",
             .zai => "https://api.zplus.ai/v1",
             .bailian, .bailian_plan => "https://dashscope.aliyuncs.com/compatible-mode/v1",
             .volcano => "https://ark.cn-beijing.volces.com/api/v3",
             .volcano_plan => "https://ark.cn-beijing.volces.com/api/coding/v3",
+            .openrouter => "https://openrouter.ai/api/v1",
             .tencent, .tencent_plan => "https://api.hunyuan.cloud.tencent.com/v1",
         };
     }
 
     pub fn defaultModel(self: Provider) []const u8 {
         return switch (self) {
-            .openai => "gpt-4o",
-            .anthropic => "claude-3-5-sonnet-20240620",
+            .openai => "gpt-5.5",
+            .anthropic => "claude-sonnet-4-6",
+            .deepseek => "deepseek-v4-pro",
             .kimi, .kimi_plan => "kimi-k2.5",
             .minimax, .minimax_plan => "MiniMax-M2.7",
             .zai => "glm-4.7",
-            .bailian, .bailian_plan => "qwen3.5-plus",
+            .bailian, .bailian_plan => "qwen3.6-plus",
             .volcano => "doubao-seed-1-8-251228",
             .volcano_plan => "ark-code-latest",
+            .openrouter => "openai/gpt-4o",
             .tencent, .tencent_plan => "hunyuan-lite",
         };
     }
@@ -238,6 +244,7 @@ pub const Provider = enum {
         return switch (self) {
             .openai => "OpenAI",
             .anthropic => "Anthropic",
+            .deepseek => "DeepSeek",
             .kimi => "Kimi (Moonshot)",
             .kimi_plan => "Kimi Coding Plan",
             .minimax => "MiniMax",
@@ -247,6 +254,7 @@ pub const Provider = enum {
             .bailian_plan => "Bailian Coding Plan",
             .volcano => "Volcano Engine",
             .volcano_plan => "Volcano Engine Coding Plan",
+            .openrouter => "OpenRouter",
             .tencent => "Tencent (Hunyuan)",
             .tencent_plan => "Tencent Coding Plan",
         };
@@ -255,6 +263,7 @@ pub const Provider = enum {
         return switch (self) {
             .openai => "openai",
             .anthropic => "anthropic",
+            .deepseek => "deepseek",
             .kimi => "kimi",
             .kimi_plan => "kimi-plan",
             .minimax => "minimax",
@@ -264,21 +273,24 @@ pub const Provider = enum {
             .bailian_plan => "bailian-plan",
             .volcano => "volcano",
             .volcano_plan => "volcano-plan",
+            .openrouter => "openrouter",
             .tencent => "tencent",
             .tencent_plan => "tencent-plan",
         };
     }
     pub fn models(self: Provider) []const []const u8 {
         return switch (self) {
-            .openai => &.{ "gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "gpt-4", "gpt-3.5-turbo" },
-            .anthropic => &.{ "claude-3-5-sonnet-20240620", "claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307" },
-            .kimi, .kimi_plan => &.{ "kimi-k2.5", "kimi-k2-turbo-preview", "moonshot-v1-8k", "moonshot-v1-32k", "moonshot-v1-128k", "moonshot-v1-auto" },
-            .minimax, .minimax_plan => &.{ "MiniMax-M2.7", "MiniMax-M2.5", "MiniMax-M2.1", "MiniMax-M2", "abab6.5s-chat" },
-            .zai => &.{ "glm-4.7", "glm-4.7-flash", "glm-4.6", "glm-4-plus", "glm-4-flash" },
-            .bailian, .bailian_plan => &.{ "qwen3.5-plus", "qwen3.5-flash", "qwen3-max", "qwen-plus", "qwen-flash" },
+            .openai => &.{ "gpt-5.5", "gpt-5.5-mini", "gpt-5.1", "o5-mini", "o4-mini", "gpt-4o" },
+            .anthropic => &.{ "claude-opus-4-7", "claude-sonnet-4-6", "claude-haiku-4-5", "claude-3-5-sonnet-20241022" },
+            .deepseek => &.{ "deepseek-v4-pro", "deepseek-v4-flash", "deepseek-chat", "deepseek-reasoner", "deepseek-coder" },
+            .kimi, .kimi_plan => &.{ "kimi-k2.5", "kimi-k2-thinking", "kimi-k2-turbo-preview", "moonshot-v1-auto", "moonshot-v1-128k" },
+            .minimax, .minimax_plan => &.{ "MiniMax-M2.7", "MiniMax-M2.5", "MiniMax-M2.1", "MiniMax-M2", "abab7-chat" },
+            .zai => &.{ "glm-4.7", "glm-4.7-flash", "glm-4.6", "glm-4-plus", "glm-4-flash-x" },
+            .bailian, .bailian_plan => &.{ "qwen3.6-plus", "qwen3.6-flash", "qwen3.6-coder-plus", "qwen3-max-plus", "qwen-vl-max" },
             .volcano => &.{ "doubao-seed-1-8-251228", "doubao-pro-32k", "doubao-pro-128k", "doubao-lite-32k", "doubao-seed-1-6-250615" },
             .volcano_plan => &.{ "ark-code-latest", "doubao-seed-code", "glm-4.7", "kimi-k2-thinking", "doubao-seed-code-preview-251028" },
-            .tencent, .tencent_plan => &.{ "hunyuan-lite", "hunyuan-standard", "hunyuan-pro", "hunyuan-t1" },
+            .openrouter => &.{ "openai/gpt-5.1", "anthropic/claude-opus-4.7", "anthropic/claude-sonnet-4.6", "google/gemini-2.5-pro", "meta-llama/llama-4-maverick", "deepseek/deepseek-v3-0324" },
+            .tencent, .tencent_plan => &.{ "hunyuan-turbo-latest", "hunyuan-t1-latest", "hunyuan-standard", "hunyuan-lite", "hunyuan-vision" },
         };
     }
     pub fn fromStr(s: []const u8) ?Provider {
@@ -289,6 +301,7 @@ pub const Provider = enum {
             .{ "anthropic", .anthropic },
             .{ "claude", .anthropic },
             .{ "gpt", .openai },
+            .{ "deepseek", .deepseek },
             .{ "kimi-plan", .kimi_plan },
             .{ "kimi", .kimi },
             .{ "moonshot", .kimi },
@@ -311,6 +324,7 @@ pub const Provider = enum {
             .{ "tencent", .tencent },
             .{ "hunyuan", .tencent },
             .{ "腾讯", .tencent },
+            .{ "openrouter", .openrouter },
         }) |pair| {
             if (std.mem.eql(u8, lowered, pair[0])) {
                 return pair[1];
@@ -407,15 +421,18 @@ pub const LLMClient = struct {
     }
 
     fn extractContent(self: *LLMClient, response_body: []const u8) ![]const u8 {
-        // 先解析JSON，再检查是否有error字段
-        var parsed = std.json.parseFromSlice(std.json.Value, self.allocator, response_body, .{}) catch {
+        // Try JSON parse
+        var parsed = std.json.parseFromSlice(std.json.Value, self.allocator, response_body, .{}) catch |err| {
+            std.log.err("LLM JSON parse failed: {s}, body head: {s}", .{ @errorName(err), if (response_body.len > 200) response_body[0..200] else response_body });
             return try self.allocator.dupe(u8, "服务暂时不可用，请稍后再试");
         };
         defer parsed.deinit();
 
-        // 检查根节点是否有error字段，是则返回错误提示
-        if (parsed.value.object.get("error")) |_| {
-                return try self.allocator.dupe(u8, "服务暂时不可用，请稍后再试");
+        // Check for error field
+        if (parsed.value.object.get("error")) |err_val| {
+            const msg = if (err_val.object.get("message")) |m| m.string else "unknown error";
+            std.log.err("LLM API error: {s}", .{msg});
+            return try self.allocator.dupe(u8, "服务暂时不可用，请稍后再试");
         }
 
         const root = parsed.value;
@@ -488,22 +505,26 @@ pub const LLMClient = struct {
             }
             if (end > start) {
                 const slice = data[start..end];
-                var result: std.ArrayList(u8) = .empty;
+                // Pre-allocate the result buffer to avoid repeated reallocation failures.
+                // If the initial allocation fails, return null rather than producing
+                // silently-corrupted output.
+                var result = std.ArrayList(u8).initCapacity(self.allocator, slice.len) catch return null;
+                errdefer result.deinit();
 
                 var j: usize = 0;
                 while (j < slice.len) {
                     if (slice[j] == '\\' and j + 1 < slice.len) {
                         switch (slice[j + 1]) {
-                            'n' => result.append(self.allocator, '\n') catch {},
-                            'r' => result.append(self.allocator, '\r') catch {},
-                            't' => result.append(self.allocator, '\t') catch {},
-                            '"' => result.append(self.allocator, '"') catch {},
-                            '\\' => result.append(self.allocator, '\\') catch {},
-                            else => result.append(self.allocator, slice[j + 1]) catch {},
+                            'n' => result.appendAssumeCapacity('\n'),
+                            'r' => result.appendAssumeCapacity('\r'),
+                            't' => result.appendAssumeCapacity('\t'),
+                            '"' => result.appendAssumeCapacity('"'),
+                            '\\' => result.appendAssumeCapacity('\\'),
+                            else => result.appendAssumeCapacity(slice[j + 1]),
                         }
                         j += 2;
                     } else {
-                        result.append(self.allocator, slice[j]) catch {};
+                        result.appendAssumeCapacity(slice[j]);
                         j += 1;
                     }
                 }
@@ -511,6 +532,7 @@ pub const LLMClient = struct {
                 if (result.items.len > 0) {
                     return result.toOwnedSlice(self.allocator) catch return null;
                 }
+                result.deinit(self.allocator);
             }
         }
         return null;

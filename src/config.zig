@@ -252,6 +252,7 @@ pub const Config = struct {
         const allocator = self.allocator orelse return;
 
         if (self.api_key) |key| {
+            @memset(@constCast(key), 0);
             allocator.free(key);
         }
         allocator.free(self.api_base);

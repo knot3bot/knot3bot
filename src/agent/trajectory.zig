@@ -47,14 +47,16 @@ pub const TrajectoryRecorder = struct {
         }
         try w.writeAll("],");
 
-        // Timestamp in ISO-8601-ish format
+        // Timestamp in ISO-8601 format
         const ts = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds();
         const seconds = @mod(ts, 60);
         const minutes = @mod(@divTrunc(ts, 60), 60);
         const hours = @mod(@divTrunc(ts, 3600), 24);
-        _ = @divTrunc(ts, 86400); // days ignored for simplified date
-        // Rough date formatting: 2024-01-01T00:00:00Z (simplified)
-        try w.print("\"timestamp\":\"{d}-01-01T{d:0>2}:{d:0>2}:{d:0>2}Z\",", .{ 2024, hours, minutes, seconds });
+        const days_since_epoch = @divTrunc(ts, 86400);
+        const date = civilFromDays(days_since_epoch);
+        try w.print("\"timestamp\":\"{d}-{d:0>2}-{d:0>2}T{d:0>2}:{d:0>2}:{d:0>2}Z\",", .{
+            date.year, date.month, date.day, hours, minutes, seconds,
+        });
         try w.print("\"model\":\"{s}\",\"completed\":{s},", .{ model, if (completed) "true" else "false" });
 
         // Steps array
@@ -105,6 +107,28 @@ pub const TrajectoryRecorder = struct {
         try file.writePositionalAll(shared.context.io(), json_buf.items, stat.size);
     }
 };
+
+const CivilDate = struct {
+    year: i64,
+    month: i64,
+    day: i64,
+};
+
+/// Convert days since Unix epoch (1970-01-01) to civil date.
+/// Uses algorithm from Howard Hinnant's civil_from_days.
+fn civilFromDays(days: i64) CivilDate {
+    const z = days + 719468;
+    const era = @divTrunc(if (z >= 0) z else z - 146096, 146097);
+    const doe = @as(u32, @intCast(z - era * 146097));
+    const yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    const y = @as(i64, yoe) + era * 400;
+    const doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    const mp = (5 * doy + 2) / 153;
+    const d = doy - (153 * mp + 2) / 5 + 1;
+    const m: u32 = if (mp < 10) mp + 3 else mp - 9;
+    const yf = y + if (m <= 2) @as(i64, 1) else @as(i64, 0);
+    return .{ .year = yf, .month = @intCast(m), .day = @intCast(d) };
+}
 
 fn writeEscapedJsonString(writer: anytype, str: []const u8) !void {
     for (str) |c| {

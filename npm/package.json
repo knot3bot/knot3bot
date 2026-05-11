@@ -1,0 +1,46 @@
+{
+  "name": "knot3bot",
+  "version": "0.1.4",
+  "description": "High-performance AI coding agent in Zig — single binary, zero runtime dependencies",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/knot3bot/knot3bot.git"
+  },
+  "homepage": "https://github.com/knot3bot/knot3bot#readme",
+  "bugs": {
+    "url": "https://github.com/knot3bot/knot3bot/issues"
+  },
+  "bin": {
+    "knot3bot": "bin/knot3bot"
+  },
+  "files": [
+    "bin/",
+    "install.js",
+    "README.md"
+  ],
+  "scripts": {
+    "postinstall": "node install.js"
+  },
+  "keywords": [
+    "ai-agent",
+    "llm",
+    "coding-agent",
+    "zig",
+    "cli",
+    "chatgpt",
+    "claude",
+    "openai"
+  ],
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "os": [
+    "darwin",
+    "linux"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
+}

@@ -1,0 +1,15 @@
+# Prometheus scrape configuration for knot3bot
+# Usage: prometheus --config.file=deploy/prometheus.yml
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: 'knot3bot'
+    static_configs:
+      - targets: ['localhost:8080']
+    metrics_path: '/metrics'
+    scheme: 'http'
+    # If auth is enabled on the server, add bearer token:
+    # authorization:
+    #   credentials: 'your-api-key-here'

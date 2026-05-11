@@ -1,0 +1,55 @@
+# Multi-stage Docker build for knot3bot
+# Stage 1: Build Zig application from source
+# Stage 2: Minimal runtime image
+#
+# Usage:
+#   docker build -f Dockerfile.build -t knot3bot:latest .
+#   docker run -p 8080:8080 -e OPENAI_API_KEY=sk-... knot3bot:latest
+
+# ── Build stage ───────────────────────────────────────────────────────────────
+FROM alpine:3.23 AS builder
+
+RUN apk add --no-cache curl xz git
+
+# Install Zig 0.16.0
+ARG ZIG_VERSION=0.16.0
+RUN curl -fsSL https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz | tar xJ -C /usr/local
+ENV PATH="/usr/local/zig-linux-x86_64-${ZIG_VERSION}:${PATH}"
+
+WORKDIR /build
+
+# Copy dependency manifests first for layer caching
+COPY build.zig build.zig.zon ./
+COPY vendor/ vendor/
+
+# Copy source
+COPY src/ src/
+
+# Build with ReleaseSafe for production
+RUN zig build -Doptimize=ReleaseSafe
+
+# ── Runtime stage ─────────────────────────────────────────────────────────────
+FROM alpine:3.23
+
+RUN apk add --no-cache ca-certificates curl tzdata
+
+RUN addgroup -S knot3bot && adduser -S knot3bot -G knot3bot
+
+COPY --from=builder /build/zig-out/bin/knot3bot /usr/local/bin/knot3bot
+COPY ui/ /app/ui/
+
+RUN mkdir -p /app/data /app/logs && chown -R knot3bot:knot3bot /app
+
+WORKDIR /app
+
+VOLUME ["/app/data", "/app/logs"]
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
+    CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+
+USER knot3bot
+
+ENTRYPOINT ["/usr/local/bin/knot3bot"]
+CMD ["--server", "--port", "8080"]

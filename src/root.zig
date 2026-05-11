@@ -45,3 +45,4 @@ pub const context_compressor = @import("agent/context_compressor.zig");
 pub const trajectory = @import("agent/trajectory.zig");
 pub const acp_adapter = @import("adapters/acp_adapter.zig");
 pub const ACAdapter = acp_adapter.ACAdapter;
+pub const gateway = @import("gateway/root.zig");

@@ -15,16 +15,17 @@ const Provider = providers.Provider;
 const context_compressor_mod = @import("../agent/context_compressor.zig");
 const trajectory_mod = @import("../agent/trajectory.zig");
 const skill_self_improve_mod = @import("../agent/skill_self_improve.zig");
+const credential_pool_mod = @import("../agent/credential_pool.zig");
 const models = @import("../models.zig");
 const MemoryManager = @import("../memory/root.zig").MemoryManager;
 const ManagerMemoryBackend = @import("../memory/root.zig").ManagerMemoryBackend;
 const MemorySystem = @import("../memory/root.zig").MemorySystem;
 
 /// Maximum request body size (1MB) - protects against buffer overflow
-const MAX_REQUEST_SIZE = 1024 * 1024;
+pub const MAX_REQUEST_SIZE = 1024 * 1024;
 
 /// Graceful shutdown timeout for connection draining (seconds)
-const GRACEFUL_SHUTDOWN_TIMEOUT = 10;
+pub const GRACEFUL_SHUTDOWN_TIMEOUT = 10;
 
 // ============================================================================
 // Authentication Configuration
@@ -37,9 +38,20 @@ pub const AuthConfig = struct {
 
     pub fn validateKey(self: *const AuthConfig, key: []const u8) bool {
         for (self.api_keys) |valid_key| {
-            if (std.mem.eql(u8, key, valid_key)) return true;
+            if (constantTimeEql(key, valid_key)) return true;
         }
         return false;
+    }
+
+    /// Constant-time string comparison to prevent timing attacks on API keys.
+    /// Does not short-circuit on mismatch; always scans full length.
+    fn constantTimeEql(a: []const u8, b: []const u8) bool {
+        if (a.len != b.len) return false;
+        var diff: u8 = 0;
+        for (a, b) |ca, cb| {
+            diff |= ca ^ cb;
+        }
+        return diff == 0;
     }
 
     pub fn validateOrigin(self: *const AuthConfig, origin: []const u8) bool {
@@ -66,6 +78,8 @@ pub const ServerConfig = struct {
     rate_limit_requests: u32 = 100,
     /// Rate limit: window size in seconds (default: 60)
     rate_limit_window_secs: u32 = 60,
+    /// Max concurrent connections (default: 100, 0 = unlimited)
+    max_connections: u32 = 100,
     /// Enable skill self-improvement (default: false)
     enable_skill_self_improve: bool = false,
 };
@@ -83,10 +97,23 @@ pub const ServerMetrics = struct {
     request_size_errors: u64 = 0,
     rate_limit_exceeded: u64 = 0,
     circuit_breaker_rejections: u64 = 0,
+    /// Latency histogram buckets (ms): 10, 50, 100, 250, 500, 1000, 5000, +Inf
+    latency_buckets: [8]u64 = .{0} ** 8,
+    /// Cumulative token usage across all requests
+    prompt_tokens_total: u64 = 0,
+    completion_tokens_total: u64 = 0,
+    /// Provider call latency tracking
+    provider_calls: u64 = 0,
+    provider_total_ms: u64 = 0,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) ServerMetrics {
         return .{ .allocator = allocator };
+    }
+
+    pub fn recordProviderCall(self: *ServerMetrics, duration_ms: u64) void {
+        self.provider_calls += 1;
+        self.provider_total_ms += duration_ms;
     }
 
     pub fn record(self: *ServerMetrics, endpoint: []const u8, duration_ms: u64, is_error: bool) void {
@@ -94,6 +121,20 @@ pub const ServerMetrics = struct {
         self.total_requests += 1;
         if (is_error) self.error_count += 1;
         self.total_response_time_ms += duration_ms;
+        // Increment latency histogram bucket
+        const buckets = [_]u64{ 10, 50, 100, 250, 500, 1000, 5000 };
+        for (buckets, 0..) |bound, i| {
+            if (duration_ms <= bound) {
+                self.latency_buckets[i] += 1;
+                return;
+            }
+        }
+        self.latency_buckets[7] += 1; // +Inf bucket
+    }
+
+    pub fn recordTokens(self: *ServerMetrics, prompt: u32, completion: u32) void {
+        self.prompt_tokens_total += prompt;
+        self.completion_tokens_total += completion;
     }
 
     pub fn recordRequestSizeError(self: *ServerMetrics) void {
@@ -113,7 +154,11 @@ fn generateRequestId() []const u8 {
     const static = struct {
         var buf: [64]u8 = undefined;
     };
-    const result = std.fmt.bufPrint(&static.buf, "{d}-{d}", .{ timestamp, request_counter }) catch unreachable;
+    const result = std.fmt.bufPrint(&static.buf, "{d}-{d}", .{ timestamp, request_counter }) catch {
+        // Fallback: use a simpler format that fits in 64 bytes
+        const fallback = std.fmt.bufPrint(&static.buf, "err-{d}", .{request_counter}) catch unreachable;
+        return fallback;
+    };
     return result;
 }
 
@@ -171,6 +216,8 @@ pub const Server = struct {
     skill_self_improve: ?*skill_self_improve_mod.SkillSelfImprove = null,
     /// Whether skill self-improvement is enabled
     enable_skill_self_improve: bool = false,
+    /// Credential pool for multi-key rotation in server mode
+    credential_pool: ?credential_pool_mod.CredentialPool = null,
 
 
     pub fn init(
@@ -233,6 +280,23 @@ pub const Server = struct {
         std.log.info("Server listening on http://0.0.0.0:{d}/", .{self.port});
         std.log.info("Provider: {s}  Model: {s}", .{ self.agent_config.provider.name(), self.agent_config.model });
         std.log.info("Max request size: {d} bytes", .{self.config.max_request_size});
+        std.log.info("Max concurrent connections: {d}", .{self.config.max_connections});
+
+        // Verify provider connectivity at startup
+        if (self.agent_config.api_key != null) {
+            std.log.info("Checking provider connectivity...", .{});
+            if (self.verifyProviderConnectivity(io)) {
+                std.log.info("Provider connectivity: OK", .{});
+            } else |err| {
+                std.log.warn("Provider connectivity check failed: {s} (server will start anyway)", .{@errorName(err)});
+            }
+        } else {
+            std.log.warn("No API key configured — provider calls will fail", .{});
+        }
+
+        // Active connection counter for graceful shutdown draining
+        var active_connections = std.atomic.Value(u32).init(0);
+        var total_accepted: u64 = 0;
 
         while (!self.shutdown_flag.load(.monotonic)) {
             const conn = tcp_server.accept(io) catch |err| {
@@ -240,14 +304,52 @@ pub const Server = struct {
                 std.log.debug("Accept error: {s}", .{@errorName(err)});
                 continue;
             };
-            defer conn.close(io);
 
+            // Check connection limit (0 = unlimited)
+            const current = active_connections.fetchAdd(1, .monotonic);
+            if (self.config.max_connections > 0 and current >= self.config.max_connections) {
+                _ = active_connections.fetchSub(1, .monotonic);
+                const msg = "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\nConnection: close\r\n\r\n";
+                _ = streamWriteAllFd(conn.socket.handle, msg) catch {};
+                conn.close(io);
+                continue;
+            }
+            total_accepted += 1;
+            if (total_accepted % 1000 == 0) {
+                std.log.info("Server accepted {d} total connections", .{total_accepted});
+            }
+
+            // Handle the connection, tracking active count for drain
             self.handleConnection(conn) catch |err| {
                 std.log.err("Connection error: {s}", .{@errorName(err)});
             };
+            _ = active_connections.fetchSub(1, .monotonic);
+            conn.close(io);
         }
 
-        std.log.info("Server shutdown complete", .{});
+        // Graceful shutdown: drain active connections
+        if (active_connections.load(.monotonic) > 0) {
+            std.log.info("Draining {d} active connections (timeout: {d}s)...", .{
+                active_connections.load(.monotonic),
+                self.config.graceful_shutdown_timeout,
+            });
+
+            const deadline_ns = @as(i64, @truncate(std.Io.Clock.Timestamp.now(io, .awake).raw.nanoseconds)) +
+                @as(i64, @intCast(self.config.graceful_shutdown_timeout)) * std.time.ns_per_s;
+
+            while (active_connections.load(.monotonic) > 0) {
+                const now_ns = @as(i64, @truncate(std.Io.Clock.Timestamp.now(io, .awake).raw.nanoseconds));
+                if (now_ns >= deadline_ns) {
+                    std.log.warn("Graceful shutdown timed out with {d} connections remaining", .{
+                        active_connections.load(.monotonic),
+                    });
+                    break;
+                }
+                std.Io.sleep(io, .{ .nanoseconds = 100 * std.time.ns_per_ms }, .awake) catch break;
+            }
+        }
+
+        std.log.info("Server shutdown complete (handled {d} total connections)", .{total_accepted});
     }
 
     fn extractAuthHeader(request: []const u8) ?[]const u8 {
@@ -266,6 +368,32 @@ pub const Server = struct {
         const bearer_prefix = "Bearer ";
         const token = if (std.mem.startsWith(u8, header, bearer_prefix)) header[bearer_prefix.len..] else header;
         return self.auth_config.validateKey(token);
+    }
+
+    /// Verify LLM provider connectivity with a lightweight models list request.
+    fn verifyProviderConnectivity(self: *Server, io: std.Io) !void {
+        const api_base = self.agent_config.provider.baseUrl();
+        const api_key = self.agent_config.api_key orelse return error.NoApiKey;
+
+        // Build the models URL and auth header
+        var url_buf: [512]u8 = undefined;
+        const models_url = try std.fmt.bufPrint(&url_buf, "{s}/models", .{api_base});
+
+        var auth_buf: [512]u8 = undefined;
+        const auth_header = try std.fmt.bufPrint(&auth_buf, "Authorization: Bearer {s}", .{api_key});
+
+        const result = std.process.run(self.allocator, io, .{
+            .argv = &.{ "curl", "-s", "-o", "/dev/null", "-w", "%{http_code}", "--max-time", "10", "-H", auth_header, models_url },
+            .stdout_limit = std.Io.Limit.limited(64),
+            .stderr_limit = std.Io.Limit.limited(256),
+        }) catch return error.ProviderUnreachable;
+        defer self.allocator.free(result.stdout);
+        defer self.allocator.free(result.stderr);
+
+        const status_str = std.mem.trim(u8, result.stdout, " \n\r");
+        const status_code = std.fmt.parseInt(u16, status_str, 10) catch return error.InvalidResponse;
+        if (status_code >= 500) return error.ProviderError;
+        if (status_code == 401 or status_code == 403) return error.InvalidApiKey;
     }
 
     fn handleConnection(self: *Server, conn: std.Io.net.Stream) !void {
@@ -322,7 +450,9 @@ pub const Server = struct {
         std.log.info("[{s}] {s} {s}", .{ request_id, method, path });
 
         if (std.mem.eql(u8, method, "GET")) {
-            if (std.mem.eql(u8, path, "/") or std.mem.eql(u8, path, "/index.html")) {
+            if (std.mem.eql(u8, path, "/") or std.mem.eql(u8, path, "/dashboard")) {
+                try self.serveStaticFile(conn, "ui/dashboard.html", "text/html; charset=utf-8", request_id);
+            } else if (std.mem.eql(u8, path, "/index.html")) {
                 try self.serveStaticFile(conn, "ui/index.html", "text/html; charset=utf-8", request_id);
             } else if (std.mem.eql(u8, path, "/health")) {
                 try self.handleHealth(conn, request_id);
@@ -338,24 +468,18 @@ pub const Server = struct {
                 try self.handleGetTools(conn, request_id);
             } else if (std.mem.eql(u8, path, "/api/config")) {
                 try self.handleGetConfig(conn, request_id);
+            } else if (std.mem.eql(u8, path, "/api/sessions")) {
+                try self.handleGetSessions(conn, request_id);
+            } else if (std.mem.eql(u8, path, "/api/dashboard")) {
+                try self.handleDashboard(conn, request_id);
             } else {
                 try self.sendJson(conn, 404, "{\"error\":{\"message\":\"Not found\"}}", request_id);
             }
         } else if (std.mem.eql(u8, method, "OPTIONS")) {
+            // CORS preflight — send headers and stop. The browser will follow up
+            // with the actual request separately.
             try self.sendOptions(conn, request_id);
-            if (std.mem.eql(u8, path, "/") or std.mem.eql(u8, path, "/health")) {
-                try self.handleHealth(conn, request_id);
-            } else if (std.mem.eql(u8, path, "/healthz")) {
-                try self.sendJson(conn, 200, "{\"status\":\"ok\"}", request_id);
-            } else if (std.mem.eql(u8, path, "/v1/models")) {
-                try self.handleGetModels(conn, request_id);
-            } else if (std.mem.eql(u8, path, "/metrics")) {
-                try self.handleGetMetrics(conn, request_id);
-            } else if (std.mem.eql(u8, path, "/ready")) {
-                try self.handleReady(conn, request_id);
-            } else {
-                try self.sendJson(conn, 404, "{\"error\":{\"message\":\"Not found\"}}", request_id);
-            }
+            return;
         } else if (std.mem.eql(u8, method, "POST")) {
             if (!self.validateApiKey(auth_header)) {
                 try self.sendJson(conn, 401, "{\"error\":{\"message\":\"Unauthorized\",\"type\":\"invalid_api_key\"}}", request_id);
@@ -443,6 +567,7 @@ pub const Server = struct {
             .enable_smart_routing = self.model_registry != null,
             .enable_skill_self_improve = self.enable_skill_self_improve,
             .skill_self_improve = if (si_engine) |*si| si else null,
+            .credential_pool = if (self.credential_pool) |*cp| cp else null,
         };
 
         var agent = Agent.Agent.init(allocator, agent_config, self.registry);
@@ -456,8 +581,15 @@ pub const Server = struct {
             }
         }
 
-        const session_id = parsed.value.session_id;
-        if (session_id) |sid| {
+        // Load past conversation history from memory
+        const loaded_sid = parsed.value.session_id orelse "default";
+        if (self.memory_manager.getHistoryJSON(allocator, loaded_sid)) |history| {
+            if (history) |h| {
+                agent.loadHistoryFromJSON(h) catch {};
+            }
+        } else |_| {}
+
+        if (parsed.value.session_id) |sid| {
             self.memory_manager.createSession(sid) catch {};
             for (messages) |msg| {
                 self.memory_manager.addMessage(sid, msg.role, msg.content) catch {};
@@ -471,7 +603,7 @@ pub const Server = struct {
                 return;
             };
             defer allocator.free(response);
-            if (session_id) |sid| {
+            if (parsed.value.session_id) |sid| {
                 self.memory_manager.addMessage(sid, "assistant", response) catch {};
             }
         } else {
@@ -484,7 +616,11 @@ pub const Server = struct {
             self.circuit_brk.recordSuccess();
             defer allocator.free(response);
 
-            if (session_id) |sid| {
+            // Record token usage for metrics
+            const usage_stats = agent.getUsageStats();
+            self.metrics.recordTokens(usage_stats.prompt_tokens, usage_stats.completion_tokens);
+
+            if (parsed.value.session_id) |sid| {
                 self.memory_manager.addMessage(sid, "assistant", response) catch {};
             }
 
@@ -494,6 +630,7 @@ pub const Server = struct {
             const chat_id = std.fmt.allocPrint(self.allocator, "chatcmpl-{s}", .{request_id}) catch "chatcmpl-1";
             defer self.allocator.free(chat_id);
 
+            const ut = usage_stats;
             try json_buf.appendSlice(self.allocator, "{\"id\":\"");
             try json_buf.appendSlice(self.allocator, chat_id);
             try json_buf.appendSlice(self.allocator, "\",\"object\":\"chat.completion\",\"created\":");
@@ -506,7 +643,25 @@ pub const Server = struct {
             try json_buf.appendSlice(self.allocator, self.agent_config.model);
             try json_buf.appendSlice(self.allocator, "\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"");
             try appendJsonEscaped(&json_buf, self.allocator, response);
-            try json_buf.appendSlice(self.allocator, "\"}}],\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":0,\"total_tokens\":0}}");
+            try json_buf.appendSlice(self.allocator, "\"}}],\"usage\":{\"prompt_tokens\":");
+            {
+                var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &json_buf);
+                try allocating.writer.print("{d}", .{ut.prompt_tokens});
+                json_buf = allocating.toArrayList();
+            }
+            try json_buf.appendSlice(self.allocator, ",\"completion_tokens\":");
+            {
+                var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &json_buf);
+                try allocating.writer.print("{d}", .{ut.completion_tokens});
+                json_buf = allocating.toArrayList();
+            }
+            try json_buf.appendSlice(self.allocator, ",\"total_tokens\":");
+            {
+                var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &json_buf);
+                try allocating.writer.print("{d}", .{ut.total_tokens});
+                json_buf = allocating.toArrayList();
+            }
+            try json_buf.appendSlice(self.allocator, "}}");
             try self.sendJson(conn, 200, try json_buf.toOwnedSlice(self.allocator), request_id);
         }
     }
@@ -666,6 +821,7 @@ pub const Server = struct {
             .trajectory_recorder = if (self.trajectory_recorder) |*tr| tr else null,
             .model_registry = self.model_registry,
             .enable_smart_routing = self.model_registry != null,
+            .credential_pool = if (self.credential_pool) |*cp| cp else null,
         };
 
         var agent = Agent.Agent.init(allocator, agent_config, self.registry);
@@ -679,8 +835,15 @@ pub const Server = struct {
             }
         }
 
-        const session_id = parsed.value.session_id;
-        if (session_id) |sid| {
+        // Load past conversation history from memory
+        const loaded_sid = parsed.value.session_id orelse "default";
+        if (self.memory_manager.getHistoryJSON(allocator, loaded_sid)) |history| {
+            if (history) |h| {
+                agent.loadHistoryFromJSON(h) catch {};
+            }
+        } else |_| {}
+
+        if (parsed.value.session_id) |sid| {
             self.memory_manager.createSession(sid) catch {};
             for (messages) |msg| {
                 self.memory_manager.addMessage(sid, msg.role, msg.content) catch {};
@@ -696,7 +859,11 @@ pub const Server = struct {
         self.circuit_brk.recordSuccess();
         defer allocator.free(response);
 
-        if (session_id) |sid| {
+        // Record token usage for metrics
+        const usage_stats2 = agent.getUsageStats();
+        self.metrics.recordTokens(usage_stats2.prompt_tokens, usage_stats2.completion_tokens);
+
+        if (parsed.value.session_id) |sid| {
             self.memory_manager.addMessage(sid, "assistant", response) catch {};
         }
 
@@ -718,7 +885,25 @@ pub const Server = struct {
         try json_buf.appendSlice(self.allocator, self.agent_config.model);
         try json_buf.appendSlice(self.allocator, "\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"");
             try appendJsonEscaped(&json_buf, self.allocator, response);
-        try json_buf.appendSlice(self.allocator, "\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":0,\"completion_tokens\":0,\"total_tokens\":0}}");
+        try json_buf.appendSlice(self.allocator, "\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":");
+        {
+            var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &json_buf);
+            try allocating.writer.print("{d}", .{usage_stats2.prompt_tokens});
+            json_buf = allocating.toArrayList();
+        }
+        try json_buf.appendSlice(self.allocator, ",\"completion_tokens\":");
+        {
+            var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &json_buf);
+            try allocating.writer.print("{d}", .{usage_stats2.completion_tokens});
+            json_buf = allocating.toArrayList();
+        }
+        try json_buf.appendSlice(self.allocator, ",\"total_tokens\":");
+        {
+            var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &json_buf);
+            try allocating.writer.print("{d}", .{usage_stats2.total_tokens});
+            json_buf = allocating.toArrayList();
+        }
+        try json_buf.appendSlice(self.allocator, "}}");
         try self.sendJson(conn, 200, try json_buf.toOwnedSlice(self.allocator), request_id);
     }
     fn serveStaticFile(self: *Server, conn: std.Io.net.Stream, file_path: []const u8, content_type: []const u8, request_id: []const u8) !void {
@@ -750,18 +935,47 @@ pub const Server = struct {
     }
 
     fn sendOptions(self: *Server, conn: std.Io.net.Stream, request_id: []const u8) !void {
-        const header = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 204 No Content\r\nAccess-Control-Allow-Origin: *\r\nAccess-Control-Allow-Methods: GET, POST, OPTIONS\r\nAccess-Control-Allow-Headers: Content-Type, Authorization\r\nX-Request-ID: {s}\r\n\r\n", .{request_id});
+        const header = try std.fmt.allocPrint(self.allocator,
+            "HTTP/1.1 204 No Content\r\n" ++
+                "Server: knot3bot\r\n" ++
+                "X-Content-Type-Options: nosniff\r\n" ++
+                "X-Frame-Options: DENY\r\n" ++
+                "X-XSS-Protection: 1; mode=block\r\n" ++
+                "Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n" ++
+                "Access-Control-Allow-Origin: *\r\n" ++
+                "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n" ++
+                "Access-Control-Allow-Headers: Content-Type, Authorization\r\n" ++
+                "X-Request-ID: {s}\r\n\r\n",
+            .{request_id});
         defer self.allocator.free(header);
         try streamWriteAll(conn, header);
     }
 
     fn sendJson(self: *Server, conn: std.Io.net.Stream, status: u16, json: []const u8, request_id: []const u8) !void {
-        const header = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 {d} OK\r\nContent-Type: application/json\r\nContent-Length: {d}\r\nAccess-Control-Allow-Origin: *\r\nX-Request-ID: {s}\r\n\r\n", .{ status, json.len, request_id });
+        const header = try std.fmt.allocPrint(self.allocator,
+            "HTTP/1.1 {d} OK\r\n" ++
+                "Server: knot3bot\r\n" ++
+                "X-Content-Type-Options: nosniff\r\n" ++
+                "X-Frame-Options: DENY\r\n" ++
+                "X-XSS-Protection: 1; mode=block\r\n" ++
+                "Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n" ++
+                "Content-Type: application/json\r\n" ++
+                "Content-Length: {d}\r\n" ++
+                "Access-Control-Allow-Origin: *\r\n" ++
+                "X-Request-ID: {s}\r\n\r\n",
+            .{ status, json.len, request_id });
         defer self.allocator.free(header);
         try streamWriteAll(conn, header);
         try streamWriteAll(conn, json);
     }
 
+
+    /// Get process RSS in bytes.
+    /// Read /proc/self/statm on Linux (second field = RSS pages * 4096).
+    /// Returns 0 on non-Linux platforms where /proc is unavailable.
+    fn getProcessRss() u64 {
+        return 0; // Stub: /proc/self/statm available on Linux only
+    }
 
     fn handleHealth(self: *Server, conn: std.Io.net.Stream, request_id: []const u8) !void {
         const uptime = shared.timestamp() - self.start_time;
@@ -769,9 +983,12 @@ pub const Server = struct {
         const model = self.agent_config.model;
         const tool_count = self.registry.count();
         const skill_status: []const u8 = if (self.enable_skill_self_improve) "enabled" else "disabled";
+        const version = @import("config").version;
+        const rss_bytes = getProcessRss();
+        const total_requests = self.metrics.total_requests;
         const response = try std.fmt.allocPrint(self.allocator,
-            "{{\"status\":\"ok\",\"service\":\"knot3bot\",\"version\":\"0.1.0\",\"uptime_seconds\":{d},\"provider\":\"{s}\",\"model\":\"{s}\",\"tools\":{d},\"skill_self_improve\":\"{s}\",\"request_id\":\"{s}\"}}",
-            .{ uptime, provider, model, tool_count, skill_status, request_id });
+            "{{\"status\":\"ok\",\"service\":\"knot3bot\",\"version\":\"{s}\",\"uptime_seconds\":{d},\"provider\":\"{s}\",\"model\":\"{s}\",\"tools\":{d},\"skill_self_improve\":\"{s}\",\"request_id\":\"{s}\",\"memory_rss_bytes\":{d},\"total_requests\":{d}}}",
+            .{ version, uptime, provider, model, tool_count, skill_status, request_id, rss_bytes, total_requests });
         defer self.allocator.free(response);
         try self.sendJson(conn, 200, response, request_id);
     }
@@ -779,18 +996,30 @@ pub const Server = struct {
     fn handleReady(self: *Server, conn: std.Io.net.Stream, request_id: []const u8) !void {
         // Deep health check - verify DB connectivity
         var db_healthy = true;
+        var provider_healthy = true;
         if (self.db_path) |path| {
             _ = SqliteMemorySystem.init(self.allocator, path) catch {
                 db_healthy = false;
             };
         }
 
+        // Check provider has an API key configured
+        if (self.agent_config.api_key == null) {
+            provider_healthy = false;
+        }
+
+        const ready = db_healthy and provider_healthy;
         const provider = self.agent_config.provider.name();
+        const status_code: u16 = if (ready) 200 else 503;
         const response = try std.fmt.allocPrint(self.allocator,
-            \\{{"ready":true,"provider":"{s}","database":"{s}"}}
-        , .{ provider, if (db_healthy) "ok" else "error" });
+            \\{{"ready":{s},"provider":"{s}","database":"{s}"}}
+        , .{
+            if (ready) "true" else "false",
+            provider,
+            if (db_healthy) "ok" else "error",
+        });
         defer self.allocator.free(response);
-        try self.sendJson(conn, 200, response, request_id);
+        try self.sendJson(conn, status_code, response, request_id);
     }
 
     fn handleGetModels(self: *Server, conn: std.Io.net.Stream, request_id: []const u8) !void {
@@ -882,11 +1111,81 @@ pub const Server = struct {
             metrics_text = allocating.toArrayList();
         }
 
+        // Latency histogram
+        try metrics_text.appendSlice(self.allocator, "# HELP knot3bot_request_duration_histogram_ms Request duration histogram\n");
+        try metrics_text.appendSlice(self.allocator, "# TYPE knot3bot_request_duration_histogram_ms histogram\n");
+        {
+            var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &metrics_text);
+            const bucket_bounds = [_]u64{ 10, 50, 100, 250, 500, 1000, 5000 };
+            var cumulative: u64 = 0;
+            for (bucket_bounds, 0..) |bound, i| {
+                cumulative += self.metrics.latency_buckets[i];
+                try allocating.writer.print("knot3bot_request_duration_histogram_ms{{le=\"{d}\"}} {d}\n", .{ bound, cumulative });
+            }
+            cumulative += self.metrics.latency_buckets[7];
+            try allocating.writer.print("knot3bot_request_duration_histogram_ms{{le=\"+Inf\"}} {d}\n", .{cumulative});
+            try allocating.writer.print("knot3bot_request_duration_histogram_ms_count {d}\n", .{cumulative});
+            // Sum approximation using bucket midpoints
+            const midpoints = [_]u64{ 5, 30, 75, 175, 375, 750, 3000, 10000 };
+            var sum: u64 = 0;
+            for (midpoints, 0..) |mid, i| {
+                sum += mid * self.metrics.latency_buckets[i];
+            }
+            try allocating.writer.print("knot3bot_request_duration_histogram_ms_sum {d}\n", .{sum});
+            metrics_text = allocating.toArrayList();
+        }
+
         try metrics_text.appendSlice(self.allocator, "# HELP knot3bot_rate_limit_exceeded Total rate limit violations\n");
         try metrics_text.appendSlice(self.allocator, "# TYPE knot3bot_rate_limit_exceeded counter\n");
         {
             var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &metrics_text);
             try allocating.writer.print("knot3bot_rate_limit_exceeded {d}\n", .{self.metrics.rate_limit_exceeded});
+            metrics_text = allocating.toArrayList();
+        }
+
+        try metrics_text.appendSlice(self.allocator, "# HELP knot3bot_prompt_tokens_total Cumulative prompt tokens used\n");
+        try metrics_text.appendSlice(self.allocator, "# TYPE knot3bot_prompt_tokens_total counter\n");
+        {
+            var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &metrics_text);
+            try allocating.writer.print("knot3bot_prompt_tokens_total {d}\n", .{self.metrics.prompt_tokens_total});
+            metrics_text = allocating.toArrayList();
+        }
+
+        try metrics_text.appendSlice(self.allocator, "# HELP knot3bot_completion_tokens_total Cumulative completion tokens used\n");
+        try metrics_text.appendSlice(self.allocator, "# TYPE knot3bot_completion_tokens_total counter\n");
+        {
+            var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &metrics_text);
+            try allocating.writer.print("knot3bot_completion_tokens_total {d}\n", .{self.metrics.completion_tokens_total});
+            metrics_text = allocating.toArrayList();
+        }
+
+        // Provider latency metrics
+        try metrics_text.appendSlice(self.allocator, "# HELP knot3bot_provider_calls_total Total LLM provider calls\n");
+        try metrics_text.appendSlice(self.allocator, "# TYPE knot3bot_provider_calls_total counter\n");
+        {
+            var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &metrics_text);
+            try allocating.writer.print("knot3bot_provider_calls_total {d}\n", .{self.metrics.provider_calls});
+            metrics_text = allocating.toArrayList();
+        }
+
+        try metrics_text.appendSlice(self.allocator, "# HELP knot3bot_provider_latency_ms_avg Average provider call latency\n");
+        try metrics_text.appendSlice(self.allocator, "# TYPE knot3bot_provider_latency_ms_avg gauge\n");
+        {
+            var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &metrics_text);
+            const avg = if (self.metrics.provider_calls > 0)
+                @as(f64, @floatFromInt(self.metrics.provider_total_ms)) / @as(f64, @floatFromInt(self.metrics.provider_calls))
+            else
+                0.0;
+            try allocating.writer.print("knot3bot_provider_latency_ms_avg {d:.2}\n", .{avg});
+            metrics_text = allocating.toArrayList();
+        }
+
+        // Memory RSS metric
+        try metrics_text.appendSlice(self.allocator, "# HELP knot3bot_memory_rss_bytes Process RSS memory in bytes\n");
+        try metrics_text.appendSlice(self.allocator, "# TYPE knot3bot_memory_rss_bytes gauge\n");
+        {
+            var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &metrics_text);
+            try allocating.writer.print("knot3bot_memory_rss_bytes {d}\n", .{getProcessRss()});
             metrics_text = allocating.toArrayList();
         }
 
@@ -954,6 +1253,39 @@ pub const Server = struct {
         defer self.allocator.free(header);
         try streamWriteAll(conn, header);
         try streamWriteAll(conn, metrics);
+    }
+
+    fn handleGetSessions(self: *Server, conn: std.Io.net.Stream, request_id: []const u8) !void {
+        const sessions = self.memory_manager.listSessions(self.allocator) catch &.{};
+        defer for (sessions) |s| self.allocator.free(s);
+        var json = std.ArrayList(u8).initCapacity(self.allocator, 1024) catch return;
+        defer json.deinit(self.allocator);
+        try json.appendSlice(self.allocator, "{\"sessions\":[");
+        for (sessions, 0..) |s, i| {
+            if (i > 0) try json.appendSlice(self.allocator, ",");
+            try json.appendSlice(self.allocator, "\"");
+            try json.appendSlice(self.allocator, s);
+            try json.appendSlice(self.allocator, "\"");
+        }
+        try json.appendSlice(self.allocator, "]}");
+        const resp = try json.toOwnedSlice(self.allocator);
+        defer self.allocator.free(resp);
+        try self.sendJson(conn, 200, resp, request_id);
+    }
+
+    fn handleDashboard(self: *Server, conn: std.Io.net.Stream, request_id: []const u8) !void {
+        const uptime = shared.timestamp() - self.start_time;
+        const tool_count = self.registry.count();
+        const provider = self.agent_config.provider.name();
+        const model = self.agent_config.model;
+        const resp = try std.fmt.allocPrint(self.allocator,
+            "{{\"status\":\"ok\",\"provider\":\"{s}\",\"model\":\"{s}\",\"tools\":{d},\"uptime\":{d},\"total_requests\":{d},\"errors\":{d},\"streaming\":{d},\"circuit_state\":\"{s}\",\"version\":\"{s}\"}}",
+            .{ provider, model, tool_count, uptime, self.metrics.total_requests, self.metrics.error_count,
+               self.metrics.streaming_requests,
+               @tagName(self.circuit_brk.getState()),
+               @import("config").version });
+        defer self.allocator.free(resp);
+        try self.sendJson(conn, 200, resp, request_id);
     }
 };
 

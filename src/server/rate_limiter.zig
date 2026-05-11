@@ -36,17 +36,28 @@ pub const RateLimiter = struct {
     /// Client buckets (key identifier -> bucket)
     clients: std.StringHashMap(ClientBucket),
     allocator: std.mem.Allocator,
+    mutex: std.Io.Mutex,
+    io: std.Io,
+    /// Last cleanup timestamp for TTL-based eviction
+    last_cleanup: i64,
 
     pub fn init(allocator: std.mem.Allocator, config: RateLimitConfig) RateLimiter {
+        const io = std.Io.Threaded.global_single_threaded.io();
         return .{
             .config = config,
             .key_limits = std.StringHashMap(PerKeyLimit).init(allocator),
             .clients = std.StringHashMap(ClientBucket).init(allocator),
             .allocator = allocator,
+            .mutex = std.Io.Mutex.init,
+            .io = io,
+            .last_cleanup = 0,
         };
     }
 
     pub fn deinit(self: *RateLimiter) void {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+
         var it = self.clients.iterator();
         while (it.next()) |entry| {
             self.allocator.free(entry.key_ptr.*);
@@ -84,9 +95,15 @@ pub const RateLimiter = struct {
         };
     }
 
-    /// Check if request is allowed for the given identifier
-    /// Uses API key if provided, otherwise falls back to IP
+    /// Check if request is allowed for the given identifier.
+    /// Uses API key if provided, otherwise falls back to IP.
+    /// Thread-safe via internal mutex.
     pub fn check(self: *RateLimiter, identifier: []const u8) bool {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+
+        self.maybeCleanup();
+
         const now = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds() * std.time.ms_per_s;
         const effective_limit = self.getEffectiveLimit(identifier);
         const bucket = self.getOrCreateBucket(identifier, now, effective_limit);
@@ -120,6 +137,29 @@ pub const RateLimiter = struct {
         return false;
     }
 
+    /// Evict stale client buckets to prevent unbounded memory growth.
+    fn maybeCleanup(self: *RateLimiter) void {
+        const now = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds() * std.time.ms_per_s;
+        // Cleanup at most once per minute
+        if (now - self.last_cleanup < 60 * std.time.ms_per_s) return;
+        self.last_cleanup = now;
+
+        const max_idle_ms = 5 * 60 * std.time.ms_per_s; // 5 minute TTL
+        var to_remove: std.ArrayList([]const u8) = .empty;
+        var it = self.clients.iterator();
+        while (it.next()) |entry| {
+            if (now - entry.value_ptr.last_update > max_idle_ms) {
+                to_remove.append(self.allocator, entry.key_ptr.*) catch continue;
+            }
+        }
+        for (to_remove.items) |key| {
+            if (self.clients.fetchRemove(key)) |kv| {
+                self.allocator.free(kv.key);
+            }
+        }
+        to_remove.deinit(self.allocator);
+    }
+
     fn getOrCreateBucket(self: *RateLimiter, identifier: []const u8, now: i64, limit: PerKeyLimit) ClientBucket {
         if (self.clients.get(identifier)) |existing| {
             const elapsed = @as(f64, @floatFromInt(now - existing.last_update));
@@ -135,6 +175,9 @@ pub const RateLimiter = struct {
 
     /// Get remaining tokens for an identifier
     pub fn remaining(self: *RateLimiter, identifier: []const u8) u32 {
+        self.mutex.lockUncancelable(self.io);
+        defer self.mutex.unlock(self.io);
+
         const effective_limit = self.getEffectiveLimit(identifier);
         if (self.clients.get(identifier)) |bucket| {
             return @as(u32, @intFromFloat(@max(0, bucket.tokens)));

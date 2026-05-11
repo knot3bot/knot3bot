@@ -98,6 +98,16 @@ pub fn createDefaultRegistry(allocator: std.mem.Allocator, workspace_dir: []cons
         sp.* = .{ .workspace_dir = workspace_dir };
         try registry.register(sp.tool());
     }
+    // Task planner
+    { const tp = try allocator.create(root.task_planner.TaskPlannerTool); tp.* = .{}; try registry.register(tp.tool()); }
+    // Diff tool
+    { const dt = try allocator.create(root.diff_tool.DiffTool); dt.* = .{ .workspace_dir = workspace_dir }; try registry.register(dt.tool()); }
+    // Approval
+    { const at = try allocator.create(root.approval.ApprovalTool); at.* = .{}; try registry.register(at.tool()); }
+    // URL safety
+    { const ust = try allocator.create(root.url_safety.UrlSafetyTool); ust.* = .{}; try registry.register(ust.tool()); }
+    // Session search
+    { const sst = try allocator.create(root.session_search.SessionSearchTool); sst.* = .{}; try registry.register(sst.tool()); }
 
     return registry;
 }

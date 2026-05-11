@@ -1,0 +1,54 @@
+# Prometheus alerting rules for knot3bot
+# Usage: prometheus --config.file=deploy/prometheus.yml
+groups:
+  - name: knot3bot
+    rules:
+      # Circuit breaker is open — service is rejecting requests
+      - alert: Knot3botCircuitBreakerOpen
+        expr: knot3bot_circuit_breaker_state == 1
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Circuit breaker is open"
+          description: "knot3bot circuit breaker has been open for 1 minute. LLM provider may be down."
+
+      # High error rate
+      - alert: Knot3botHighErrorRate
+        expr: rate(knot3bot_errors[5m]) / rate(knot3bot_total_requests[5m]) > 0.10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High error rate"
+          description: "knot3bot error rate is {{ $value | humanizePercentage }} over the last 5 minutes."
+
+      # High latency
+      - alert: Knot3botHighLatency
+        expr: histogram_quantile(0.95, rate(knot3bot_request_duration_histogram_ms_bucket[5m])) > 5000
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High P95 latency"
+          description: "knot3bot P95 latency is {{ $value }}ms over the last 5 minutes."
+
+      # Service down
+      - alert: Knot3botDown
+        expr: up{job="knot3bot"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "knot3bot is down"
+          description: "knot3bot has been unreachable for 2 minutes."
+
+      # Rate limiting active
+      - alert: Knot3botRateLimiting
+        expr: rate(knot3bot_rate_limit_exceeded[5m]) > 1
+        for: 5m
+        labels:
+          severity: info
+        annotations:
+          summary: "Rate limiting active"
+          description: "knot3bot is rate-limiting {{ $value }} requests/second."

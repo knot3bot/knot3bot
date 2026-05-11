@@ -1,13 +1,38 @@
 const std = @import("std");
 
+pub const SafetyLevel = enum(u2) {
+    low,      // Safe: read-only, no side effects
+    medium,   // Moderate: file writes, web requests
+    high,     // Dangerous: shell execution, code execution
+    critical, // Requires explicit user approval: system changes, network access
+
+    pub fn fromString(s: []const u8) SafetyLevel {
+        if (std.mem.eql(u8, s, "low")) return .low;
+        if (std.mem.eql(u8, s, "medium")) return .medium;
+        if (std.mem.eql(u8, s, "high")) return .high;
+        if (std.mem.eql(u8, s, "critical")) return .critical;
+        return .medium; // default
+    }
+
+    pub fn needsApproval(self: SafetyLevel) bool {
+        return self == .high or self == .critical;
+    }
+};
+
 /// Skill definition - a reusable prompt template or procedure
 pub const Skill = struct {
     name: []const u8,
     description: []const u8,
+    /// Safety level (default: medium)
+    safety_level: SafetyLevel = .medium,
     /// Prompt template that gets injected when skill is activated
     prompt_template: []const u8,
     /// Optional associated scripts for automation
     scripts: []const SkillScript = &[_]SkillScript{},
+    /// Tools required by this skill (validated on load)
+    required_tools: []const []const u8 = &.{},
+    /// Environment variables required by this skill
+    required_env_vars: []const []const u8 = &.{},
     /// Whether this skill should auto-activate for certain patterns
     auto_activate: bool = false,
     /// Pattern that triggers auto-activation (regex-like)
@@ -34,13 +59,13 @@ pub const SkillLoadResult = struct {
 /// Registry for managing skills
 pub const SkillRegistry = struct {
     allocator: std.mem.Allocator,
-    skills: std.StringArrayHashMap(Skill),
+    skills: std.StringHashMap(Skill),
 
     /// Initialize skill registry
     pub fn init(allocator: std.mem.Allocator) SkillRegistry {
         return .{
             .allocator = allocator,
-            .skills = std.StringArrayHashMap(Skill).init(allocator),
+            .skills = std.StringHashMap(Skill).init(allocator),
         };
     }
 
@@ -64,7 +89,23 @@ pub const SkillRegistry = struct {
         self.skills.deinit();
     }
 
-    /// Register a skill
+    /// Validate a skill's dependencies against available tools.
+    /// Returns null if valid, or an error message string identifying the problem.
+    pub fn validateSkill(_: *SkillRegistry, skill: *const Skill, available_tools: []const []const u8) ?[]const u8 {
+        // Check required tools
+        for (skill.required_tools) |tool_name| {
+            var found = false;
+            for (available_tools) |available| {
+                if (std.mem.eql(u8, tool_name, available)) { found = true; break; }
+            }
+            if (!found) return "Missing required tool";
+        }
+
+        // Env var validation: the caller should check via shared.context.getenv()
+        return null;
+    }
+
+    /// Register a skill with validation.
     pub fn register(self: *SkillRegistry, skill: Skill) !void {
         const name_copy = try self.allocator.dupe(u8, skill.name);
         errdefer self.allocator.free(name_copy);

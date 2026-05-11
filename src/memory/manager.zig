@@ -58,15 +58,22 @@ pub const MemoryManager = struct {
     }
 
     pub fn getHistoryJSON(self: *MemoryManager, allocator: std.mem.Allocator, session_id: []const u8) !?[]const u8 {
-        for (self.backends) |backend| {
-            const result = switch (backend) {
-                .memory => |b| b.getHistoryJSON(allocator, session_id),
-                .sqlite => |b| b.getHistoryJSON(allocator, session_id),
-            };
-            if (result) |history| {
-                if (history) |h| return h;
-            } else |err| {
-                std.log.warn("MemoryManager: getHistoryJSON failed for backend: {s}", .{@errorName(err)});
+        for (self.backends) |*backend| {
+            switch (backend.*) {
+                .memory => |b_ptr| {
+                    if (MemorySystem.getHistoryJSON(b_ptr, allocator, session_id)) |r| {
+                        return r;
+                    } else |err| {
+                        std.log.warn("MemoryManager: memory getHistoryJSON err: {s}", .{@errorName(err)});
+                    }
+                },
+                .sqlite => |b_ptr| {
+                    const r = SqliteMemorySystem.getHistoryJSON(b_ptr, allocator, session_id) catch |err| {
+                        std.log.warn("MemoryManager: sqlite getHistoryJSON err: {s}", .{@errorName(err)});
+                        continue;
+                    };
+                    return r;
+                },
             }
         }
         return null;

@@ -1,0 +1,35 @@
+# Build artifacts
+.zig-cache/
+zig-out/
+zig-pkg/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+*.pem
+*.key
+credentials.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Git
+.git/
+.gitignore
+.gitmodules
+
+# Docs (not needed at runtime)
+docs/
+*.md
+LICENSE
+
+# Test files
+src/*_test.zig
+src/**/*_test.zig

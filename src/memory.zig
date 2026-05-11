@@ -92,17 +92,17 @@ pub const MemorySystem = struct {
 
         var list: std.ArrayList(u8) = .empty;
         defer list.deinit(allocator);
-        const writer = list.writer(allocator);
 
-        try writer.writeAll("[");
+        try list.appendSlice(allocator, "[");
         for (session.messages.items, 0..) |msg, i| {
-            if (i > 0) try writer.writeAll(",");
-            try writer.print(
+            if (i > 0) try list.appendSlice(allocator, ",");
+            const entry = try std.fmt.allocPrint(allocator,
                 "{{\"role\":\"{s}\",\"content\":\"{s}\",\"timestamp\":{d}}}",
-                .{ msg.role, msg.content, msg.timestamp },
-            );
+                .{ msg.role, msg.content, msg.timestamp });
+            defer allocator.free(entry);
+            try list.appendSlice(allocator, entry);
         }
-        try writer.writeAll("]");
+        try list.appendSlice(allocator, "]");
 
         return try list.toOwnedSlice(allocator);
     }

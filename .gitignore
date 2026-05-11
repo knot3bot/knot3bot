@@ -50,3 +50,5 @@ build/
 *.key
 credentials.json
 .gstack/
+npm/bin/knot3bot_bin
+trajectory_samples.jsonl

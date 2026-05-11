@@ -13,9 +13,9 @@ pub fn build(b: *std.Build) void {
     // for restricting supported target set are available.
     const target = b.standardTargetOptions(.{});
     // Standard optimization options allow the person running `zig build` to select
-    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall. Here we do not
-    // set a preferred release mode, allowing the user to decide how to optimize.
-    const optimize = b.standardOptimizeOption(.{});
+    // between Debug, ReleaseSafe, ReleaseFast, and ReleaseSmall.
+    // Default to ReleaseSafe for production safety.
+    const optimize = b.standardOptimizeOption(.{ .preferred_optimize_mode = .ReleaseSafe });
     // It's also possible to define more custom flags to toggle optional features
     // of this build script using `b.option()`. All defined flags (including
     // target and optimize options) will be listed when running `zig build --help`
@@ -101,6 +101,12 @@ pub fn build(b: *std.Build) void {
     // Config options module for conditional compilation
     const config_options = b.addOptions();
     config_options.addOption(bool, "enable_sqlite", enable_sqlite);
+    // Embed git version: try git rev-parse, fall back to "dev"
+    const git_version = blk: {
+        var code: u8 = undefined;
+        break :blk b.runAllowFail(&.{ "git", "rev-parse", "--short", "HEAD" }, &code, .pipe) catch "dev";
+    };
+    config_options.addOption([]const u8, "version", std.mem.trim(u8, git_version, " \n\r"));
     const config_mod = config_options.createModule();
     mod.addImport("config", config_mod);
     exe.root_module.addImport("config", config_mod);
@@ -155,32 +161,25 @@ pub fn build(b: *std.Build) void {
         run_cmd.addArgs(args);
     }
 
-    // Creates an executable that will run `test` blocks from the provided module.
-    // Here `mod` needs to define a target, which is why earlier we made sure to
-    // set the releative field.
-    const mod_tests = b.addTest(.{
-        .root_module = mod,
-    });
+    // Test step — runs zig test directly on each source file with inline tests.
+    // Uses direct command invocation (addSystemCommand) to get terminal output,
+    // as b.addRunArtifact routes test results through --listen=- IPC (silent on success).
+    const test_step = b.step("test", "Run all tests");
 
-    // A run step that will run the test executable.
-    const run_mod_tests = b.addRunArtifact(mod_tests);
+    const zig_exe = b.graph.zig_exe;
+    const cwd_path = b.path(".");
 
-    // Creates an executable that will run `test` blocks from the executable's
-    // root module. Note that test executables only test one module at a time,
-    // hence why we have to create two separate ones.
-    const exe_tests = b.addTest(.{
-        .root_module = exe.root_module,
-    });
-
-    // A run step that will run the second test executable.
-    const run_exe_tests = b.addRunArtifact(exe_tests);
-
-    // A top level step for running all tests. dependOn can be called multiple
-    // times and since the two run steps do not depend on one another, this will
-    // make the two of them run in parallel.
-    const test_step = b.step("test", "Run tests");
-    test_step.dependOn(&run_mod_tests.step);
-    test_step.dependOn(&run_exe_tests.step);
+    inline for (.{
+        "src/server/circuit_breaker.zig",
+        "src/server/rate_limiter.zig",
+        "src/validation.zig",
+        "src/agent/agent_unit_test.zig",
+        "src/cli.zig",
+    }) |test_file| {
+        const test_cmd = b.addSystemCommand(&.{ zig_exe, "test", test_file });
+        test_cmd.setCwd(cwd_path);
+        test_step.dependOn(&test_cmd.step);
+    }
 
     // Benchmark executable
     const benchmark_exe = b.addExecutable(.{

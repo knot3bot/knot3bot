@@ -1,0 +1,59 @@
+{
+  "title": "knot3bot",
+  "uid": "knot3bot",
+  "panels": [
+    {
+      "title": "Request Rate",
+      "targets": [
+        { "expr": "rate(knot3bot_total_requests[1m])", "legendFormat": "req/s" }
+      ],
+      "gridPos": { "x": 0, "y": 0, "w": 8, "h": 4 }
+    },
+    {
+      "title": "Error Rate",
+      "targets": [
+        { "expr": "rate(knot3bot_errors[1m])", "legendFormat": "errors/s" }
+      ],
+      "gridPos": { "x": 8, "y": 0, "w": 8, "h": 4 }
+    },
+    {
+      "title": "Request Duration (p50/p95/p99)",
+      "targets": [
+        { "expr": "histogram_quantile(0.50, rate(knot3bot_request_duration_histogram_ms_bucket[1m]))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, rate(knot3bot_request_duration_histogram_ms_bucket[1m]))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, rate(knot3bot_request_duration_histogram_ms_bucket[1m]))", "legendFormat": "p99" }
+      ],
+      "gridPos": { "x": 0, "y": 4, "w": 8, "h": 4 }
+    },
+    {
+      "title": "Token Usage",
+      "targets": [
+        { "expr": "rate(knot3bot_prompt_tokens_total[1m])", "legendFormat": "prompt tokens/s" },
+        { "expr": "rate(knot3bot_completion_tokens_total[1m])", "legendFormat": "completion tokens/s" }
+      ],
+      "gridPos": { "x": 8, "y": 4, "w": 8, "h": 4 }
+    },
+    {
+      "title": "Circuit Breaker State",
+      "targets": [
+        { "expr": "knot3bot_circuit_breaker_state", "legendFormat": "state" },
+        { "expr": "rate(knot3bot_circuit_breaker_trips[5m])", "legendFormat": "trips/5m" }
+      ],
+      "gridPos": { "x": 0, "y": 8, "w": 8, "h": 4 }
+    },
+    {
+      "title": "Rate Limit Exceeded",
+      "targets": [
+        { "expr": "rate(knot3bot_rate_limit_exceeded[1m])", "legendFormat": "rate limited/s" }
+      ],
+      "gridPos": { "x": 8, "y": 8, "w": 8, "h": 4 }
+    },
+    {
+      "title": "Uptime",
+      "targets": [
+        { "expr": "knot3bot_uptime_seconds", "legendFormat": "seconds" }
+      ],
+      "gridPos": { "x": 0, "y": 12, "w": 8, "h": 4 }
+    }
+  ]
+}

@@ -1,0 +1,17 @@
+src/
+vendor/
+zig-pkg/
+zig-out/
+.zig-cache/
+.github/
+deploy/
+docs/
+scripts/
+*.zig
+build.zig
+build.zig.zon
+Dockerfile*
+docker-compose.yml
+.env.example
+.gitignore
+.gitmodules

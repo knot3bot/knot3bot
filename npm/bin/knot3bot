@@ -1,0 +1,43 @@
+#!/usr/bin/env node
+// Shim: downloads the platform binary on first run, then execs it.
+
+const { spawnSync } = require("child_process");
+const path = require("path");
+const fs = require("fs");
+
+const BIN_DIR = __dirname;
+const BIN_PATH = path.join(BIN_DIR, "knot3bot_bin");
+const INSTALL_SCRIPT = path.join(__dirname, "..", "install.js");
+
+async function main() {
+  // If the binary doesn't exist, run the installer
+  if (!fs.existsSync(BIN_PATH)) {
+    console.log("knot3bot: Platform binary not found, downloading...");
+    try {
+      require(INSTALL_SCRIPT);
+      // install.js is async — give it a moment
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    } catch (e) {
+      // install.js may not exist; try running it
+    }
+    // If still not found, run install.js synchronously
+    if (!fs.existsSync(BIN_PATH)) {
+      const result = spawnSync(process.execPath, [INSTALL_SCRIPT], {
+        stdio: "inherit",
+        cwd: path.join(__dirname, ".."),
+      });
+      if (result.status !== 0 || !fs.existsSync(BIN_PATH)) {
+        console.error("knot3bot: Failed to download binary.");
+        console.error("Build from source: https://github.com/n0x/knot3bot#building");
+        process.exit(1);
+      }
+    }
+  }
+
+  // Exec the binary with the same args
+  const args = process.argv.slice(2);
+  const result = spawnSync(BIN_PATH, args, { stdio: "inherit" });
+  process.exit(result.status || 0);
+}
+
+main();
