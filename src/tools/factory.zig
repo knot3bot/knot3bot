@@ -61,6 +61,11 @@ pub fn createDefaultRegistry(allocator: std.mem.Allocator, workspace_dir: []cons
     { const cpt = try allocator.create(root.checkpoint.CheckpointManagerTool); cpt.* = .{ .workspace_dir = workspace_dir }; try registry.register(cpt.tool()); }
     { const dlt = try allocator.create(root.delegate.DelegateTool); dlt.* = .{ .workspace_dir = workspace_dir }; try registry.register(dlt.tool()); }
     { const drt = try allocator.create(root.delegate.DelegateResultTool); drt.* = .{ .workspace_dir = workspace_dir }; try registry.register(drt.tool()); }
+    { const cpt = try allocator.create(root.checkpoint.CheckpointManagerTool); cpt.* = .{ .workspace_dir = workspace_dir }; try registry.register(cpt.tool()); }
+    { const dlt = try allocator.create(root.delegate.DelegateTool); dlt.* = .{ .workspace_dir = workspace_dir }; try registry.register(dlt.tool()); }
+    { const cpt = try allocator.create(root.checkpoint.CheckpointManagerTool); cpt.* = .{ .workspace_dir = workspace_dir }; try registry.register(cpt.tool()); }
+    { const dlt = try allocator.create(root.delegate.DelegateTool); dlt.* = .{ .workspace_dir = workspace_dir }; try registry.register(dlt.tool()); }
+    { const drt = try allocator.create(root.delegate.DelegateResultTool); drt.* = .{ .workspace_dir = workspace_dir }; try registry.register(drt.tool()); }
     return registry;
 }
 
@@ -102,6 +107,11 @@ pub fn createFullRegistry(allocator: std.mem.Allocator, workspace_dir: []const u
     { const tdt = try allocator.create(root.todo.TodoTool); tdt.* = root.todo.TodoTool.init(allocator); errdefer tdt.deinit(allocator); try registry.register(tdt.tool()); }
     { const mcpt = try allocator.create(root.mcp_tool.MCPTool); mcpt.* = .{}; try registry.register(mcpt.tool()); }
     { const mls = try allocator.create(root.mcp_tool.MCPListServersTool); mls.* = .{}; try registry.register(mls.tool()); }
+    { const cpt = try allocator.create(root.checkpoint.CheckpointManagerTool); cpt.* = .{ .workspace_dir = workspace_dir }; try registry.register(cpt.tool()); }
+    { const dlt = try allocator.create(root.delegate.DelegateTool); dlt.* = .{ .workspace_dir = workspace_dir }; try registry.register(dlt.tool()); }
+    { const drt = try allocator.create(root.delegate.DelegateResultTool); drt.* = .{ .workspace_dir = workspace_dir }; try registry.register(drt.tool()); }
+    { const cpt = try allocator.create(root.checkpoint.CheckpointManagerTool); cpt.* = .{ .workspace_dir = workspace_dir }; try registry.register(cpt.tool()); }
+    { const dlt = try allocator.create(root.delegate.DelegateTool); dlt.* = .{ .workspace_dir = workspace_dir }; try registry.register(dlt.tool()); }
     { const cpt = try allocator.create(root.checkpoint.CheckpointManagerTool); cpt.* = .{ .workspace_dir = workspace_dir }; try registry.register(cpt.tool()); }
     { const dlt = try allocator.create(root.delegate.DelegateTool); dlt.* = .{ .workspace_dir = workspace_dir }; try registry.register(dlt.tool()); }
     { const drt = try allocator.create(root.delegate.DelegateResultTool); drt.* = .{ .workspace_dir = workspace_dir }; try registry.register(drt.tool()); }

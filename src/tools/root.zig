@@ -165,8 +165,8 @@ pub fn toolVTable(comptime T: type, ptr: *T) Tool {
 pub const shell = @import("shell.zig");
 pub const file_ops = @import("file_ops.zig");
 pub const skills = @import("skills.zig");
-pub const delegate = @import("delegate.zig");
-pub const checkpoint = @import("checkpoint.zig");
+//pub const delegate = @import("delegate.zig");
+//pub const checkpoint = @import("checkpoint.zig");
 pub const browser = @import("browser.zig");
 pub const misc = @import("misc.zig");
 pub const git = @import("git.zig");

@@ -32,7 +32,7 @@ pub const CheckpointManagerTool = struct {
         const checkpoint_dir = try std.fmt.allocPrint(allocator, "{s}/.checkpoints", .{self.workspace_dir});
         defer allocator.free(checkpoint_dir);
 
-        shared.cwd().makePath(checkpoint_dir) catch {};
+        shared.cwd().createDirPath(shared.io(), checkpoint_dir) catch {};
 
         if (std.mem.eql(u8, action, "save")) {
             const cid = checkpoint_id orelse "default";
