@@ -551,53 +551,53 @@ function app() {
       } catch(e) {}
     },
 
-    // Skills - fetch from health endpoint and known built-in list
+    // Skills - fetch from server /api/skills endpoint
     async fetchSkills() {
       try {
         const h = await (await fetch('/health')).json();
         this.selfImprove = h.skill_self_improve === 'enabled';
         if (h.model) this.model = h.model;
-        // Build skill list from known built-in + any created skills
-        const builtin = [
-          {name:'code-review',description:'Review code for bugs, security, and best practices',category:'development'},
-          {name:'debug',description:'Systematic debugging methodology',category:'development'},
-          {name:'refactor',description:'Safe code refactoring without changing behavior',category:'development'},
-          {name:'web-research',description:'Effective web search and information gathering',category:'research'},
-          {name:'shell-expert',description:'Advanced shell command patterns',category:'development'},
-          {name:'git-workflow',description:'Safe Git operations with best practices',category:'development'},
-          {name:'write-tests',description:'Write comprehensive test cases',category:'development'},
-          {name:'explain-code',description:'Explain code in clear human language',category:'development'},
-          {name:'diagram',description:'Generate diagrams and visual representations',category:'design'},
-          {name:'security-audit',description:'Comprehensive security audit',category:'security'},
-        ];
-        // Try to fetch any additional skills via API
-        try {
-          const hdrs = {'Content-Type':'application/json'};
-          if (this.apiKey) hdrs['Authorization'] = 'Bearer '+this.apiKey;
-          const r = await fetch('/v1/chat/completions',{
-            method:'POST',headers:hdrs,
-            body:JSON.stringify({model:this.model,messages:[{role:'user',content:'Call skills_list'}],stream:false,max_tokens:200}),
-          });
-          const j = await r.json();
-          const txt = j.choices?.[0]?.message?.content||'';
-          // Try to parse skill names from response
-          const extra = [];
-          for (const name of ['quick-shell','code-review','debug','refactor','web-research','shell-expert','git-workflow','write-tests','explain-code','diagram','security-audit']) {
-            if (txt.includes(name) && !builtin.find(s=>s.name===name)) {
-              extra.push({name,description:'',category:''});
-            }
-          }
-          this.skills = [...builtin, ...extra];
-        } catch(e) { this.skills = builtin; }
-      } catch(e) { this.skills = []; }
+
+        // Fetch skills from dedicated API endpoint
+        const r = await fetch('/api/skills');
+        const data = await r.json();
+        const names = (data.skills||[]).map(s=>s.name);
+
+        // Merge with built-in descriptions
+        const builtin = this.getBuiltinSkills();
+        const builtinMap = {};
+        for (const s of builtin) builtinMap[s.name] = s;
+
+        this.skills = names.map(name => {
+          const b = builtinMap[name];
+          return b ? {...b} : {name, description:'', category:''};
+        });
+      } catch(e) {
+        this.skills = this.getBuiltinSkills();
+      }
+    },
+    getBuiltinSkills() {
+      return [
+        {name:'code-review',description:'Review code for bugs, security, and best practices',category:'development'},
+        {name:'debug',description:'Systematic debugging methodology',category:'development'},
+        {name:'refactor',description:'Safe code refactoring without changing behavior',category:'development'},
+        {name:'web-research',description:'Effective web search and information gathering',category:'research'},
+        {name:'shell-expert',description:'Advanced shell command patterns',category:'development'},
+        {name:'git-workflow',description:'Safe Git operations with best practices',category:'development'},
+        {name:'write-tests',description:'Write comprehensive test cases',category:'development'},
+        {name:'explain-code',description:'Explain code in clear human language',category:'development'},
+        {name:'diagram',description:'Generate diagrams and visual representations',category:'design'},
+        {name:'security-audit',description:'Comprehensive security audit covering OWASP Top 10',category:'security'},
+      ];
     },
     async fetchTools() {
       const known = ['shell','read_file','write_file','list_directory','grep','glob','calculator','git','cron','http_request','web_fetch','web_search','web_extract','browser','spawn','task_planner','diff','approval','url_safety','session_search','homeassistant','image_generation','send_message','transcription','tts','vision','screen_capture','clarify','env_passthrough','interrupt','mcp','mcp_list_servers','checkpoint','delegate','delegate_result','skill_self_improve','credential_files','code_execution','memory','skills_list','skill_view','skill_manager','skill_run'];
       this.tools = known.map(n=>({name:n,enabled:true,category:''}));
     },
     async viewSkill(name) {
-      const skill = this.skills.find(s=>s.name===name);
-      this.skillView = {name, content: skill?.description||'Loading...'};
+      const builtin = this.getBuiltinSkills();
+      const info = builtin.find(s=>s.name===name) || {name,description:''};
+      this.skillView = {name, content: '## '+name+'\n\n'+info.description+'\n\n*Loaded from src/skills/ or src/option-skills/*'};
     },
 
     // Memory - fetch from localStorage and server session

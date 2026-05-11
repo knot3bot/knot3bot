@@ -457,6 +457,8 @@ pub const Server = struct {
                 try self.handleReady(conn, request_id);
             } else if (std.mem.eql(u8, path, "/api/tools")) {
                 try self.handleGetTools(conn, request_id);
+            } else if (std.mem.eql(u8, path, "/api/skills")) {
+                try self.handleGetSkills(conn, request_id);
             } else if (std.mem.eql(u8, path, "/api/config")) {
                 try self.handleGetConfig(conn, request_id);
             } else if (std.mem.eql(u8, path, "/api/sessions")) {
@@ -1256,6 +1258,35 @@ pub const Server = struct {
         try self.sendJson(conn, 200, try json_buf.toOwnedSlice(self.allocator), request_id);
     }
 
+    fn handleGetSkills(self: *Server, conn: std.Io.net.Stream, request_id: []const u8) !void {
+        const skills_dir = try std.fmt.allocPrint(self.allocator, "{s}/skills", .{"/tmp"});
+        defer self.allocator.free(skills_dir);
+
+        var json_buf = std.ArrayList(u8).empty;
+        defer json_buf.deinit(self.allocator);
+        try json_buf.appendSlice(self.allocator, "{\"skills\":[");
+
+        var dir = shared.cwdOpenDir(skills_dir, .{}) catch {
+            try json_buf.appendSlice(self.allocator, "]}");
+            try self.sendJson(conn, 200, try json_buf.toOwnedSlice(self.allocator), request_id);
+            return;
+        };
+        defer dir.close(shared.io());
+
+        var first = true;
+        var iter = dir.iterate();
+        while (iter.next(shared.io()) catch null) |entry| {
+            if (entry.kind != .directory) continue;
+            if (!first) try json_buf.appendSlice(self.allocator, ",");
+            first = false;
+            try json_buf.appendSlice(self.allocator, "{\"name\":\"");
+            try appendJsonEscaped(&json_buf, self.allocator, entry.name);
+            try json_buf.appendSlice(self.allocator, "\"}");
+        }
+
+        try json_buf.appendSlice(self.allocator, "]}");
+        try self.sendJson(conn, 200, try json_buf.toOwnedSlice(self.allocator), request_id);
+    }
 
     fn handleGetConfig(self: *Server, conn: std.Io.net.Stream, request_id: []const u8) !void {
         const uptime = shared.timestamp() - self.start_time;
