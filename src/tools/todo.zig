@@ -48,19 +48,19 @@ pub const TodoStore = struct {
             allocator.free(self.items);
 
             // Clone all items
-            var new_items = std.array_list.AlignedManaged(TodoItem, null).init(allocator);
-            defer new_items.deinit();
+            var new_items: std.ArrayList(TodoItem) = .empty;
+            defer new_items.deinit(allocator);
 
             for (todos) |item| {
                 const validated = validateItem(item, allocator);
-                try new_items.append(validated);
+                try new_items.append(allocator, validated);
             }
 
-            self.items = try new_items.toOwnedSlice();
+            self.items = new_items.toOwnedSlice(allocator) catch self.items;
         } else {
             // Merge mode - update by id, append new
-            var existing = std.StringArrayHashMap(usize).init(allocator);
-            defer existing.deinit();
+            var existing = std.StringHashMap(usize).init(allocator);
+            defer existing.deinit(allocator);
 
             // Index existing items by id
             for (self.items, 0..) |item, idx| {
@@ -98,7 +98,7 @@ pub const TodoStore = struct {
         if (self.items.len == 0) return null;
 
         // Only active items (pending/in_progress)
-        var active_items = std.array_list.AlignedManaged(TodoItem, null).init(allocator);
+        var active_items: std.ArrayList(TodoItem) = .empty;
         defer active_items.deinit();
 
         for (self.items) |item| {
@@ -110,18 +110,19 @@ pub const TodoStore = struct {
         if (active_items.items.len == 0) return null;
 
         // Format as text
-        var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-        defer buf.deinit();
-        const w = buf.writer();
+        var buf: std.ArrayList(u8) = .empty;
+        defer buf.deinit(allocator);
 
-        try w.writeAll("[Your active task list was preserved]\n");
+        try buf.appendSlice(allocator, "[Your active task list was preserved]\n");
 
         for (active_items.items) |item| {
             const marker: []const u8 = if (std.mem.eql(u8, item.status, "in_progress")) "[>]" else "[ ]";
-            try w.print("- {s} {s}. {s}\n", .{ marker, item.id, item.content });
+            const line = try std.fmt.allocPrint(allocator, "- {s} {s}. {s}\n", .{ marker, item.id, item.content });
+            defer allocator.free(line);
+            try buf.appendSlice(allocator, line);
         }
 
-        return try buf.toOwnedSlice(allocator);
+        return buf.toOwnedSlice(allocator);
     }
 
     /// Validate and normalize a todo item
@@ -207,20 +208,41 @@ pub const TodoTool = struct {
         }
 
         // Build JSON response
-        var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-        defer buf.deinit();
-        const w = buf.writer();
+        var buf: std.ArrayList(u8) = .empty;
+        defer buf.deinit(allocator);
 
-        try w.writeAll("{\"todos\":[");
+        try buf.appendSlice(allocator, "{\"todos\":[");
         for (items, 0..) |item, i| {
-            if (i > 0) try w.writeAll(",");
-            try w.print("{\"id\":\"{s}\",\"content\":\"{s}\",\"status\":\"{s}\"}", .{ item.id, item.content, item.status });
+            if (i > 0) try buf.appendSlice(allocator, ",");
+            try buf.appendSlice(allocator, "{\"id\":\"");
+            try buf.appendSlice(allocator, item.id);
+            try buf.appendSlice(allocator, "\",\"content\":\"");
+            try buf.appendSlice(allocator, item.content);
+            try buf.appendSlice(allocator, "\",\"status\":\"");
+            try buf.appendSlice(allocator, item.status);
+            try buf.appendSlice(allocator, "\"}");
         }
-        try w.writeAll("],\"summary\":{");
-        try w.print("\"total\":{d},\"pending\":{d},\"in_progress\":{d},\"completed\":{d},\"cancelled\":{d}", .{
-            items.len, pending, in_progress, completed, cancelled,
-        });
-        try w.writeAll("}}");
+        try buf.appendSlice(allocator, "],\"summary\":{\"total\":");
+        const ts = try std.fmt.allocPrint(allocator, "{d}", .{items.len});
+        defer allocator.free(ts);
+        try buf.appendSlice(allocator, ts);
+        try buf.appendSlice(allocator, ",\"pending\":");
+        const ps = try std.fmt.allocPrint(allocator, "{d}", .{pending});
+        defer allocator.free(ps);
+        try buf.appendSlice(allocator, ps);
+        try buf.appendSlice(allocator, ",\"in_progress\":");
+        const ip = try std.fmt.allocPrint(allocator, "{d}", .{in_progress});
+        defer allocator.free(ip);
+        try buf.appendSlice(allocator, ip);
+        try buf.appendSlice(allocator, ",\"completed\":");
+        const cs = try std.fmt.allocPrint(allocator, "{d}", .{completed});
+        defer allocator.free(cs);
+        try buf.appendSlice(allocator, cs);
+        try buf.appendSlice(allocator, ",\"cancelled\":");
+        const ca = try std.fmt.allocPrint(allocator, "{d}", .{cancelled});
+        defer allocator.free(ca);
+        try buf.appendSlice(allocator, ca);
+        try buf.appendSlice(allocator, "}}");
 
         return ToolResult{
             .success = true,

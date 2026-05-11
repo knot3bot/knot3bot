@@ -54,6 +54,8 @@ pub fn createDefaultRegistry(allocator: std.mem.Allocator, workspace_dir: []cons
     errdefer registry.deinit();
     try addCoreTools(&registry, allocator, workspace_dir);
     try addExtendedTools(&registry, allocator, workspace_dir);
+    { const itt = try allocator.create(root.interrupt.InterruptTool); itt.* = .{}; try registry.register(itt.tool()); }
+    { const tdt = try allocator.create(root.todo.TodoTool); tdt.* = root.todo.TodoTool.init(allocator); errdefer tdt.deinit(allocator); try registry.register(tdt.tool()); }
     return registry;
 }
 
@@ -91,5 +93,7 @@ pub fn createFullRegistry(allocator: std.mem.Allocator, workspace_dir: []const u
     // Memory
     { const t = try allocator.create(root.memory_tool.MemoryTool); t.* = try root.memory_tool.MemoryTool.init(allocator); errdefer t.deinit(); try registry.register(t.tool()); }
 
+    { const itt = try allocator.create(root.interrupt.InterruptTool); itt.* = .{}; try registry.register(itt.tool()); }
+    { const tdt = try allocator.create(root.todo.TodoTool); tdt.* = root.todo.TodoTool.init(allocator); errdefer tdt.deinit(allocator); try registry.register(tdt.tool()); }
     return registry;
 }
