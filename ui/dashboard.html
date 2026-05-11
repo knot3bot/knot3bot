@@ -8,35 +8,42 @@
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <style>
 [x-cloak]{display:none!important}
-.chat-scroll::-webkit-scrollbar{width:5px}
-.chat-scroll::-webkit-scrollbar-thumb{background:#4b5563;border-radius:3px}
+.chat-scroll::-webkit-scrollbar{width:4px}
+.chat-scroll::-webkit-scrollbar-thumb{background:#4b5563;border-radius:2px}
 .stream-cursor::after{content:'▊';animation:blink 1s step-end infinite}
 @keyframes blink{50%{opacity:0}}
-.panel-card{transition:all .15s}
-.panel-card:hover{border-color:#6b7280}
 .tab-btn.active{color:#22d3ee;border-color:#22d3ee}
 
-/* Markdown rendered styles */
-.md-body { line-height: 1.65; word-break: break-word; }
-.md-body h1 { font-size: 1.25rem; font-weight: 700; color: #e2e8f0; margin: 0.75rem 0 0.4rem; border-bottom: 1px solid #374151; padding-bottom: 0.25rem; }
-.md-body h2 { font-size: 1.1rem; font-weight: 700; color: #e2e8f0; margin: 0.6rem 0 0.35rem; }
-.md-body h3 { font-size: 1rem; font-weight: 600; color: #cbd5e1; margin: 0.5rem 0 0.3rem; }
-.md-body p { margin: 0.35rem 0; }
-.md-body ul, .md-body ol { margin: 0.35rem 0; padding-left: 1.25rem; }
-.md-body li { margin: 0.15rem 0; }
+/* Compact Markdown */
+.md-body { line-height: 1.5; word-break: break-word; font-size: 0.875rem; }
+.md-body h1 { font-size: 1.1rem; font-weight: 700; color: #e2e8f0; margin: 0.35rem 0 0.2rem; border-bottom: 1px solid #374151; padding-bottom: 0.15rem; }
+.md-body h2 { font-size: 1rem; font-weight: 700; color: #e2e8f0; margin: 0.3rem 0 0.15rem; }
+.md-body h3 { font-size: 0.9rem; font-weight: 600; color: #cbd5e1; margin: 0.25rem 0 0.1rem; }
+.md-body h4 { font-size: 0.85rem; font-weight: 600; color: #cbd5e1; margin: 0.2rem 0 0.1rem; }
+.md-body p { margin: 0.15rem 0; }
+.md-body p:first-child { margin-top: 0; }
+.md-body p:last-child { margin-bottom: 0; }
+.md-body ul, .md-body ol { margin: 0.15rem 0; padding-left: 1.1rem; }
+.md-body li { margin: 0.05rem 0; }
 .md-body li::marker { color: #6b7280; }
-.md-body code { background: #1f2937; color: #f472b6; padding: 0.1rem 0.3rem; border-radius: 0.25rem; font-size: 0.85em; font-family: ui-monospace, monospace; }
-.md-body pre { background: #111827; border: 1px solid #374151; border-radius: 0.5rem; padding: 0.75rem 1rem; overflow-x: auto; margin: 0.5rem 0; }
-.md-body pre code { background: none; color: #e2e8f0; padding: 0; font-size: 0.8rem; line-height: 1.5; }
-.md-body blockquote { border-left: 3px solid #06b6d4; padding-left: 0.75rem; color: #9ca3af; margin: 0.5rem 0; font-style: italic; }
-.md-body table { width: 100%; border-collapse: collapse; margin: 0.5rem 0; font-size: 0.85rem; }
-.md-body th { background: #1f2937; color: #e2e8f0; font-weight: 600; padding: 0.4rem 0.6rem; text-align: left; border: 1px solid #374151; }
-.md-body td { padding: 0.35rem 0.6rem; border: 1px solid #374151; color: #d1d5db; }
+.md-body code { background: #1f2937; color: #f472b6; padding: 0.05rem 0.25rem; border-radius: 0.2rem; font-size: 0.82em; font-family: ui-monospace, monospace; }
+.md-body pre { background: #111827; border: 1px solid #374151; border-radius: 0.35rem; padding: 0.5rem 0.75rem; overflow-x: auto; margin: 0.25rem 0; }
+.md-body pre code { background: none; color: #e2e8f0; padding: 0; font-size: 0.78rem; line-height: 1.4; }
+.md-body blockquote { border-left: 2px solid #06b6d4; padding-left: 0.5rem; color: #9ca3af; margin: 0.25rem 0; }
+.md-body table { width: 100%; border-collapse: collapse; margin: 0.25rem 0; font-size: 0.8rem; }
+.md-body th { background: #1f2937; color: #e2e8f0; font-weight: 600; padding: 0.25rem 0.5rem; text-align: left; border: 1px solid #374151; }
+.md-body td { padding: 0.2rem 0.5rem; border: 1px solid #374151; color: #d1d5db; }
 .md-body tr:nth-child(even) td { background: #11182730; }
 .md-body a { color: #22d3ee; text-decoration: underline; }
 .md-body strong { color: #f3f4f6; font-weight: 700; }
-.md-body hr { border: none; border-top: 1px solid #374151; margin: 0.5rem 0; }
+.md-body hr { border: none; border-top: 1px solid #374151; margin: 0.25rem 0; }
 .md-body em { font-style: italic; color: #d1d5db; }
+
+/* Message actions */
+.msg-actions { opacity: 0; transition: opacity 0.15s; }
+.msg-wrap:hover .msg-actions { opacity: 1; }
+.msg-btn { font-size: 0.7rem; padding: 0.15rem 0.4rem; border-radius: 0.25rem; transition: all 0.15s; }
+.msg-btn:hover { background: #374151; }
 </style>
 </head>
 <body class="h-full bg-gray-950 text-gray-100" x-data="app()" x-cloak>
@@ -172,7 +179,7 @@
 </aside>
 
 <!-- ====== MAIN ====== -->
-<main class="flex-1 flex flex-col min-w-0">
+<main class="flex-1 flex flex-col min-w-0 overflow-hidden">
   <!-- Header -->
   <header class="h-10 bg-gray-900 border-b border-gray-800 flex items-center px-4 shrink-0 gap-3">
     <span class="text-xs text-gray-500">Model</span>
@@ -194,20 +201,25 @@
     <!-- Messages -->
     <div class="flex-1 overflow-y-auto p-4 chat-scroll space-y-3" id="chat-messages">
       <template x-for="msg in currentMessages" :key="msg.id">
-        <div :class="msg.role==='user'?'flex justify-end':'flex justify-start'">
-          <div :class="msg.role==='user'?'bg-cyan-700 text-white rounded-2xl rounded-br-md':'bg-gray-800 text-gray-200 rounded-2xl rounded-bl-md'"
-            class="px-4 py-2.5 max-w-[75%] text-sm leading-relaxed">
-            <div class="md-body" x-html="msg.role==='user' ? escapeHtml(msg.content) : renderMarkdown(msg.content)"></div>
-            <div class="text-xs opacity-50 mt-1 flex items-center gap-2">
-              <span x-text="msg.time"></span>
-              <span x-show="msg.tokens" class="text-cyan-300" x-text="'tokens:'+msg.tokens"></span>
+        <div :class="msg.role==='user'?'flex justify-end':'flex justify-start'" class="msg-wrap">
+          <div class="group" :class="msg.role==='user'?'max-w-[75%]':'max-w-[85%]'">
+            <div :class="msg.role==='user'?'bg-cyan-700 text-white rounded-2xl rounded-br-md':'bg-gray-800 text-gray-200 rounded-2xl rounded-bl-md'"
+              class="px-3 py-2 text-sm">
+              <div class="md-body" x-html="msg.role==='user' ? escapeHtml(msg.content) : renderMarkdown(cleanContent(msg.content))"></div>
+            </div>
+            <!-- Actions bar -->
+            <div class="msg-actions flex items-center gap-1 mt-0.5 px-1" :class="msg.role==='user'?'justify-end':'justify-start'">
+              <span class="text-[10px] text-gray-600" x-text="msg.time"></span>
+              <span x-show="msg.tokens" class="text-[10px] text-cyan-600" x-text="msg.tokens+' tk'"></span>
+              <button class="msg-btn text-gray-500 hover:text-gray-300" @click="copyMarkdown(msg)" title="Copy as Markdown">Copy</button>
+              <button class="msg-btn text-gray-500 hover:text-gray-300" @click="copyText(msg)" title="Copy plain text">Txt</button>
             </div>
           </div>
         </div>
       </template>
       <div x-show="streaming" class="flex justify-start">
         <div class="bg-gray-800 text-gray-200 rounded-2xl rounded-bl-md max-w-[75%] px-4 py-2.5 text-sm">
-          <span class="md-body" x-html="renderMarkdown(streamContent)"></span><span class="stream-cursor text-cyan-400"></span>
+          <span class="md-body" x-html="renderMarkdown(cleanContent(streamContent))"></span><span class="stream-cursor text-cyan-400"></span>
         </div>
       </div>
       <div x-show="currentMessages.length===0 && !streaming" class="flex items-center justify-center h-full">
@@ -364,6 +376,30 @@ function renderMarkdown(text) {
 
 function escapeHtml(text) {
   return text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br>');
+}
+
+// Strip tool execution noise from content
+function cleanContent(text) {
+  if (!text) return '';
+  // Remove [Tool(s) executed. Results: ...] patterns
+  return text.replace(/\[Tool\(s\) executed\. Results:.*?\]/gs, '').trim();
+}
+
+// Strip markdown for plain text copy
+function stripMarkdown(text) {
+  return text
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/\*([^*]+)\*/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/^#{1,4}\s+/gm, '')
+    .replace(/^>\s+/gm, '')
+    .replace(/^[-*]\s+/gm, '- ')
+    .replace(/^\d+\.\s+/gm, '')
+    .replace(/^\|.+\|$/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function app() {
@@ -575,6 +611,24 @@ function app() {
         if (!s) return;
         Object.keys(s).forEach(k=>{if(this[k]!==undefined)this[k]=s[k];});
       } catch(e){}
+    },
+
+    // Copy & Share
+    copyMarkdown(msg) {
+      navigator.clipboard.writeText(cleanContent(msg.content)).then(()=>{
+        const btn = event.target;
+        const orig = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(()=>btn.textContent=orig, 1500);
+      }).catch(()=>{});
+    },
+    copyText(msg) {
+      navigator.clipboard.writeText(stripMarkdown(cleanContent(msg.content))).then(()=>{
+        const btn = event.target;
+        const orig = btn.textContent;
+        btn.textContent = 'Copied!';
+        setTimeout(()=>btn.textContent=orig, 1500);
+      }).catch(()=>{});
     },
 
     // Metrics
