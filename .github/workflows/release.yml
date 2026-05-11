@@ -9,7 +9,8 @@ env:
   ZIG_VERSION: "0.16.0"
 
 jobs:
-  release:
+  # ── Linux builds (x86_64 + aarch64, musl) ──────────────────────────────
+  release-linux:
     name: Release for ${{ matrix.target }}
     runs-on: ubuntu-latest
     strategy:
@@ -18,33 +19,22 @@ jobs:
         target:
           - x86_64-linux-musl
           - aarch64-linux-musl
-          - x86_64-macos-gnu
-          - aarch64-macos-gnu
-    
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Zig
-        uses: goto-bus-terminal/docker-ziglang@v1
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
         with:
-          zig-version: ${{ env.ZIG_VERSION }}
+          version: ${{ env.ZIG_VERSION }}
 
       - name: Cross-compile
         run: |
           TARGET=${{ matrix.target }}
-          ARCH=$(echo $TARGET | cut -d- -f1)
-          OS=$(echo $TARGET | cut -d- -f2)
-          EXT=$(echo $TARGET | cut -d- -f3)
-          
-          # Build for target
-          zig build -Dtarget=$TARGET -Doptimize=ReleaseSmall
-          
-          # Rename output
+          zig build -Dtarget=$TARGET -Drelease=true
           mkdir -p release/
           cp zig-out/bin/knot3bot release/knot3bot-${TARGET}
-          
-          # Print size
           ls -lh release/
 
       - name: Upload artifacts
@@ -53,10 +43,44 @@ jobs:
           name: knot3bot-${{ matrix.target }}
           path: release/*
 
+  # ── macOS builds (x86_64 + aarch64) ────────────────────────────────────
+  release-macos:
+    name: Release for ${{ matrix.target }}
+    runs-on: macos-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target:
+          - x86_64-macos-gnu
+          - aarch64-macos-gnu
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Compile
+        run: |
+          zig build -Dtarget=${{ matrix.target }} -Drelease=true
+          mkdir -p release/
+          cp zig-out/bin/knot3bot release/knot3bot-${{ matrix.target }}
+          ls -lh release/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: knot3bot-${{ matrix.target }}
+          path: release/*
+
+  # ── GitHub Release ─────────────────────────────────────────────────────
   create-release:
     name: Create GitHub Release
     runs-on: ubuntu-latest
-    needs: [release]
+    needs: [release-linux, release-macos]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -74,11 +98,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  # ── Docker ──────────────────────────────────────────────────────────────
   docker:
     name: Docker Build & Push
     runs-on: ubuntu-latest
-    needs: [release]
-    
+    needs: [release-linux, release-macos]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -106,6 +130,7 @@ jobs:
             ghcr.io/${{ github.repository }}:${{ steps.version.outputs.VERSION }}
             ghcr.io/${{ github.repository }}:latest
 
+  # ── npm ─────────────────────────────────────────────────────────────────
   npm-publish:
     name: Publish to npm
     runs-on: ubuntu-latest
