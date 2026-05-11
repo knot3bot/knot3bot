@@ -514,7 +514,7 @@ pub const Server = struct {
             return;
         }
 
-        const parsed = std.json.parseFromSlice(ChatCompletionRequest, allocator, body, .{}) catch {
+        const parsed = std.json.parseFromSlice(ChatCompletionRequest, allocator, body, .{.ignore_unknown_fields = true}) catch {
             try self.sendJson(conn, 400, "{\"error\":{\"message\":\"Invalid JSON\"}}", request_id);
             return;
         };
@@ -793,7 +793,7 @@ pub const Server = struct {
             return;
         }
 
-        const parsed = std.json.parseFromSlice(ChatCompletionRequest, allocator, body, .{}) catch {
+        const parsed = std.json.parseFromSlice(ChatCompletionRequest, allocator, body, .{.ignore_unknown_fields = true}) catch {
             try self.sendJson(conn, 400, "{\"error\":{\"message\":\"Invalid JSON\"}}", request_id);
             return;
         };
@@ -1357,6 +1357,7 @@ const ChatCompletionRequest = struct {
     messages: []ChatMessage = &.{},
     temperature: ?f32 = null,
     max_tokens: ?u32 = null,
+    top_p: ?f32 = null,
     stream: ?bool = null,
     session_id: ?[]const u8 = null,
 };
