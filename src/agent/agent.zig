@@ -498,7 +498,9 @@ pub const Agent = struct {
                     // Skill Self-Improvement: Record tool call for pattern tracking
                     if (self.skill_self_improve) |*si| {
                         const success = tool_result != null;
-                        si.*.recordToolCall(tc.function.name, success, tool_duration, tc.function.arguments) catch {};
+                        si.*.recordToolCall(tc.function.name, success, tool_duration, tc.function.arguments) catch |err| {
+                            std.log.warn("recordToolCall: {s}", .{@errorName(err)});
+                        };
                     }
                 }
 
@@ -664,7 +666,9 @@ pub const Agent = struct {
             // Save trajectory for streaming path
             if (self.enable_trajectory_recording) {
                 if (self.trajectory_recorder) |recorder| {
-                    recorder.save(self.config.model, true, self.step_logs.items, self.messages.items) catch {};
+                    recorder.save(self.config.model, true, self.step_logs.items, self.messages.items) catch |err| {
+                        std.log.warn("trajectory save: {s}", .{@errorName(err)});
+                    };
                 }
             }
             return llm_result.content;
@@ -672,7 +676,9 @@ pub const Agent = struct {
         // Save failed trajectory
         if (self.enable_trajectory_recording) {
             if (self.trajectory_recorder) |recorder| {
-                recorder.save(self.config.model, false, self.step_logs.items, self.messages.items) catch {};
+                recorder.save(self.config.model, false, self.step_logs.items, self.messages.items) catch |err| {
+                    std.log.warn("trajectory save(fail): {s}", .{@errorName(err)});
+                };
             }
         }
         return "Max iterations reached";

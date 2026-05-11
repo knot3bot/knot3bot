@@ -577,7 +577,9 @@ pub const Server = struct {
             for (messages[0 .. messages.len - 1]) |msg| {
                 const role: Agent.Role = if (std.mem.eql(u8, msg.role, "system")) .system else if (std.mem.eql(u8, msg.role, "user")) .user else if (std.mem.eql(u8, msg.role, "assistant")) .assistant else if (std.mem.eql(u8, msg.role, "tool")) .tool else .user;
                 if (role == .system) continue;
-                agent.appendMessage(role, msg.content) catch {};
+                agent.appendMessage(role, msg.content) catch |err| {
+                    std.log.err("[{s}] agent.appendMessage: {s}", .{ request_id, @errorName(err) });
+                };
             }
         }
 
@@ -585,14 +587,20 @@ pub const Server = struct {
         const loaded_sid = parsed.value.session_id orelse "default";
         if (self.memory_manager.getHistoryJSON(allocator, loaded_sid)) |history| {
             if (history) |h| {
-                agent.loadHistoryFromJSON(h) catch {};
+                agent.loadHistoryFromJSON(h) catch |err| {
+                    std.log.err("[{s}] loadHistoryFromJSON: {s}", .{ request_id, @errorName(err) });
+                };
             }
         } else |_| {}
 
         if (parsed.value.session_id) |sid| {
-            self.memory_manager.createSession(sid) catch {};
+            self.memory_manager.createSession(sid) catch |err| {
+                std.log.err("[{s}] createSession: {s}", .{ request_id, @errorName(err) });
+            };
             for (messages) |msg| {
-                self.memory_manager.addMessage(sid, msg.role, msg.content) catch {};
+                self.memory_manager.addMessage(sid, msg.role, msg.content) catch |err| {
+                    std.log.err("[{s}] addMessage: {s}", .{ request_id, @errorName(err) });
+                };
             }
         }
 
@@ -604,7 +612,9 @@ pub const Server = struct {
             };
             defer allocator.free(response);
             if (parsed.value.session_id) |sid| {
-                self.memory_manager.addMessage(sid, "assistant", response) catch {};
+                self.memory_manager.addMessage(sid, "assistant", response) catch |err| {
+                    std.log.err("[{s}] addMessage(assistant): {s}", .{ request_id, @errorName(err) });
+                };
             }
         } else {
             const response = agent.run(user_message) catch |err| {
@@ -621,7 +631,9 @@ pub const Server = struct {
             self.metrics.recordTokens(usage_stats.prompt_tokens, usage_stats.completion_tokens);
 
             if (parsed.value.session_id) |sid| {
-                self.memory_manager.addMessage(sid, "assistant", response) catch {};
+                self.memory_manager.addMessage(sid, "assistant", response) catch |err| {
+                    std.log.err("[{s}] addMessage(assistant): {s}", .{ request_id, @errorName(err) });
+                };
             }
 
             var json_buf = std.ArrayList(u8).empty;
@@ -831,7 +843,9 @@ pub const Server = struct {
             for (messages[0 .. messages.len - 1]) |msg| {
                 const role: Agent.Role = if (std.mem.eql(u8, msg.role, "system")) .system else if (std.mem.eql(u8, msg.role, "user")) .user else if (std.mem.eql(u8, msg.role, "assistant")) .assistant else if (std.mem.eql(u8, msg.role, "tool")) .tool else .user;
                 if (role == .system) continue;
-                agent.appendMessage(role, msg.content) catch {};
+                agent.appendMessage(role, msg.content) catch |err| {
+                    std.log.err("[{s}] agent.appendMessage: {s}", .{ request_id, @errorName(err) });
+                };
             }
         }
 
@@ -839,14 +853,20 @@ pub const Server = struct {
         const loaded_sid = parsed.value.session_id orelse "default";
         if (self.memory_manager.getHistoryJSON(allocator, loaded_sid)) |history| {
             if (history) |h| {
-                agent.loadHistoryFromJSON(h) catch {};
+                agent.loadHistoryFromJSON(h) catch |err| {
+                    std.log.err("[{s}] loadHistoryFromJSON: {s}", .{ request_id, @errorName(err) });
+                };
             }
         } else |_| {}
 
         if (parsed.value.session_id) |sid| {
-            self.memory_manager.createSession(sid) catch {};
+            self.memory_manager.createSession(sid) catch |err| {
+                std.log.err("[{s}] createSession: {s}", .{ request_id, @errorName(err) });
+            };
             for (messages) |msg| {
-                self.memory_manager.addMessage(sid, msg.role, msg.content) catch {};
+                self.memory_manager.addMessage(sid, msg.role, msg.content) catch |err| {
+                    std.log.err("[{s}] addMessage: {s}", .{ request_id, @errorName(err) });
+                };
             }
         }
 

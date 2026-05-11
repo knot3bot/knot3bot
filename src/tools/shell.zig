@@ -53,20 +53,17 @@ pub const ShellTool = struct {
         }
     }
 
-    fn validateCommand(command: []const u8) ?[]const u8 {
-        const dangerous = &[_][]const u8{
-            "&& ",  "| ",   "|| ", "; ",
-            "> ",   "< ",   "`",   "$(",
-            "eval", "exec",
-        };
-        for (dangerous) |pattern| {
-            if (std.mem.indexOf(u8, command, pattern) != null) {
-                return "Command contains blocked pattern";
-            }
-        }
-        if (std.mem.indexOf(u8, command, "cd ") == 0) return "cd not allowed";
-        if (std.mem.indexOf(u8, command, "export ") == 0) return "export not allowed";
-        if (std.mem.indexOf(u8, command, "source ") == 0) return "source not allowed";
+    pub fn validateCommand(command: []const u8) ?[]const u8 {
+        if (command.len == 0) return "empty";
+        if (std.mem.indexOfScalar(u8, command, 0) != null) return "null byte";
+        for (command) |c| { if (c < 0x20 and c != '\t') return "control char"; }
+        if (std.mem.indexOfScalar(u8, command, '\n') != null or std.mem.indexOfScalar(u8, command, '\r') != null) return "newline";
+        const meta = [_][]const u8{ "&&", "||", "|", ";", ">", "<", "$(", "`", "&>", ">&", "<>", "<<<", "<<", ">>" };
+        for (meta) |mc| { if (std.mem.indexOf(u8, command, mc) != null) return "metachar"; }
+        const prefixes = [_][]const u8{ "cd ", "export ", "source ", "eval ", "exec ", ". ", "alias ", "set ", "unset " };
+        for (prefixes) |p| { if (std.mem.startsWith(u8, command, p)) return "dangerous prefix"; }
+        const bare = [_][]const u8{ "cd", "eval", "exec", "source", "exit", "logout" };
+        for (bare) |w| { if (std.mem.eql(u8, command, w)) return "bare dangerous"; }
         return null;
     }
 
