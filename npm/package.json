@@ -1,6 +1,6 @@
 {
   "name": "knot3bot",
-  "version": "0.1.4",
+  "version": "0.4.1",
   "description": "High-performance AI coding agent in Zig — single binary, zero runtime dependencies",
   "license": "MIT",
   "repository": {
