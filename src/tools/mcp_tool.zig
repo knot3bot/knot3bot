@@ -66,7 +66,7 @@ pub const MCPTool = struct {
 pub const MCPListServersTool = struct {
     pub const tool_name = "mcp_list_servers";
     pub const tool_description = "List all configured MCP servers and their connection status.";
-    pub const tool_params = "{}";
+    pub const tool_params = "{\"type\":\"object\",\"properties\":{}}";
 
     pub fn tool(self: *MCPListServersTool) Tool {
         return .{ .ptr = @ptrCast(self), .vtable = &vtable };

@@ -147,9 +147,18 @@ pub fn ToolVTable(comptime T: type) Tool.VTable {
             }
         }.f,
         .deinit = &struct {
-            fn f(ptr: *anyopaque, allocator: std.mem.Allocator) void {
+            fn f(ptr: *anyopaque, alloc: std.mem.Allocator) void {
                 const self: *T = @ptrCast(@alignCast(ptr));
-                allocator.destroy(self);
+                if (comptime @hasDecl(T, "deinit")) {
+                    const DeinitFn = @TypeOf(T.deinit);
+                    const fn_info = @typeInfo(DeinitFn).@"fn";
+                    if (fn_info.params.len == 2) {
+                        self.deinit(alloc);
+                    } else {
+                        self.deinit();
+                    }
+                }
+                alloc.destroy(self);
             }
         }.f,
     };
