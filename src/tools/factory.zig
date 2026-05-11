@@ -186,7 +186,7 @@ pub fn createFullRegistry(allocator: std.mem.Allocator, workspace_dir: []const u
     }
     {
         const ws = try allocator.create(root.web_search.WebSearchTool);
-        ws.* = .{ .workspace_dir = workspace_dir };
+        ws.* = .{};
         try registry.register(ws.tool());
     }
     {
