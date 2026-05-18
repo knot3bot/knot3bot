@@ -14,6 +14,7 @@ const models = @import("root.zig").models;
 const context_compressor = @import("root.zig").context_compressor;
 const trajectory = @import("root.zig").trajectory;
 const shared = @import("root.zig").shared;
+const tui = @import("tui/vaxis_tui.zig");
 
 var g_shutdown_flag = std.atomic.Value(bool).init(false);
 
@@ -342,170 +343,163 @@ fn runCliMode(config: *CliConfig, registry: *ToolRegistry) !void {
     const memory_path = if (config.db_path) |p| p else "in-memory";
     printSessionInfo(config, memory_path);
 
-    while (!g_shutdown_flag.load(.monotonic)) {
-        const prompt = try std.fmt.allocPrint(allocator, "{s}{s}{s}{s}{s} {s}>{s} ", .{
-            display.Colors.bold, display.Colors.blue,
-            if (config.model.len > 0) config.model else "?",
-            display.Colors.dim,
-            display.Colors.reset,
-            display.Colors.blue, display.Colors.reset,
-        });
-        defer allocator.free(prompt);
-        const line = cli.readLine(prompt) catch |err| {
-            std.debug.print("Read error: {s}\n", .{@errorName(err)});
-            continue;
-        };
-        if (line == null) break; // Ctrl-C or Ctrl-D
-        defer std.heap.page_allocator.free(line.?);
-        const trimmed = std.mem.trim(u8, line.?, " \n\r");
-        if (trimmed.len == 0) continue;
+    // Init vaxis TUI
+    const env_map: *std.process.Environ.Map = @constCast(shared.context.environ());
+    var vx_tui = try tui.App.init(gpa, shared.context.io(), env_map);
+    defer vx_tui.deinit();
+    vx_tui.provider_name = config.provider.name();
+    vx_tui.model_name = config.model;
+    vx_tui.session_id = config.session_id;
+    vx_tui.tools_count = registry.count();
+    try vx_tui.addMessage(.system, "knot3bot v0.2.0 — /help for commands, /quit to exit.");
+    try vx_tui.start();
+    defer vx_tui.stop();
 
-        // Handle slash commands
-        if (trimmed[0] == '/') {
-            // Slash discovery: if no space in input (incomplete command), show suggestions
-            if (std.mem.indexOfScalar(u8, trimmed, ' ') == null and trimmed.len > 1) {
-                const known = [_][]const u8{ "help", "quit", "exit", "q", "new", "clear", "config", "model", "tools", "skills", "setup", "h" };
-                var is_known = false;
-                for (&known) |k| {
-                    if (std.mem.eql(u8, trimmed[1..], k)) { is_known = true; break; }
-                }
-                if (!is_known) {
-                    cli.discoverCommands(trimmed);
-                    continue;
-                }
-            }
+    // Agent state (lazy init)
+    var agent_ready = false;
+    var agent_instance: Agent.Agent = undefined;
+    defer if (agent_ready) agent_instance.deinit();
+    var model_registry: models.ModelRegistry = undefined;
+    defer if (agent_ready) model_registry.deinit();
+    var compressor: context_compressor.ContextCompressor = undefined;
+    defer if (agent_ready) compressor.deinit();
+    var recorder: trajectory.TrajectoryRecorder = undefined;
+    var si_engine: ?SkillSelfImprove = null;
+    defer if (si_engine) |*si| si.deinit();
+    var cp: credential_pool.CredentialPool = undefined;
 
-            var action = cli.parseCommand(allocator, trimmed);
-            defer cli.deinitAction(&action, allocator);
+    try vx_tui.renderFrame();
+
+    while (!vx_tui.should_quit and !g_shutdown_flag.load(.monotonic)) {
+        // Process pending TUI actions
+        if (vx_tui.takeAction()) |action| {
             switch (action) {
-                .quit => {
-                    std.debug.print("Goodbye!\n", .{});
-                    break;
-                },
+                .quit => vx_tui.quit(),
                 .new_session => {
                     manager.deleteSession(config.session_id);
                     manager.createSession(config.session_id) catch {};
-                    std.debug.print("\n{s}New session started.{s}\n\n", .{ display.Colors.green, display.Colors.reset });
-                },
-                .show_help => cli.printHelp(),
-                .show_config => {
-                    // Try interactive setup wizard if no model set
-                    if (config.model.len == 0 or config.api_key == null) {
-                        try runSetupWizard(config);
-                    } else {
-                        cli.printConfig(.{
-                            .allocator = allocator,
-                            .model = config.model,
-                            .provider = config.provider,
-                            .api_key = config.api_key,
-                            .tool_names = &.{},
-                            .skill_names = &.{},
-                            .active_skill = null,
-                            .session_id = config.session_id,
-                        });
-                    }
-                },
-                .show_models => {
-                    if (cli.supportsInteractive()) {
-                        const models_list = config.provider.models();
-                        if (interactiveSelect(allocator, "Select Model", models_list)) |idx| {
-                            if (idx < models_list.len) {
-                                const old_model = config.model;
-                                config.model = models_list[idx];
-                                std.debug.print("{s}Model: {s} → {s}{s}\n", .{ display.Colors.green, old_model, config.model, display.Colors.reset });
-                            }
-                        }
-                    } else {
-                        cli.printModels(config.provider);
-                        std.debug.print("Use {s}/model <name>{s} to switch\n\n", .{ display.Colors.cyan, display.Colors.reset });
-                    }
-                },
-                .switch_model => |model| {
-                    config.model = model;
-                    std.debug.print("{s}Model switched to:{s} {s}\n", .{ display.Colors.green, display.Colors.reset, model });
-                },
-                .show_tools => {
-                    const entries = registry.list();
-                    var names: std.ArrayList([]const u8) = .empty;
-                    defer names.deinit(allocator);
-                    for (entries) |e| names.append(allocator, e.spec.name) catch continue;
-                    if (cli.supportsInteractive()) {
-                        if (interactiveSelect(allocator, "Tools (toggle: auto via /tools enable/disable)", names.items)) |_| {
-                            std.debug.print("{s}Use /tools enable <name> or /tools disable <name>{s}\n", .{ display.Colors.cyan, display.Colors.reset });
-                        }
-                    } else cli.printTools(names.items);
-                },
-                .show_skills => cli.printSkills(&.{}, null),
-                .toggle_tool => |tt| {
-                    std.debug.print("{s}Tool '{s}' {s}.{s}\n", .{
-                        display.Colors.green, tt.name,
-                        if (tt.enable) "enabled" else "disabled",
-                        display.Colors.reset,
-                    });
-                },
-                .view_skill => |name| {
-                    if (cli.supportsInteractive()) {
-                        const skill_title = try std.fmt.allocPrint(allocator, "Skill: {s}", .{name});
-                        defer allocator.free(skill_title);
-                        _ = cli.interactiveMenu(allocator, skill_title, &.{ "[View]", "[Use]", "[Cancel]" }) catch null;
-                    }
-                    std.debug.print("{s}Skill:{s} {s}\n", .{ display.Colors.cyan, display.Colors.reset, name });
-                },
-                .use_skill => |name| {
-                    std.debug.print("{s}Activated skill:{s} {s}\n", .{ display.Colors.green, display.Colors.reset, name });
-                },
-                .clear_skill => {
-                    std.debug.print("{s}Skill cleared.{s}\n", .{ display.Colors.green, display.Colors.reset });
+                    try vx_tui.addMessage(.system, "New session started.");
                 },
                 .send_message => |msg| {
-                    std.debug.print("\n", .{});
-                    try runAgentStream(allocator, config, registry, &manager, msg);
-                    std.debug.print("\n\n", .{});
+                    defer gpa.free(msg);
+                    const trimmed = std.mem.trim(u8, msg, " \t\n\r");
+                    if (trimmed.len == 0) continue;
+
+                    // Slash commands
+                    if (trimmed.len > 0 and trimmed[0] == '/') {
+                        if (std.mem.eql(u8, trimmed, "/help") or std.mem.eql(u8, trimmed, "/h")) { vx_tui.show_help = true; }
+                        else if (std.mem.eql(u8, trimmed, "/quit") or std.mem.eql(u8, trimmed, "/q")) { vx_tui.quit(); }
+                        else if (std.mem.eql(u8, trimmed, "/new")) { try vx_tui.addMessage(.system, "New session."); }
+                        else if (std.mem.eql(u8, trimmed, "/config")) { vx_tui.show_config = true; }
+                        else if (std.mem.eql(u8, trimmed, "/model")) {
+                            vx_tui.menu_items.clearRetainingCapacity();
+                            for (config.provider.models()) |m| try vx_tui.menu_items.append(m);
+                            vx_tui.menu_title = "Select Model"; vx_tui.menu_selected = 0; vx_tui.show_models = true;
+                        } else if (std.mem.eql(u8, trimmed, "/tools")) {
+                            vx_tui.menu_items.clearRetainingCapacity();
+                            for (registry.list()) |e| try vx_tui.menu_items.append(e.spec.name);
+                            vx_tui.menu_title = "Tools"; vx_tui.menu_selected = 0; vx_tui.show_tools = true;
+                        } else if (std.mem.eql(u8, trimmed, "/skills")) {
+                            vx_tui.menu_items.clearRetainingCapacity();
+                            try vx_tui.menu_items.append("(no skills)");
+                            vx_tui.menu_title = "Skills"; vx_tui.menu_selected = 0; vx_tui.show_skills = true;
+                        } else if (std.mem.startsWith(u8, trimmed, "/model ")) {
+                            const name = try allocator.dupe(u8, trimmed["/model ".len..]);
+                            config.model = name; vx_tui.model_name = name;
+                            try vx_tui.addMessage(.system, try std.fmt.allocPrint(allocator, "Model: {s}", .{name}));
+                        } else { try vx_tui.addMessage(.err, try std.fmt.allocPrint(allocator, "Unknown: {s}", .{trimmed})); }
+                        try vx_tui.renderFrame();
+                        continue;
+                    }
+
+                    // Normal message
+                    try vx_tui.addMessage(.user, trimmed);
+                    try vx_tui.renderFrame();
+
+                    if (config.api_key == null) {
+                        try vx_tui.addMessage(.err, "No API key configured.");
+                        try vx_tui.renderFrame();
+                        continue;
+                    }
+
+                    // Lazy-init agent
+                    if (!agent_ready) {
+                        model_registry = try models.createDefaultModelRegistry(allocator);
+                        recorder = trajectory.TrajectoryRecorder.init(allocator);
+                        compressor = context_compressor.ContextCompressor.init(allocator, config.model, config.provider, config.api_key.?, null);
+                        if (config.enable_skill_self_improve) si_engine = SkillSelfImprove.init(allocator);
+                        cp = credential_pool.CredentialPool.init(allocator, collectKeysForProvider(allocator, shared.context.environ(), config.provider));
+                        const agent_config = Agent.AgentConfig{
+                            .max_iterations = @intCast(config.max_iterations),
+                            .model = config.model, .api_key = config.api_key, .provider = config.provider,
+                            .system_prompt = try createDefaultSystemPrompt(allocator, registry),
+                            .context_compressor = compressor, .enable_trajectory_recording = true,
+                            .trajectory_recorder = &recorder, .model_registry = &model_registry,
+                            .enable_smart_routing = true, .enable_skill_self_improve = config.enable_skill_self_improve,
+                            .skill_self_improve = if (si_engine) |*si| si else null,
+                            .credential_pool = if (cp.keys.len > 0) &cp else null,
+                        };
+                        agent_instance = try Agent.Agent.init(allocator, agent_config, registry);
+                        agent_ready = true;
+                        if (manager.getHistoryJSON(allocator, config.session_id)) |h| {
+                            if (h) |hist| agent_instance.loadHistoryFromJSON(hist) catch {};
+                        } else |_| {}
+                    }
+
+                    // Run agent
+                    vx_tui.streaming = true;
+                    try vx_tui.renderFrame();
+                    const response = agent_instance.run(trimmed) catch |err| {
+                        try vx_tui.addMessage(.err, try std.fmt.allocPrint(gpa, "Error: {}", .{err}));
+                        vx_tui.streaming = false;
+                        try vx_tui.renderFrame();
+                        continue;
+                    };
+                    vx_tui.streaming = false;
+                    try vx_tui.addMessage(.assistant, try cleanResponse(gpa, response));
+                    vx_tui.token_prompt = agent_instance.usage.prompt_tokens;
+                    vx_tui.token_completion = agent_instance.usage.completion_tokens;
+                    manager.addMessage(config.session_id, "user", trimmed) catch {};
+                    manager.addMessage(config.session_id, "assistant", response) catch {};
+                    try vx_tui.renderFrame();
                 },
-                .none => {
-                    std.debug.print("{s}Unknown command:{s} {s}\n", .{ display.Colors.red, display.Colors.reset, trimmed });
-                    std.debug.print("Type {s}/help{s} for available commands.\n", .{ display.Colors.cyan, display.Colors.reset });
-                },
             }
-            continue;
         }
 
-        // Handle legacy commands for backward compatibility
-        if (std.mem.eql(u8, trimmed, "exit") or std.mem.eql(u8, trimmed, "quit")) {
-            std.debug.print("Goodbye!\n", .{});
-            break;
-        }
-
-        if (std.mem.eql(u8, trimmed, "clear")) {
-            manager.deleteSession(config.session_id);
-            manager.createSession(config.session_id) catch {};
-            std.debug.print("Session cleared.\n\n", .{});
-            continue;
-        }
-
-        if (std.mem.eql(u8, trimmed, "sessions")) {
-            const sessions = manager.listSessions(allocator) catch |err| {
-                std.debug.print("Error listing sessions: {s}\n\n", .{@errorName(err)});
-                continue;
-            };
-            defer {
-                for (sessions) |s| allocator.free(s);
+        // Drain all pending events, then block for next
+        while (vx_tui.loop.tryEvent() catch null) |event| {
+            switch (event) {
+                .key_press => |key| vx_tui.handleKey(key),
+                .winsize => {},
+                else => {},
             }
-            std.debug.print("Sessions: {d}\n", .{sessions.len});
-            for (sessions) |s| {
-                std.debug.print("  - {s}\n", .{s});
-            }
-            std.debug.print("\n", .{});
-            continue;
         }
-
-        // Regular message — send to agent
-        std.debug.print("\n", .{});
-        try runAgentStream(allocator, config, registry, &manager, trimmed);
-        std.debug.print("\n\n", .{});
+        const event = vx_tui.loop.nextEvent() catch continue;
+        switch (event) {
+            .key_press => |key| vx_tui.handleKey(key),
+            .winsize => {},
+            else => {},
+        }
+        try vx_tui.renderFrame();
     }
 }
 
+fn cleanResponse(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
+    var result = std.array_list.AlignedManaged(u8, null).init(allocator);
+    var pos: usize = 0;
+    while (pos < text.len) {
+        if (std.mem.startsWith(u8, text[pos..], "[Tool(s) executed.")) {
+            if (std.mem.indexOfScalarPos(u8, text, pos, ']')) |end| {
+                pos = end + 1;
+                if (pos < text.len and text[pos] == '\n') pos += 1;
+                continue;
+            }
+        }
+        try result.append(text[pos]);
+        pos += 1;
+    }
+    return result.toOwnedSlice();
+}
 /// Run an interactive selection menu, returning the chosen index or null.
 fn interactiveSelect(allocator: std.mem.Allocator, title: []const u8, items: []const []const u8) ?usize {
     return cli.interactiveMenu(allocator, title, items) catch null;
