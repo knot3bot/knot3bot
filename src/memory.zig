@@ -94,15 +94,31 @@ pub const MemorySystem = struct {
         try list.appendSlice(allocator, "[");
         for (session.messages.items, 0..) |msg, i| {
             if (i > 0) try list.appendSlice(allocator, ",");
-            const entry = try std.fmt.allocPrint(allocator,
-                "{{\"role\":\"{s}\",\"content\":\"{s}\",\"timestamp\":{d}}}",
-                .{ msg.role, msg.content, msg.timestamp });
-            defer allocator.free(entry);
-            try list.appendSlice(allocator, entry);
+            try list.appendSlice(allocator, "{\"role\":\"");
+            try jsonEscape(&list, allocator, msg.role);
+            try list.appendSlice(allocator, "\",\"content\":\"");
+            try jsonEscape(&list, allocator, msg.content);
+            const ts_str = try std.fmt.allocPrint(allocator, "\",\"timestamp\":{}", .{msg.timestamp});
+            defer allocator.free(ts_str);
+            try list.appendSlice(allocator, ts_str);
+            try list.appendSlice(allocator, "}");
         }
         try list.appendSlice(allocator, "]");
 
         return try list.toOwnedSlice(allocator);
+    }
+
+    fn jsonEscape(list: *std.ArrayList(u8), alloc: std.mem.Allocator, s: []const u8) !void {
+        for (s) |c| {
+            switch (c) {
+                '"' => try list.appendSlice(alloc, "\\\""),
+                '\\' => try list.appendSlice(alloc, "\\\\"),
+                '\n' => try list.appendSlice(alloc, "\\n"),
+                '\r' => try list.appendSlice(alloc, "\\r"),
+                '\t' => try list.appendSlice(alloc, "\\t"),
+                else => try list.append(alloc, c),
+            }
+        }
     }
 
     /// Delete session
