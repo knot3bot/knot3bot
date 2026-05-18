@@ -200,7 +200,7 @@ pub const Server = struct {
     trajectory_recorder: ?trajectory_mod.TrajectoryRecorder = null,
     model_registry: ?*models.ModelRegistry = null,
     memory_manager: MemoryManager,
-    in_memory: MemorySystem,
+    in_memory: *MemorySystem,
     sqlite_memory: ?SqliteMemorySystem = null,
     backends: []ManagerMemoryBackend,
     /// Skill self-improvement engine (created per-request for server mode)
@@ -234,7 +234,7 @@ pub const Server = struct {
             .auth_config = auth_config,
             .rate_limiter = rate_limiter_mod.RateLimiter.init(allocator, .{ .max_requests = config.rate_limit_requests, .window_ms = config.rate_limit_window_secs * 1000 }),
             .circuit_brk = circuit_breaker.CircuitBreaker.init(.{}),
-            .in_memory = MemorySystem.init(allocator),
+            .in_memory = undefined,
             .sqlite_memory = if (db_path) |p| try SqliteMemorySystem.init(allocator, p) else null,
             .backends = &.{},
             .memory_manager = undefined,
@@ -242,7 +242,9 @@ pub const Server = struct {
 
         const backend_count: usize = if (server.sqlite_memory != null) 2 else 1;
         server.backends = try allocator.alloc(ManagerMemoryBackend, backend_count);
-        server.backends[0] = .{ .memory = &server.in_memory };
+        server.in_memory = try allocator.create(MemorySystem);
+        server.in_memory.* = MemorySystem.init(allocator);
+        server.backends[0] = .{ .memory = server.in_memory };
         if (server.sqlite_memory) |*s| server.backends[1] = .{ .sqlite = s };
         server.memory_manager = MemoryManager.init(allocator, server.backends);
 
@@ -252,6 +254,7 @@ pub const Server = struct {
     pub fn deinit(self: *Server) void {
         self.memory_manager.deinit();
         self.in_memory.deinit();
+        self.allocator.destroy(self.in_memory);
         if (self.sqlite_memory) |*s| s.deinit();
         self.allocator.free(self.backends);
         self.rate_limiter.deinit();
