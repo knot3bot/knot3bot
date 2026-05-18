@@ -8,6 +8,7 @@
 <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 <style>
 [x-cloak]{display:none!important}
+#chat-messages{scroll-behavior:auto}
 .chat-scroll::-webkit-scrollbar{width:4px}
 .chat-scroll::-webkit-scrollbar-thumb{background:#4b5563;border-radius:2px}
 .stream-cursor::after{content:'▊';animation:blink 1s step-end infinite}
@@ -469,6 +470,7 @@ function app() {
       } catch(e) { this.status = 'Unreachable'; this.connected = false; }
       await Promise.all([this.fetchMetrics(), this.fetchTools(), this.fetchSkills(), this.fetchMemories()]);
       setInterval(()=>this.fetchMetrics(), 10000);
+      this.scrollChat();
     },
 
     // Chat
@@ -547,17 +549,17 @@ function app() {
     scrollChat() {
       const doScroll = () => {
         const el = document.getElementById('chat-messages');
-        if (el) el.scrollTop = el.scrollHeight;
+        if (el) { el.scrollTop = 999999; el.scrollTop = el.scrollHeight; }
       };
-      // Multiple attempts to ensure DOM is ready
       doScroll();
+      requestAnimationFrame(()=>{ doScroll(); setTimeout(doScroll, 100); });
       setTimeout(doScroll, 50);
-      setTimeout(doScroll, 200);
+      setTimeout(doScroll, 300);
     },
 
     // Session management
     newSession() { const id='s'+Date.now(); this.sessions.push({id}); this.activeSession=id; this.sessionMessages[id]=[]; this.saveHistory(); },
-    switchSession(id) { this.activeSession=id; if(!this.sessionMessages[id])this.sessionMessages[id]=[]; },
+    switchSession(id) { this.activeSession=id; if(!this.sessionMessages[id])this.sessionMessages[id]=[]; this.scrollChat(); },
     deleteSession(idx) { if(this.sessions.length<=1)return; const id=this.sessions[idx].id; delete this.sessionMessages[id]; this.sessions.splice(idx,1); if(this.activeSession===id)this.activeSession=this.sessions[0].id; this.saveHistory(); },
     saveHistory() {
       try {
