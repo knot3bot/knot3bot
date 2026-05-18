@@ -597,7 +597,9 @@ pub const LLMClient = struct {
 
         while (true) {
             const bytes_read = stdout_file.readStreaming(io, &[_][]u8{&response_buffer}) catch |err| {
-                std.log.err("Read error: {s}", .{@errorName(err)});
+                if (err != error.EndOfStream) {
+                    std.log.err("Read error: {s}", .{@errorName(err)});
+                }
                 break;
             };
 
@@ -607,21 +609,16 @@ pub const LLMClient = struct {
                 if (byte == '\n') {
                     if (line_pos > 0) {
                         const line = line_buffer[0..line_pos];
-
                         if (std.mem.startsWith(u8, line, "data: ")) {
                             const data = line[6..];
-
                             if (std.mem.eql(u8, data, "[DONE]")) {
                                 stdout_file.close(io);
                                 child.stdout = null;
                                 _ = child.wait(io) catch {};
                                 return;
                             }
-
                             if (self.extractStreamContent(data)) |content| {
-                                if (content.len > 0) {
-                                    callback(content, user_data);
-                                }
+                                if (content.len > 0) callback(content, user_data);
                             }
                         }
                         line_pos = 0;
@@ -629,6 +626,15 @@ pub const LLMClient = struct {
                 } else if (line_pos < line_buffer.len) {
                     line_buffer[line_pos] = byte;
                     line_pos += 1;
+                }
+            }
+        }
+        // Process any remaining data in line buffer (pipe closed without final newline)
+        if (line_pos > 0) {
+            const line = line_buffer[0..line_pos];
+            if (std.mem.startsWith(u8, line, "data: ") and !std.mem.eql(u8, line[6..], "[DONE]")) {
+                if (self.extractStreamContent(line[6..])) |content| {
+                    if (content.len > 0) callback(content, user_data);
                 }
             }
         }

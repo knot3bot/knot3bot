@@ -736,7 +736,7 @@ pub const Server = struct {
                 if (!appendSlice(&buf, &pos, p.request_id)) return;
                 if (!appendSlice(&buf, &pos, "\",\"object\":\"chat.completion.chunk\",\"created\":")) return;
 
-                const ts_slice = std.fmt.bufPrint(buf[pos..], "{d}", .{ts}) catch return;
+                const ts_slice = std.fmt.bufPrint(buf[pos..], "{}", .{ts}) catch return;
                 pos += ts_slice.len;
 
                 if (!appendSlice(&buf, &pos, ",\"model\":\"")) return;
