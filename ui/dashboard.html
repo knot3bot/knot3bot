@@ -474,6 +474,11 @@ function app() {
     // Chat
     async sendMessage() {
       if (!this.input.trim() || this.sending) return;
+      if (!this.apiKey) {
+        this.sessionMessages[this.activeSession].push({id:Date.now(),role:'assistant',content:'Error: No API key set. Go to Settings tab to configure your API key.',time:new Date().toLocaleTimeString()});
+        this.showSettings = true;
+        return;
+      }
       const content = this.input.trim(); this.input = '';
       if (!this.sessionMessages[this.activeSession]) this.sessionMessages[this.activeSession] = [];
       const msgs = this.sessionMessages[this.activeSession];
@@ -482,7 +487,7 @@ function app() {
 
       try {
         const headers = {'Content-Type':'application/json'};
-        if (this.apiKey) headers['Authorization'] = 'Bearer ' + this.apiKey;
+        headers['Authorization'] = 'Bearer ' + this.apiKey;
         const body = {
           model: this.model, stream: this.streamEnabled,
           messages: msgs.map(m=>({role:m.role,content:m.content})),
@@ -505,7 +510,7 @@ function app() {
           this.streaming = true; this.streamContent = '';
           const reader = r.body.getReader();
           const decoder = new TextDecoder();
-          let full = '', buffer = '';
+          let full = '', buffer = '', lastScroll = Date.now();
           while (true) {
             const {done,value} = await reader.read();
             if (done) break;
@@ -518,6 +523,8 @@ function app() {
                 try { const c = JSON.parse(data).choices?.[0]?.delta?.content; if (c) { full += c; this.streamContent = full; } } catch(e){}
               }
             }
+            // Throttled scroll during streaming
+            if (Date.now() - lastScroll > 80) { const el = document.getElementById('chat-messages'); if (el) el.scrollTop = el.scrollHeight; lastScroll = Date.now(); }
           }
           this.streaming = false;
           if (full) msgs.push({id:Date.now(),role:'assistant',content:full,time:new Date().toLocaleTimeString()});
@@ -533,8 +540,19 @@ function app() {
       }
       this.sending = false;
       this.saveHistory();
-      this.$nextTick(()=>{const el=document.getElementById('chat-messages');if(el)el.scrollTop=el.scrollHeight;});
+      this.scrollChat();
       setTimeout(()=>this.fetchMemories(), 500);
+    },
+
+    scrollChat() {
+      const doScroll = () => {
+        const el = document.getElementById('chat-messages');
+        if (el) el.scrollTop = el.scrollHeight;
+      };
+      // Multiple attempts to ensure DOM is ready
+      doScroll();
+      setTimeout(doScroll, 50);
+      setTimeout(doScroll, 200);
     },
 
     // Session management
