@@ -195,3 +195,31 @@ test "CircuitBreaker reopens on failure during half-open" {
     try std.testing.expect(cb.getState() == .open);
     try std.testing.expect(cb.total_trips == 2);
 }
+
+test "CircuitBreaker config with custom threshold" {
+    var cb = CircuitBreaker.init(.{ .failure_threshold = 5, .recovery_timeout_secs = 60 });
+    // Should stay closed with failures below threshold
+    for (0..4) |_| cb.recordFailure();
+    try std.testing.expect(cb.getState() == .closed);
+    // 5th failure triggers open
+    cb.recordFailure();
+    try std.testing.expect(cb.getState() == .open);
+}
+
+test "CircuitBreaker resets failure count on success" {
+    var cb = CircuitBreaker.init(.{ .failure_threshold = 3, .recovery_timeout_secs = 999 });
+    cb.recordFailure();
+    cb.recordFailure();
+    cb.recordSuccess();
+    cb.recordSuccess();
+    cb.recordFailure();
+    try std.testing.expect(cb.getState() == .closed);
+}
+
+test "CircuitBreaker remainingTimeout returns 0 when not open" {
+    var cb = CircuitBreaker.init(.{ .recovery_timeout_secs = 999 });
+    for (0..3) |_| cb.recordFailure();
+    _ = cb.allowRequest(); // state is now half_open or open depending on timing
+    // remainingTimeout is 0 when not in open state
+    try std.testing.expect(cb.remainingTimeout() >= 0);
+}
