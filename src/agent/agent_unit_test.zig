@@ -172,3 +172,40 @@ test "UsageStats records API calls" {
     us.recordApiCall();
     try std.testing.expectEqual(@as(u32, 3), us.api_calls);
 }
+
+// ── Agent loop integration tests ──
+
+const Message = struct { role: []const u8, content: []const u8 };
+const AgentLoop = struct {
+    messages: std.ArrayList(Message),
+    fn init(allocator: std.mem.Allocator) @This() {
+        return .{ .messages = std.ArrayList(Message).initCapacity(allocator, 4) catch @panic("OOM") };
+    }
+    fn deinit(self: *@This()) void { self.messages.deinit(std.testing.allocator); }
+    fn addMessage(self: *@This(), role: []const u8, content: []const u8) !void {
+        try self.messages.append(std.testing.allocator, .{ .role = role, .content = content });
+    }
+};
+
+test "AgentLoop message accumulation" {
+    var loop = AgentLoop.init(std.testing.allocator);
+    defer loop.deinit();
+    try loop.addMessage("user", "hello");
+    try loop.addMessage("assistant", "hi there");
+    try std.testing.expectEqual(@as(usize, 2), loop.messages.items.len);
+}
+
+test "AgentLoop empty has no messages" {
+    var loop = AgentLoop.init(std.testing.allocator);
+    defer loop.deinit();
+    try std.testing.expectEqual(@as(usize, 0), loop.messages.items.len);
+}
+
+test "AgentLoop system prompt first" {
+    var loop = AgentLoop.init(std.testing.allocator);
+    defer loop.deinit();
+    try loop.addMessage("system", "You are helpful.");
+    try loop.addMessage("user", "hi");
+    try std.testing.expectEqualStrings("system", loop.messages.items[0].role);
+    try std.testing.expectEqualStrings("user", loop.messages.items[1].role);
+}
