@@ -513,7 +513,7 @@ pub const Server = struct {
             self.metrics.circuit_breaker_rejections += 1;
             const remaining = self.circuit_brk.remainingTimeout();
             std.log.warn("[{s}] Circuit breaker OPEN, retry after {d}s", .{ request_id, remaining });
-            const err_resp = try std.fmt.allocPrint(self.allocator, "{{\"error\":{{\"message\":\"Service temporarily unavailable\",\"type\":\"circuit_breaker_open\",\"retry_after_seconds\":{d}}}}}", .{remaining});
+            const err_resp = try std.fmt.allocPrint(self.allocator, "{{\"error\":{{\"message\":\"Service temporarily unavailable\",\"type\":\"circuit_breaker_open\",\"retry_after_seconds\":{}}}}}", .{remaining});
             defer self.allocator.free(err_resp);
             try self.sendJson(conn, 503, err_resp, request_id);
             return;
@@ -844,7 +844,7 @@ pub const Server = struct {
             self.metrics.circuit_breaker_rejections += 1;
             const remaining = self.circuit_brk.remainingTimeout();
             std.log.warn("[{s}] Circuit breaker OPEN, retry after {d}s", .{ request_id, remaining });
-            const err_resp = try std.fmt.allocPrint(self.allocator, "{{\"error\":{{\"message\":\"Service temporarily unavailable\",\"type\":\"circuit_breaker_open\",\"retry_after_seconds\":{d}}}}}", .{remaining});
+            const err_resp = try std.fmt.allocPrint(self.allocator, "{{\"error\":{{\"message\":\"Service temporarily unavailable\",\"type\":\"circuit_breaker_open\",\"retry_after_seconds\":{}}}}}", .{remaining});
             defer self.allocator.free(err_resp);
             try self.sendJson(conn, 503, err_resp, request_id);
             return;
