@@ -256,3 +256,17 @@ test "RateLimiter per-key custom limits" {
     }
     try std.testing.expectEqual(@as(u32, 2), regular_allowed);
 }
+
+test "RateLimiter deinit after use" {
+    var limiter = RateLimiter.init(std.testing.allocator, .{ .max_requests = 10, .window_ms = 1000 });
+    _ = limiter.check("tmp-key");
+    limiter.deinit(); // should not crash
+}
+
+test "RateLimiter multiple keys independent" {
+    var limiter = RateLimiter.init(std.testing.allocator, .{ .max_requests = 5, .window_ms = 1000 });
+    defer limiter.deinit();
+    // Each key has its own bucket
+    for (0..5) |_| { try std.testing.expect(limiter.check("key-a")); }
+    for (0..5) |_| { try std.testing.expect(limiter.check("key-b")); }
+}
