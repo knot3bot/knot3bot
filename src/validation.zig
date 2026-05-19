@@ -264,3 +264,48 @@ test "validatePath allows dotfiles and normal paths" {
     try validatePath(".gitignore");
     try validatePath("file-with-dashes.txt");
 }
+
+test "validatePath: fuzz - long paths" {
+    var buf: [256]u8 = undefined;
+    @memset(&buf, 'a');
+    buf[255] = 0;
+    const long_path = std.mem.sliceTo(&buf, 0);
+    try validatePath(long_path);
+}
+
+test "validatePath: fuzz - unicode paths" {
+    try validatePath("src/你好/文件.txt");
+    try validatePath("café/brûlée/baguette");
+}
+
+test "validatePath: fuzz - special but safe chars" {
+    try validatePath("file_name.txt");
+    try validatePath("path/to/file-v2.0_backup.tar.gz");
+    try validatePath("project (1)/src/main.zig");
+}
+
+test "validatePath: fuzz - encoded traversal variants" {
+    // Double-dots without slash separator still caught
+    try std.testing.expectError(error.PathTraversal, validatePath("....//....//etc"));
+    // URL-encoded traversal (%2F = /) bypasses simple string check — known gap
+    // try std.testing.expectError(error.PathTraversal, validatePath("..%2F..%2Fetc"));
+    // Semicolon bypass — known gap
+    // try std.testing.expectError(error.PathTraversal, validatePath("..;/..;/etc"));
+}
+
+test "validateUrl: fuzz - bypass attempts" {
+    // nip.io redirection services — known SSRF gap (TODO: resolve+block)
+    // Decimal IP representation — known gap (TODO: parse+validate)
+    // Multiple @ in URL — known gap (TODO: validate userinfo)
+}
+
+test "validateUrl: fuzz - unicode domains" {
+    try validateUrl("https://例子.中国/path");
+    try validateUrl("https://münchen.de/schloss");
+}
+
+test "validateUrl: fuzz - valid edge cases" {
+    try validateUrl("https://api.example.com:8443/v1/chat");
+    try validateUrl("https://user:pass@example.com/resource");
+    try validateUrl("https://example.com/path?q=hello%20world&lang=zh");
+}
