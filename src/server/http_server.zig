@@ -606,16 +606,68 @@ pub const Server = struct {
 
         if (stream_requested and self.config.enable_streaming) {
             self.metrics.streaming_requests += 1;
-            const response = self.handleStreamingCompletion(conn, allocator, &agent, user_message, request_id) catch |err| {
-                std.log.err("[{s}] Streaming error: {s}", .{ request_id, @errorName(err) });
+            // Use non-streaming agent call, wrap output as SSE
+            const response = agent.run(user_message) catch |err| {
+                std.log.err("[{s}] Agent error: {s}", .{ request_id, @errorName(err) });
+                try self.sendJson(conn, 500, "{\"error\":{\"message\":\"Agent execution failed\"}}", request_id);
                 return;
             };
             defer allocator.free(response);
+
+            // Write SSE header
+            const sse_header = "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nConnection: keep-alive\r\nAccess-Control-Allow-Origin: *\r\nX-Request-ID: ";
+            try streamWriteAll(conn, sse_header);
+            try streamWriteAll(conn, request_id);
+            try streamWriteAll(conn, "\r\n\r\n");
+
+            // Stream response as SSE chunks
+            const model_name = self.agent_config.model;
+            var pos: usize = 0;
+            while (pos < response.len) {
+                const end = @min(pos + 40, response.len);
+                // Find natural break point (space or newline)
+                var chunk_end = end;
+                if (end < response.len) {
+                    var scan = end;
+                    while (scan > pos and response[scan] != ' ' and response[scan] != '\n') scan -= 1;
+                    if (scan > pos + 20) chunk_end = scan;
+                }
+                const chunk = response[pos..chunk_end];
+                // Build SSE event
+                var sse_buf: [4096]u8 = undefined;
+                const sse_event = std.fmt.bufPrint(&sse_buf,
+                    "data: {{\"id\":\"chatcmpl-{s}\",\"object\":\"chat.completion.chunk\",\"created\":{},\"model\":\"{s}\",\"choices\":[{{\"index\":0,\"delta\":{{\"content\":\"",
+                    .{ request_id, shared.timestamp(), model_name }) catch break;
+                _ = std.c.write(conn.socket.handle, sse_event.ptr, sse_event.len);
+                // Write escaped content
+                for (chunk) |c| {
+                    var esc: [2]u8 = undefined;
+                    const esc_str = switch (c) {
+                        '"' => "\\\"",
+                        '\\' => "\\\\",
+                        '\n' => "\\n",
+                        '\r' => "\\r",
+                        '\t' => "\\t",
+                        else => blk: { esc[0] = c; break :blk esc[0..1]; },
+                    };
+                    _ = std.c.write(conn.socket.handle, esc_str.ptr, esc_str.len);
+                }
+                _ = std.c.write(conn.socket.handle, "\"}}]}}\n\n", 9);
+                pos = chunk_end;
+                if (pos < response.len and response[pos] == ' ') pos += 1;
+            }
+            // Send [DONE]
+            _ = std.c.write(conn.socket.handle, "data: [DONE]\n\n", 15);
+
             if (parsed.value.session_id) |sid| {
                 self.memory_manager.addMessage(sid, "assistant", response) catch |err| {
                     std.log.err("[{s}] addMessage(assistant): {s}", .{ request_id, @errorName(err) });
                 };
             }
+            // Record usage
+            const usage_stats = agent.getUsageStats();
+            self.metrics.recordTokens(usage_stats.prompt_tokens, usage_stats.completion_tokens);
+            self.circuit_brk.recordSuccess();
         } else {
             const response = agent.run(user_message) catch |err| {
                 std.log.err("[{s}] Agent error: {s}", .{ request_id, @errorName(err) });
