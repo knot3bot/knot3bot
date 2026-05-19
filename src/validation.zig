@@ -169,11 +169,21 @@ pub fn validateUrl(url: []const u8) ValidationError!void {
         "metadata.goog",
         "169.254.169.254",
         "metadata.aws.internal",
+        "metadata.azure.internal",
+        "metadata.alibabacloud.com",
     };
     for (blocked_hosts) |blocked| {
         if (std.mem.eql(u8, lower, blocked)) {
             return error.BlockedHost;
         }
+    }
+
+    // Block nip.io and similar wildcard DNS redirection services
+    if (std.mem.endsWith(u8, lower, ".nip.io") or
+        std.mem.endsWith(u8, lower, ".xip.io") or
+        std.mem.endsWith(u8, lower, ".sslip.io"))
+    {
+        return error.BlockedHost;
     }
 
     // Check if hostname contains internal/metadata keywords
@@ -188,7 +198,22 @@ pub fn validateUrl(url: []const u8) ValidationError!void {
     // Check if hostname is an IPv6 loopback
     if (std.mem.eql(u8, lower, "::1")) return error.BlockedHost;
 
+    // Detect decimal IP notation (e.g., http://2130706433/ = http://127.0.0.1/)
+    if (isDecimalIp(hostname)) return error.BlockedHost;
+
     return;
+}
+
+/// Check if a hostname is a decimal IP representation
+fn isDecimalIp(hostname: []const u8) bool {
+    if (hostname.len == 0) return false;
+    for (hostname) |c| {
+        if (c < '0' or c > '9') return false;
+    }
+    // Must be all digits, 1-10 chars (max uint32)
+    if (hostname.len > 10) return false;
+    const num = std.fmt.parseInt(u32, hostname, 10) catch return false;
+    return num <= 0xFFFFFFFF;
 }
 
 // ============================================================================
@@ -294,9 +319,13 @@ test "validatePath: fuzz - encoded traversal variants" {
 }
 
 test "validateUrl: fuzz - bypass attempts" {
-    // nip.io redirection services — known SSRF gap (TODO: resolve+block)
-    // Decimal IP representation — known gap (TODO: parse+validate)
+    // nip.io redirection services — now blocked
+    try std.testing.expectError(error.BlockedHost, validateUrl("http://127.0.0.1.nip.io/"));
+    try std.testing.expectError(error.BlockedHost, validateUrl("http://10.0.0.1.xip.io/"));
+    // Decimal IP representation — now blocked
+    try std.testing.expectError(error.BlockedHost, validateUrl("http://2130706433/"));
     // Multiple @ in URL — known gap (TODO: validate userinfo)
+    // try std.testing.expectError(error.InvalidUrl, validateUrl("http://user@evil.com@safe.com/"));
 }
 
 test "validateUrl: fuzz - unicode domains" {
