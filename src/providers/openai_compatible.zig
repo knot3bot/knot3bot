@@ -618,7 +618,10 @@ pub const LLMClient = struct {
                                 return;
                             }
                             if (self.extractStreamContent(data)) |content| {
-                                if (content.len > 0) callback(content, user_data);
+                                if (content.len > 0) {
+                                    callback(content, user_data);
+                                    self.allocator.free(content);
+                                }
                             }
                         }
                         line_pos = 0;
@@ -634,7 +637,10 @@ pub const LLMClient = struct {
             const line = line_buffer[0..line_pos];
             if (std.mem.startsWith(u8, line, "data: ") and !std.mem.eql(u8, line[6..], "[DONE]")) {
                 if (self.extractStreamContent(line[6..])) |content| {
-                    if (content.len > 0) callback(content, user_data);
+                    if (content.len > 0) {
+                        callback(content, user_data);
+                        self.allocator.free(content);
+                    }
                 }
             }
         }
