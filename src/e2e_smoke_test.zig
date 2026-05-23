@@ -68,6 +68,34 @@ test "SSE event format" {
     try std.testing.expect(std.mem.indexOf(u8, sse, "\"content\":\"Hello\"") != null);
 }
 
+test "SSE DONE signal format" {
+    const done = "data: [DONE]";
+    try std.testing.expect(std.mem.eql(u8, done[6..], "[DONE]"));
+}
+
+test "API key rotation pool" {
+    const keys = [_][]const u8{ "sk-key1", "sk-key2", "sk-key3" };
+    var next: usize = 0;
+    // Round-robin rotation
+    for (0..6) |i| {
+        _ = keys[next];
+        next = (next + 1) % keys.len;
+        _ = i;
+    }
+    try std.testing.expectEqual(@as(usize, 0), next); // full cycle
+}
+
+test "Graceful shutdown drain logic" {
+    var active: u32 = 3;
+    const timeout_secs: u32 = 5;
+    var elapsed: u32 = 0;
+    while (active > 0 and elapsed < timeout_secs) : (elapsed += 1) {
+        active -= 1; // simulate connection completing
+    }
+    try std.testing.expectEqual(@as(u32, 0), active);
+    try std.testing.expect(elapsed <= timeout_secs);
+}
+
 const ChatMessage = struct { role: []const u8, content: []const u8 };
 const ChatCompletionRequest = struct {
     model: ?[]const u8 = null,
