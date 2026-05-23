@@ -15,6 +15,7 @@ const context_compressor = @import("root.zig").context_compressor;
 const trajectory = @import("root.zig").trajectory;
 const shared = @import("root.zig").shared;
 const tui = @import("tui/vaxis_tui.zig");
+const json_logger = @import("shared/json_logger.zig");
 
 var g_shutdown_flag = std.atomic.Value(bool).init(false);
 
@@ -697,6 +698,8 @@ pub fn main(init: std.process.Init) !u8 {
     var registry = try createDefaultRegistry(allocator, workspace_dir);
     defer registry.deinit();
 
+    // Enable structured JSON logging for production
+    json_logger.init(std.Io.File.stderr().writer(std.Io.Threaded.global_single_threaded.io()));
     std.log.info("knot3bot v0.0.1 starting...", .{});
     std.log.info("Provider: {s} | Model: {s} | Memory: {s} | Tools: {d}", .{
         config.provider.name(),

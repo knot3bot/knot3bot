@@ -184,6 +184,7 @@ pub fn build(b: *std.Build) void {
         "src/tools/shell_test.zig",
         "src/architecture_test.zig",
         "src/cli.zig",
+        "src/e2e_smoke_test.zig",
     }) |test_file| {
         const test_cmd = b.addSystemCommand(&.{ zig_exe, "test", test_file });
         test_cmd.setCwd(cwd_path);

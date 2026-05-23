@@ -508,6 +508,16 @@ pub const Server = struct {
 
         self.metrics.chat_requests += 1;
 
+        // Validate body size
+        if (body.len > self.config.max_request_size) {
+            try self.sendJson(conn, 413, "{\"error\":{\"message\":\"Request body too large\",\"type\":\"payload_too_large\"}}", request_id);
+            return;
+        }
+        if (body.len == 0 or (body.len < 16 and !std.mem.eql(u8, std.mem.trim(u8, body, " {}"), ""))) {
+            try self.sendJson(conn, 400, "{\"error\":{\"message\":\"Request body too small\",\"type\":\"invalid_request\"}}", request_id);
+            return;
+        }
+
         // Circuit breaker check
         if (!self.circuit_brk.allowRequest()) {
             self.metrics.circuit_breaker_rejections += 1;
