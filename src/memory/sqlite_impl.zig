@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const c = @cImport(@cInclude("sqlite3.h"));
+const c = @import("sqlite3_c");
 
 // SQLITE_STATIC - we use this but MUST ensure strings are heap-allocated
 // before passing to SQLite. See heapAllocString() helper.

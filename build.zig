@@ -96,6 +96,16 @@ pub fn build(b: *std.Build) void {
         if (sqlite_lib_path) |lib_path| {
             exe.root_module.addLibraryPath(.{ .cwd_relative = lib_path });
         }
+
+        // Translate SQLite C header to Zig module (replaces @cImport removed in 0.17)
+        const sqlite3_translate = b.addTranslateC(.{
+            .root_source_file = b.path("vendor/sqlite3/sqlite3.h"),
+            .target = target,
+            .optimize = optimize,
+        });
+        const sqlite3_mod = sqlite3_translate.createModule();
+        mod.addImport("sqlite3_c", sqlite3_mod);
+        exe.root_module.addImport("sqlite3_c", sqlite3_mod);
     }
 
     // Config options module for conditional compilation

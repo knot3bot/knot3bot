@@ -4,7 +4,7 @@ Instructions for building knot3bot on different platforms.
 
 ## Prerequisites
 
-- **Zig** 0.15.2 or later
+- **Zig** 0.17.0 or later
 - **Git**
 - **C compiler** (for SQLite)
 
@@ -84,9 +84,9 @@ zig build
 apt install zig
 
 # Or download from ziglang.org
-wget https://ziglang.org/download/0.15.2/zig-linux-x86_64-0.15.2.tar.xz
-tar xf zig-linux-x86_64-0.15.2.tar.xz
-export PATH="$PWD/zig-linux-x86_64-0.15.2:$PATH"
+wget https://ziglang.org/download/0.17.0/zig-linux-x86_64-0.17.0.tar.xz
+tar xf zig-linux-x86_64-0.17.0.tar.xz
+export PATH="$PWD/zig-linux-x86_64-0.17.0:$PATH"
 
 # Install SQLite development files
 apt install libsqlite3-dev
@@ -125,7 +125,7 @@ docker build -t knot3bot .
 
 ```bash
 # Build inside Docker for Linux
-docker run --rm -v $(pwd):/app -w /app ziglang/zig:0.15.2 zig build
+docker run --rm -v $(pwd):/app -w /app ziglang/zig:0.17.0 zig build
 ```
 
 ### musl Static Build
@@ -188,7 +188,7 @@ Check Zig version:
 zig version
 ```
 
-Requires 0.15.2 or later.
+Requires 0.17.0 or later.
 
 ### Build Errors
 

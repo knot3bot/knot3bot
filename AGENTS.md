@@ -71,7 +71,7 @@ zig test src/module.zig --test-filter "test_name"
 
 ## Notes for Agents
 
-- Zig 0.15.2 required
+- Zig 0.17.0 required
 - Single binary output in zig-out/bin/knot3bot
 - OpenAI-compatible REST API on HTTP server
 - Multi-provider support: OpenAI, Anthropic, Kimi, MiniMax, ZAI, Bailian, Volcano

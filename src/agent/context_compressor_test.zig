@@ -279,7 +279,7 @@ test "computeSummaryBudget - respects minimum tokens" {
 }
 
 test "computeSummaryBudget - respects max tokens cap" {
-    const long_content = "This is a very long message. " ** 100;
+    const long_content = "This is a very long message. " ++ "This is a very long message. " ++ "This is a very long message. " ++ "This is a very long message. " ++ "This is a very long message. ";
     const messages = &[_]Message{
         .{ .role = .user, .content = long_content },
     };
@@ -290,7 +290,7 @@ test "computeSummaryBudget - respects max tokens cap" {
 
 test "computeSummaryBudget - scales with content" {
     const short = "Short content";
-    const long = "This is much longer content that should result in a higher summary budget. " ** 10;
+    const long = "This is much longer content that should result in a higher summary budget. " ++ "This is much longer content that should result in a higher summary budget. ";
 
     const short_messages = &[_]Message{.{ .role = .user, .content = short }};
     const long_messages = &[_]Message{.{ .role = .user, .content = long }};

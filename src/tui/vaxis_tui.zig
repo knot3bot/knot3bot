@@ -22,13 +22,13 @@ pub const App = struct {
     scroll_offset: usize = 0,
 
     // Input
-    input_buf: [4096]u8 = [_]u8{0} ** 4096,
+    input_buf: [4096]u8 = @splat(0),
     input_len: usize = 0,
     cursor_pos: usize = 0,
 
     // Command mode
     command_mode: bool = false,
-    command_buf: [256]u8 = [_]u8{0} ** 256,
+    command_buf: [256]u8 = @splat(0),
     command_len: usize = 0,
 
     // History
@@ -112,7 +112,7 @@ pub const App = struct {
 
     pub fn addHistory(self: *App, cmd: []const u8) !void {
         if (cmd.len == 0 or cmd.len >= 4096) return;
-        var entry: [4096]u8 = [_]u8{0} ** 4096;
+        var entry: [4096]u8 = @splat(0);
         @memcpy(entry[0..cmd.len], cmd);
         try self.history.append(entry);
         self.history_idx = null;

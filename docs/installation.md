@@ -4,7 +4,7 @@ knot3bot runs as a single binary with zero runtime dependencies.
 
 ## Requirements
 
-- **Zig** 0.15.2 or later
+- **Zig** 0.17.0 or later
 - **SQLite** (optional, for persistent memory)
   - macOS: included by default
   - Linux: `apt install libsqlite3-dev` or equivalent
