@@ -1,21 +1,6 @@
 const std = @import("std");
 const shared = @import("../shared/root.zig");
 
-/// Escape special characters for JSON string values
-fn escapeJsonString(writer_arg: anytype, str: []const u8) !void {
-    var writer = writer_arg;
-    for (str) |c| {
-        switch (c) {
-            '"' => try writer.writeAll("\\\""),
-            '\\' => try writer.writeAll("\\\\"),
-            '\n' => try writer.writeAll("\\n"),
-            '\r' => try writer.writeAll("\\r"),
-            '\t' => try writer.writeAll("\\t"),
-            else => try writer.writeByte(c),
-        }
-    }
-}
-
 /// Chat message structure
 pub const ChatMessage = struct {
 role: []const u8,
@@ -62,7 +47,7 @@ pub const ChatRequest = struct {
             try writer.writeAll("{\"role\":\"");
             try writer.writeAll(msg.role);
             try writer.writeAll("\",\"content\":\"");
-            try escapeJsonString(writer, msg.content);
+            try shared.json.writeJsonEscaped(writer, msg.content);
             try writer.writeAll("\"}");
         }
 
@@ -97,7 +82,7 @@ pub const ChatRequest = struct {
                 try writer.writeAll(tool.function.name);
                 try writer.writeAll("\",\"description\":\"");
                 if (tool.function.description) |desc| {
-                    try escapeJsonString(writer, desc);
+                    try shared.json.writeJsonEscaped(writer, desc);
                 }
                 try writer.writeAll("\",\"parameters\":");
                 if (tool.function.parameters) |params| {
@@ -294,8 +279,13 @@ pub const Provider = enum {
         };
     }
     pub fn fromStr(s: []const u8) ?Provider {
-        const lowered = std.ascii.allocLowerString(std.heap.page_allocator, s) catch return null;
-        defer std.heap.page_allocator.free(lowered);
+        // Use stack buffer for case-insensitive matching — avoids allocator dependency.
+        var buf: [64]u8 = undefined;
+        const lowered = if (s.len <= buf.len) blk: {
+            @memcpy(buf[0..s.len], s);
+            for (buf[0..s.len]) |*c| c.* = std.ascii.toLower(c.*);
+            break :blk buf[0..s.len];
+        } else return null;
         inline for (.{
             .{ "openai", .openai },
             .{ "anthropic", .anthropic },
@@ -374,16 +364,7 @@ pub const LLMClient = struct {
             try body.appendSlice(self.allocator, "{\"role\":\"");
             try body.appendSlice(self.allocator, msg.role);
             try body.appendSlice(self.allocator, "\",\"content\":\"");
-            for (msg.content) |c| {
-                switch (c) {
-                    '"' => try body.appendSlice(self.allocator, "\\\""),
-                    '\\' => try body.appendSlice(self.allocator, "\\\\"),
-                    '\n' => try body.appendSlice(self.allocator, "\\n"),
-                    '\r' => try body.appendSlice(self.allocator, "\\r"),
-                    '\t' => try body.appendSlice(self.allocator, "\\t"),
-                    else => try body.append(self.allocator, c),
-                }
-            }
+            try shared.json.appendJsonEscaped(&body, self.allocator, msg.content);
             try body.appendSlice(self.allocator, "\"}");
         }
 
@@ -403,16 +384,7 @@ pub const LLMClient = struct {
             try body.appendSlice(self.allocator, "{\"role\":\"");
             try body.appendSlice(self.allocator, msg.role);
             try body.appendSlice(self.allocator, "\",\"content\":\"");
-            for (msg.content) |c| {
-                switch (c) {
-                    '"' => try body.appendSlice(self.allocator, "\\\""),
-                    '\\' => try body.appendSlice(self.allocator, "\\\\"),
-                    '\n' => try body.appendSlice(self.allocator, "\\n"),
-                    '\r' => try body.appendSlice(self.allocator, "\\r"),
-                    '\t' => try body.appendSlice(self.allocator, "\\t"),
-                    else => try body.append(self.allocator, c),
-                }
-            }
+            try shared.json.appendJsonEscaped(&body, self.allocator, msg.content);
             try body.appendSlice(self.allocator, "\"}");
         }
 
@@ -545,8 +517,8 @@ pub const LLMClient = struct {
         const url = try std.fmt.allocPrint(self.allocator, "{s}/chat/completions", .{self.base_url});
         defer self.allocator.free(url);
 
-        const auth_header = try std.fmt.allocPrint(self.allocator, "Authorization: Bearer {s}", .{self.api_key});
-        defer self.allocator.free(auth_header);
+        const auth_file = try writeAuthHeaderFile(self.allocator, self.api_key);
+        defer cleanupAuthFile(self.allocator, auth_file);
 
         const argv = &[_][]const u8{
             "curl",
@@ -561,7 +533,7 @@ pub const LLMClient = struct {
             "-H",
             "Content-Type: application/json",
             "-H",
-            auth_header,
+            auth_file,
             "--data-binary",
             "@-",
             url,
@@ -657,14 +629,13 @@ pub const LLMClient = struct {
         const url = try std.fmt.allocPrint(self.allocator, "{s}/chat/completions", .{self.base_url});
         defer self.allocator.free(url);
 
-        const auth_header = try std.fmt.allocPrint(self.allocator, "Authorization: Bearer {s}", .{self.api_key});
-        defer self.allocator.free(auth_header);
+        const auth_file = try writeAuthHeaderFile(self.allocator, self.api_key);
+        defer cleanupAuthFile(self.allocator, auth_file);
 
-        const temp_path = "/tmp/knot3bot_curl_body.json";
-        try shared.context.cwdWriteFile(temp_path, body);
-        defer shared.context.cwdDeleteFile(temp_path) catch {};
+        const body_file = try writeBodyTempFile(self.allocator, body);
+        defer cleanupAuthFile(self.allocator, body_file);
 
-        const data_arg = try std.fmt.allocPrint(self.allocator, "@{s}", .{temp_path});
+        const data_arg = try std.fmt.allocPrint(self.allocator, "@{s}", .{body_file});
         defer self.allocator.free(data_arg);
 
         const argv = &[_][]const u8{
@@ -681,7 +652,7 @@ pub const LLMClient = struct {
             "-H",
             "Content-Type: application/json",
             "-H",
-            auth_header,
+            auth_file,
             "--data-binary",
             data_arg,
             url,
@@ -738,7 +709,7 @@ pub const LLMClient = struct {
             try writer.writeAll("{\"role\":\"");
             try writer.writeAll(msg.role);
             try writer.writeAll("\",\"content\":\"");
-            try escapeJsonString(writer, msg.content);
+            try shared.json.writeJsonEscaped(writer, msg.content);
             try writer.writeAll("\"");
             if (msg.tool_call_id) |tc_id| {
                 try writer.writeAll(",\"tool_call_id\":\"");
@@ -758,7 +729,7 @@ pub const LLMClient = struct {
             try writer.writeAll(tool.function.name);
             try writer.writeAll("\",\"description\":\"");
             if (tool.function.description) |desc| {
-                try escapeJsonString(writer, desc);
+                try shared.json.writeJsonEscaped(writer, desc);
             }
             try writer.writeAll("\",\"parameters\":");
             if (tool.function.parameters) |params| {
@@ -781,14 +752,13 @@ pub const LLMClient = struct {
         const url = try std.fmt.allocPrint(self.allocator, "{s}/chat/completions", .{self.base_url});
         defer self.allocator.free(url);
 
-        const auth_header = try std.fmt.allocPrint(self.allocator, "Authorization: Bearer {s}", .{self.api_key});
-        defer self.allocator.free(auth_header);
+        const auth_file = try writeAuthHeaderFile(self.allocator, self.api_key);
+        defer cleanupAuthFile(self.allocator, auth_file);
 
-        const temp_path = "/tmp/knot3bot_curl_body.json";
-        try shared.context.cwdWriteFile(temp_path, body);
-        defer shared.context.cwdDeleteFile(temp_path) catch {};
+        const body_file = try writeBodyTempFile(self.allocator, body);
+        defer cleanupAuthFile(self.allocator, body_file);
 
-        const data_arg = try std.fmt.allocPrint(self.allocator, "@{s}", .{temp_path});
+        const data_arg = try std.fmt.allocPrint(self.allocator, "@{s}", .{body_file});
         defer self.allocator.free(data_arg);
 
         const argv = &[_][]const u8{
@@ -805,7 +775,7 @@ pub const LLMClient = struct {
             "-H",
             "Content-Type: application/json",
             "-H",
-            auth_header,
+            auth_file,
             "--data-binary",
             data_arg,
             url,
@@ -964,6 +934,39 @@ pub fn chatStreamWithRetry(
 
 /// Alias for backwards compatibility
 pub const OpenAIClient = LLMClient;
+
+/// Atomic counter for unique temp file names, avoiding collisions.
+var temp_file_counter: std.atomic.Value(u64) = std.atomic.Value(u64).init(0);
+
+/// Write auth header to a temp file so API key is NOT visible in ps aux.
+/// Uses curl @file syntax: -H @/tmp/knot3bot_auth_XXXXXX
+fn writeAuthHeaderFile(allocator: std.mem.Allocator, api_key: []const u8) ![]const u8 {
+    const seed = temp_file_counter.fetchAdd(1, .monotonic);
+    const path = try std.fmt.allocPrint(allocator, "/tmp/knot3bot_auth_{x}", .{seed});
+    errdefer allocator.free(path);
+    const content = try std.fmt.allocPrint(allocator, "Authorization: Bearer {s}", .{api_key});
+    defer allocator.free(content);
+    shared.context.cwdWriteFile(path, content) catch return error.AuthFileWriteError;
+    return path;
+}
+
+/// Write request body to a temp file with unique suffix.
+/// Uses curl @file syntax. Avoids race condition from fixed paths.
+fn writeBodyTempFile(allocator: std.mem.Allocator, body: []const u8) ![]const u8 {
+    const seed = temp_file_counter.fetchAdd(1, .monotonic);
+    const path = try std.fmt.allocPrint(allocator, "/tmp/knot3bot_body_{x}", .{seed});
+    errdefer allocator.free(path);
+    shared.context.cwdWriteFile(path, body) catch return error.BodyFileWriteError;
+    return path;
+}
+
+/// Remove a temp file and free its path string. Safe no-op on empty path.
+fn cleanupAuthFile(allocator: std.mem.Allocator, path: []const u8) void {
+    if (path.len > 0) {
+        shared.context.cwdDeleteFile(path) catch {};
+        allocator.free(path);
+    }
+}
 
 test "Provider base URL" {
     try std.testing.expectEqualStrings("https://api.kimi.com/coding/v1", Provider.kimi.baseUrl());

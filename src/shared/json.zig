@@ -96,3 +96,19 @@ pub fn appendJsonEscaped(list: *std.ArrayList(u8), allocator: std.mem.Allocator,
         }
     }
 }
+
+/// Write JSON-escaped text to any writer (e.g., std.Io.Writer.Allocating.writer).
+/// Single canonical implementation shared by anthropic.zig and openai_compatible.zig.
+pub fn writeJsonEscaped(writer_arg: anytype, str: []const u8) !void {
+    var writer = writer_arg;
+    for (str) |c| {
+        switch (c) {
+            '"' => try writer.writeAll("\\\""),
+            '\\' => try writer.writeAll("\\\\"),
+            '\n' => try writer.writeAll("\\n"),
+            '\r' => try writer.writeAll("\\r"),
+            '\t' => try writer.writeAll("\\t"),
+            else => try writer.writeByte(c),
+        }
+    }
+}

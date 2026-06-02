@@ -1,4 +1,7 @@
-//! Anthropic API Provider - Minimal text-only adapter
+//! Anthropic API Provider — text-only adapter using curl subprocess.
+//! All API keys are written to temp files (never in argv) to prevent
+//! exposure via ps aux / process inspection.
+
 const std = @import("std");
 const shared = @import("../shared/root.zig");
 
@@ -18,6 +21,13 @@ pub const AnthropicClient = struct {
     api_key: []const u8,
     model: []const u8,
 
+    pub const Error = error{
+        OutOfMemory,
+        CurlSpawnError,
+        CurlWriteError,
+        AuthFileWriteError,
+    };
+
     pub fn init(allocator: std.mem.Allocator, api_key: []const u8, model: []const u8) AnthropicClient {
         return .{
             .allocator = allocator,
@@ -30,12 +40,12 @@ pub const AnthropicClient = struct {
         _ = self;
     }
 
-    pub fn chat(self: *AnthropicClient, messages: []const AnthropicMessage) ![]const u8 {
+    pub fn chat(self: *AnthropicClient, messages: []const AnthropicMessage) Error![]const u8 {
         const body = try self.buildRequestBody(messages);
         defer self.allocator.free(body);
 
-        const auth_header = try std.fmt.allocPrint(self.allocator, "x-api-key: {s}", .{self.api_key});
-        defer self.allocator.free(auth_header);
+        const auth_file = try writeAuthHeaderFile(self.allocator, self.api_key);
+        defer cleanupAuthFile(self.allocator, auth_file);
 
         const argv = &[_][]const u8{
             "curl",
@@ -47,7 +57,7 @@ pub const AnthropicClient = struct {
             "-H",
             "Content-Type: application/json",
             "-H",
-            auth_header,
+            auth_file,
             "-H",
             "anthropic-version: 2023-06-01",
             "--data-binary",
@@ -58,12 +68,12 @@ pub const AnthropicClient = struct {
         return try self.runCurl(argv, body);
     }
 
-    pub fn chatWithTools(self: *AnthropicClient, messages: []const AnthropicMessage, tools: []const ToolDef) ![]const u8 {
+    pub fn chatWithTools(self: *AnthropicClient, messages: []const AnthropicMessage, tools: []const ToolDef) Error![]const u8 {
         const body = try self.buildRequestBodyWithTools(messages, tools);
         defer self.allocator.free(body);
 
-        const auth_header = try std.fmt.allocPrint(self.allocator, "x-api-key: {s}", .{self.api_key});
-        defer self.allocator.free(auth_header);
+        const auth_file = try writeAuthHeaderFile(self.allocator, self.api_key);
+        defer cleanupAuthFile(self.allocator, auth_file);
 
         const argv = &[_][]const u8{
             "curl",
@@ -75,7 +85,7 @@ pub const AnthropicClient = struct {
             "-H",
             "Content-Type: application/json",
             "-H",
-            auth_header,
+            auth_file,
             "-H",
             "anthropic-version: 2023-06-01",
             "--data-binary",
@@ -140,16 +150,16 @@ pub const AnthropicClient = struct {
             try writer.writeAll("{\"role\":\"");
             try writer.writeAll(msg.role);
             try writer.writeAll("\",\"content\":\"");
-            try escapeJsonString(writer, msg.content);
+            try shared.json.writeJsonEscaped(writer, msg.content);
             try writer.writeAll("\"}");
         }
         try writer.writeAll("],\"tools\":[");
         for (tools, 0..) |tool, i| {
             if (i > 0) try writer.writeAll(",");
             try writer.writeAll("{\"name\":\"");
-            try escapeJsonString(writer, tool.name);
+            try shared.json.writeJsonEscaped(writer, tool.name);
             try writer.writeAll("\",\"description\":\"");
-            if (tool.description) |d| try escapeJsonString(writer, d);
+            if (tool.description) |d| try shared.json.writeJsonEscaped(writer, d);
             try writer.writeAll("\",\"input_schema\":");
             if (tool.input_schema) |s| {
                 try writer.writeAll(s);
@@ -161,97 +171,6 @@ pub const AnthropicClient = struct {
         try writer.writeAll("]}");
         json = json_allocating.toArrayList();
         return try json.toOwnedSlice(self.allocator);
-    }
-
-    fn convertToOpenAIFormat(self: *AnthropicClient, response_body: []const u8) ![]const u8 {
-        var parsed = std.json.parseFromSlice(std.json.Value, self.allocator, response_body, .{}) catch {
-            return try std.fmt.allocPrint(self.allocator, "{{\"choices\":[]}}", .{});
-        };
-        defer parsed.deinit();
-
-        const root_val = parsed.value;
-        if (root_val != .object) return try std.fmt.allocPrint(self.allocator, "{{\"choices\":[]}}", .{});
-
-        var text_parts = std.ArrayList(u8).empty;
-        defer text_parts.deinit(self.allocator);
-        var has_tool_calls = false;
-
-        var output_json = std.ArrayList(u8).empty;
-        defer output_json.deinit(self.allocator);
-        var output_allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &output_json);
-        var w = output_allocating.writer;
-
-        try w.writeAll("{\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\"");
-
-        if (root_val.object.get("content")) |content| {
-            if (content == .array) {
-                for (content.array.items) |block| {
-                    if (block == .object) {
-                        const btype = if (block.object.get("type")) |t| if (t == .string) t.string else "" else "";
-                        if (std.mem.eql(u8, btype, "text")) {
-                            if (block.object.get("text")) |t| {
-                                if (t == .string) {
-                                    if (text_parts.items.len > 0) try text_parts.appendSlice(self.allocator, " ");
-                                    try text_parts.appendSlice(self.allocator, t.string);
-                                }
-                            }
-                        } else if (std.mem.eql(u8, btype, "tool_use")) {
-                            has_tool_calls = true;
-                        }
-                    }
-                }
-            }
-        }
-
-        try w.writeAll(",\"content\":\"");
-        try escapeJsonString(w, text_parts.items);
-        try w.writeAll("\"");
-
-        if (has_tool_calls) {
-            try w.writeAll(",\"tool_calls\":[");
-            var first_tc = true;
-            if (root_val.object.get("content")) |content| {
-                if (content == .array) {
-                    for (content.array.items) |block| {
-                        if (block == .object) {
-                            const btype = if (block.object.get("type")) |t| if (t == .string) t.string else "" else "";
-                            if (std.mem.eql(u8, btype, "tool_use")) {
-                                if (!first_tc) try w.writeAll(",");
-                                first_tc = false;
-                                const tc_id = if (block.object.get("id")) |v| if (v == .string) v.string else "" else "";
-                                const tc_name = if (block.object.get("name")) |v| if (v == .string) v.string else "" else "";
-                                const tc_input = if (block.object.get("input")) |v| std.json.Stringify.valueAlloc(self.allocator, v, .{}) catch "{}" else "{}";
-                                defer if (block.object.get("input")) |_| self.allocator.free(tc_input);
-                                try w.print("{{\"id\":\"{s}\",\"type\":\"function\",\"function\":{{\"name\":\"{s}\",\"arguments\":", .{ tc_id, tc_name });
-                                try w.writeAll(tc_input);
-                                try w.writeAll("}}}");
-                            }
-                        }
-                    }
-                }
-            }
-            try w.writeAll("]");
-        }
-
-        try w.writeAll("}}]");
-
-        if (root_val.object.get("usage")) |u| {
-            if (u == .object) {
-                var prompt_tokens: u32 = 0;
-                var completion_tokens: u32 = 0;
-                if (u.object.get("input_tokens")) |pt| {
-                    if (pt == .integer) prompt_tokens = @intCast(pt.integer);
-                }
-                if (u.object.get("output_tokens")) |ct| {
-                    if (ct == .integer) completion_tokens = @intCast(ct.integer);
-                }
-                try w.print(",\"usage\":{{\"prompt_tokens\":{d},\"completion_tokens\":{d},\"total_tokens\":{d}}}", .{ prompt_tokens, completion_tokens, prompt_tokens + completion_tokens });
-            }
-        }
-
-        try w.writeAll("}");
-        output_json = output_allocating.toArrayList();
-        return try output_json.toOwnedSlice(self.allocator);
     }
 
     fn buildRequestBody(self: *AnthropicClient, messages: []const AnthropicMessage) ![]u8 {
@@ -266,56 +185,40 @@ pub const AnthropicClient = struct {
             try writer.writeAll("{\"role\":\"");
             try writer.writeAll(msg.role);
             try writer.writeAll("\",\"content\":\"");
-            try escapeJsonString(writer, msg.content);
+            try shared.json.writeJsonEscaped(writer, msg.content);
             try writer.writeAll("\"}");
         }
         try writer.writeAll("]}");
         json = json_allocating.toArrayList();
         return try json.toOwnedSlice(self.allocator);
     }
-
-    fn extractContent(self: *AnthropicClient, response_body: []const u8) ![]const u8 {
-        var parsed = std.json.parseFromSlice(std.json.Value, self.allocator, response_body, .{}) catch {
-            return try self.allocator.dupe(u8, "Anthropic API error");
-        };
-        defer parsed.deinit();
-
-        const root_val = parsed.value;
-        if (root_val != .object) return try self.allocator.dupe(u8, "Invalid Anthropic response");
-
-        if (root_val.object.get("content")) |content| {
-            if (content == .array and content.array.items.len > 0) {
-                const first = content.array.items[0];
-                if (first == .object) {
-                    if (first.object.get("text")) |text| {
-                        if (text == .string) return try self.allocator.dupe(u8, text.string);
-                    }
-                }
-            }
-        }
-
-        if (root_val.object.get("error")) |err_val| {
-            if (err_val == .object) {
-                if (err_val.object.get("message")) |msg| {
-                    if (msg == .string) return try self.allocator.dupe(u8, msg.string);
-                }
-            }
-        }
-
-        return try self.allocator.dupe(u8, "Empty Anthropic response");
-    }
 };
 
-fn escapeJsonString(writer_arg: anytype, str: []const u8) !void {
-    var writer = writer_arg;
-    for (str) |c| {
-        switch (c) {
-            '"' => try writer.writeAll("\\\""),
-            '\\' => try writer.writeAll("\\\\"),
-            '\n' => try writer.writeAll("\\n"),
-            '\r' => try writer.writeAll("\\r"),
-            '\t' => try writer.writeAll("\\t"),
-            else => try writer.writeByte(c),
-        }
+// ── file-scoped helpers ────────────────────────────────────────────
+
+/// Atomic counter for unique temp file names, avoiding collisions.
+var temp_file_counter: std.atomic.Value(u64) = std.atomic.Value(u64).init(0);
+
+/// Write auth header to a temp file so API key is NOT visible in ps aux.
+/// Uses curl @file syntax: -H @/tmp/knot3bot_auth_XXXXXX
+/// Caller must call cleanupAuthFile after curl exits.
+fn writeAuthHeaderFile(allocator: std.mem.Allocator, api_key: []const u8) ![]const u8 {
+    const seed = temp_file_counter.fetchAdd(1, .monotonic);
+    const path = try std.fmt.allocPrint(allocator, "/tmp/knot3bot_auth_{x}", .{seed});
+    errdefer allocator.free(path);
+
+    const content = try std.fmt.allocPrint(allocator, "x-api-key: {s}", .{api_key});
+    defer allocator.free(content);
+
+    shared.context.cwdWriteFile(path, content) catch return error.AuthFileWriteError;
+    return path;
+}
+
+/// Remove auth header temp file and free its path string.
+/// Safe to call even if path is empty (no-op).
+fn cleanupAuthFile(allocator: std.mem.Allocator, path: []const u8) void {
+    if (path.len > 0) {
+        shared.context.cwdDeleteFile(path) catch {};
+        allocator.free(path);
     }
 }

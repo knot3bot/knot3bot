@@ -58,12 +58,21 @@ pub const ShellTool = struct {
         if (std.mem.indexOfScalar(u8, command, 0) != null) return "null byte";
         for (command) |c| { if (c < 0x20 and c != '\t') return "control char"; }
         if (std.mem.indexOfScalar(u8, command, '\n') != null or std.mem.indexOfScalar(u8, command, '\r') != null) return "newline";
-        const meta = [_][]const u8{ "&&", "||", "|", ";", ">", "<", "$(", "`", "&>", ">&", "<>", "<<<", "<<", ">>" };
+        // Metacharacters and shell injection vectors
+        const meta = [_][]const u8{ "&&", "||", "|", ";", ">", "<", "$(", "${", "`", "&>", ">&", "|&", "<>", "<<<", "<<", ">>" };
         for (meta) |mc| { if (std.mem.indexOf(u8, command, mc) != null) return "metachar"; }
-        const prefixes = [_][]const u8{ "cd ", "export ", "source ", "eval ", "exec ", ". ", "alias ", "set ", "unset " };
+        // Dangerous prefixes (state-changing shell builtins + privilege escalation)
+        const prefixes = [_][]const u8{ "cd ", "export ", "source ", "eval ", "exec ", ". ", "alias ", "set ", "unset ", "sudo ", "chmod ", "chown " };
         for (prefixes) |p| { if (std.mem.startsWith(u8, command, p)) return "dangerous prefix"; }
-        const bare = [_][]const u8{ "cd", "eval", "exec", "source", "exit", "logout" };
+        // Bare dangerous single words
+        const bare = [_][]const u8{ "cd", "eval", "exec", "source", "exit", "logout", "sudo", "su" };
         for (bare) |w| { if (std.mem.eql(u8, command, w)) return "bare dangerous"; }
+        // Reverse shell / data exfiltration indicators
+        const dangerous_kw = [_][]const u8{ "/dev/tcp", "/dev/udp", "> /dev/tcp", "mkfifo", "nc -e", "nc -c" };
+        for (dangerous_kw) |k| { if (std.mem.indexOf(u8, command, k) != null) return "reverse shell"; }
+        // Destructive disk / filesystem operations
+        const destructive = [_][]const u8{ "rm -rf /", "mkfs.", "dd if=", "shred ", ":(){ :|:& };" };
+        for (destructive) |d| { if (std.mem.indexOf(u8, command, d) != null) return "destructive"; }
         return null;
     }
 

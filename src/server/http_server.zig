@@ -147,15 +147,15 @@ pub const ServerMetrics = struct {
 // Request ID Generator (Simple)
 // ============================================================================
 
-var request_counter: u64 = 0;
+var request_counter: std.atomic.Value(u64) = std.atomic.Value(u64).init(0);
 
 fn generateRequestId() []const u8 {
-    request_counter += 1;
+    const count = request_counter.fetchAdd(1, .monotonic);
     const timestamp = shared.timestamp();
     const static = struct {
         var buf: [64]u8 = undefined;
     };
-    const result = std.fmt.bufPrint(&static.buf, "{}-{}", .{ timestamp, request_counter }) catch {
+    const result = std.fmt.bufPrint(&static.buf, "{}-{}", .{ timestamp, count }) catch {
         // Fallback: use a shorter string that fits in 64 bytes
         return "req-error";
     };
@@ -221,6 +221,12 @@ pub const Server = struct {
         auth_config: AuthConfig,
         config: ServerConfig,
     ) !Server {
+        var rate_limiter = rate_limiter_mod.RateLimiter.init(allocator, .{ .max_requests = config.rate_limit_requests, .window_ms = config.rate_limit_window_secs * 1000 });
+        errdefer rate_limiter.deinit();
+
+        var sqlite_memory: ?SqliteMemorySystem = if (db_path) |p| try SqliteMemorySystem.init(allocator, p) else null;
+        errdefer if (sqlite_memory) |*s| s.deinit();
+
         var server = Server{
             .allocator = allocator,
             .agent_config = agent_config,
@@ -232,17 +238,21 @@ pub const Server = struct {
             .start_time = shared.timestamp(),
             .metrics = ServerMetrics.init(allocator),
             .auth_config = auth_config,
-            .rate_limiter = rate_limiter_mod.RateLimiter.init(allocator, .{ .max_requests = config.rate_limit_requests, .window_ms = config.rate_limit_window_secs * 1000 }),
+            .rate_limiter = rate_limiter,
             .circuit_brk = circuit_breaker.CircuitBreaker.init(.{}),
             .in_memory = undefined,
-            .sqlite_memory = if (db_path) |p| try SqliteMemorySystem.init(allocator, p) else null,
+            .sqlite_memory = sqlite_memory,
             .backends = &.{},
             .memory_manager = undefined,
         };
 
         const backend_count: usize = if (server.sqlite_memory != null) 2 else 1;
         server.backends = try allocator.alloc(ManagerMemoryBackend, backend_count);
+        errdefer allocator.free(server.backends);
+
         server.in_memory = try allocator.create(MemorySystem);
+        errdefer allocator.destroy(server.in_memory);
+
         server.in_memory.* = MemorySystem.init(allocator);
         server.backends[0] = .{ .memory = server.in_memory };
         if (server.sqlite_memory) |*s| server.backends[1] = .{ .sqlite = s };
@@ -261,6 +271,8 @@ pub const Server = struct {
         if (self.context_compressor) |*cc| {
             cc.deinit();
         }
+        // Poison — catch use-after-free in Debug/ReleaseSafe
+        self.* = undefined;
     }
 
     pub fn start(self: *Server) !void {
@@ -642,6 +654,11 @@ pub const Server = struct {
                     while (scan > pos and response[scan] != ' ' and response[scan] != '\n') scan -= 1;
                     if (scan > pos + 20) chunk_end = scan;
                 }
+                // Align to UTF-8 code point boundary — never split multi-byte sequences
+                // Continuation bytes have pattern 10xxxxxx (0x80-0xBF)
+                while (chunk_end > pos and (response[chunk_end] & 0xC0) == 0x80) {
+                    chunk_end -= 1;
+                }
                 const chunk = response[pos..chunk_end];
                 // Build SSE event
                 var sse_buf: [4096]u8 = undefined;
@@ -980,9 +997,10 @@ pub const Server = struct {
         var db_healthy = true;
         var provider_healthy = true;
         if (self.db_path) |path| {
-            _ = SqliteMemorySystem.init(self.allocator, path) catch {
+            var test_db = SqliteMemorySystem.init(self.allocator, path) catch {
                 db_healthy = false;
             };
+            if (db_healthy) test_db.deinit();
         }
 
         // Check provider has an API key configured
