@@ -1,4 +1,24 @@
 const std = @import("std");
+
+const FieldInfo = struct { name: [:0]const u8, type: type };
+
+/// Comptime-only compat shim: newer Zig 0.17 dev snapshots removed
+/// `std.meta.fields` and the `StructField` array in favor of flattened
+/// `field_names` / `field_types` / `field_attrs`. This rebuilds a
+/// name/type pair array for the sites that only need those two.
+fn FieldsOf(comptime T: type) type {
+    return [@typeInfo(T).@"struct".field_names.len]FieldInfo;
+}
+
+fn structFields(comptime T: type) FieldsOf(T) {
+    const info = @typeInfo(T).@"struct";
+    var tmp: [info.field_names.len]FieldInfo = undefined;
+    for (info.field_names, info.field_types, 0..) |n, t, i| {
+        tmp[i] = .{ .name = n, .type = t };
+    }
+    return tmp;
+}
+
 const storage = @import("storage.zig");
 const config = @import("config.zig");
 const build_config = @import("build_config");
@@ -270,7 +290,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         );
 
         var backing_subset: BackingInputSubset = undefined;
-        inline for (@typeInfo(BackingInputSubset).@"struct".fields) |field| {
+        inline for (structFields(BackingInputSubset)) |field| {
             @field(backing_subset, field.name) = @field(backing, field.name);
         }
 
@@ -282,7 +302,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
 
         var tracking: Tracking = undefined;
 
-        inline for (@typeInfo(Tracking).@"struct".fields) |field| {
+        inline for (structFields(Tracking)) |field| {
             const F = @FieldType(Tracking, field.name);
             if (@hasDecl(F, "init")) {
                 const f = config.field(fields, field.name);
@@ -305,7 +325,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
             &tracking,
         );
 
-        inline for (@typeInfo(Tracking).@"struct".fields) |field| {
+        inline for (structFields(Tracking)) |field| {
             const t = &@field(tracking, field.name);
             const f = config.field(fields, field.name);
             if (!try t.okay(f)) {
@@ -374,7 +394,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         \\
     );
 
-    inline for (@typeInfo(Backing).@"struct".fields) |field| {
+    inline for (structFields(Backing)) |field| {
         const info = @typeInfo(field.type);
         if (info != .pointer or info.pointer.size != .slice) continue;
 
@@ -425,7 +445,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
         \\
     );
 
-    inline for (@typeInfo(Backing).@"struct".fields) |field| {
+    inline for (structFields(Backing)) |field| {
         const info = @typeInfo(field.type);
         if (info == .pointer and info.pointer.size == .slice) {
             try writer.print("    .{s} = backing_{s},\n", .{
@@ -525,7 +545,7 @@ pub fn main(init: std.process.Init.Minimal) !void {
 }
 
 fn hashRow(comptime Row: type, hasher: anytype, row: Row) void {
-    inline for (@typeInfo(Row).@"struct".fields) |field| {
+    inline for (structFields(Row)) |field| {
         if (comptime @typeInfo(field.type) == .@"struct" and @hasDecl(field.type, "autoHash")) {
             @field(row, field.name).autoHash(hasher);
         } else {
@@ -535,7 +555,7 @@ fn hashRow(comptime Row: type, hasher: anytype, row: Row) void {
 }
 
 fn eqlRow(comptime Row: type, a: Row, b: Row) bool {
-    inline for (@typeInfo(Row).@"struct".fields) |field| {
+    inline for (structFields(Row)) |field| {
         if (comptime @typeInfo(field.type) == .@"struct" and @hasDecl(field.type, "eql")) {
             if (!@field(a, field.name).eql(@field(b, field.name))) {
                 return false;
@@ -821,7 +841,7 @@ pub fn writeTableRows(
                 \\
             );
 
-            inline for (@typeInfo(Row).@"struct".fields) |field| {
+            inline for (structFields(Row)) |field| {
                 try writer.print("    .{s} = ", .{field.name});
 
                 try storage.writeField(field.type, writer, @field(row, field.name));

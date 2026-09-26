@@ -88,6 +88,14 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
+    // Translate SQLite C header to Zig module (replaces @cImport removed in 0.17)
+    const sqlite3_translate = b.addTranslateC(.{
+        .root_source_file = b.path("vendor/sqlite3/sqlite3.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const sqlite3_mod = sqlite3_translate.createModule();
+
     // Link SQLite if enabled
     if (enable_sqlite) {
         exe.root_module.addCMacro("ENABLE_SQLITE", "1");
@@ -97,13 +105,6 @@ pub fn build(b: *std.Build) void {
             exe.root_module.addLibraryPath(.{ .cwd_relative = lib_path });
         }
 
-        // Translate SQLite C header to Zig module (replaces @cImport removed in 0.17)
-        const sqlite3_translate = b.addTranslateC(.{
-            .root_source_file = b.path("vendor/sqlite3/sqlite3.h"),
-            .target = target,
-            .optimize = optimize,
-        });
-        const sqlite3_mod = sqlite3_translate.createModule();
         mod.addImport("sqlite3_c", sqlite3_mod);
         exe.root_module.addImport("sqlite3_c", sqlite3_mod);
     }
@@ -172,34 +173,38 @@ pub fn build(b: *std.Build) void {
     // installation directory rather than directly from within the cache directory.
     run_cmd.step.dependOn(b.getInstallStep());
 
-    // This allows the user to pass arguments to the application in the build
-    // command itself, like this: `zig build run -- arg1 arg2 etc`
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    // Note: `zig build run -- <args>` passthrough is no longer available —
+    // the Build.args field was removed in newer Zig 0.17 dev snapshots.
 
-    // Test step — runs zig test directly on each source file with inline tests.
-    // Uses direct command invocation (addSystemCommand) to get terminal output,
-    // as b.addRunArtifact routes test results through --listen=- IPC (silent on success).
+    // Test step — unified test root (src/tests.zig) compiles the full suite
+    // into a single test binary: inline tests plus every *_test.zig file.
+    // Rooting the test module at src/ also unblocks cross-directory imports
+    // in test files (e.g. `../shared/context.zig` from src/tools/).
     const test_step = b.step("test", "Run all tests");
 
-    const zig_exe = b.graph.zig_exe;
-    const cwd_path = b.path(".");
-
-    inline for (.{
-        "src/server/circuit_breaker.zig",
-        "src/server/rate_limiter.zig",
-        "src/validation.zig",
-        "src/agent/agent_unit_test.zig",
-        "src/tools/shell_test.zig",
-        "src/architecture_test.zig",
-        "src/cli.zig",
-        "src/e2e_smoke_test.zig",
-    }) |test_file| {
-        const test_cmd = b.addSystemCommand(&.{ zig_exe, "test", test_file });
-        test_cmd.setCwd(cwd_path);
-        test_step.dependOn(&test_cmd.step);
+    const test_mod = b.createModule(.{
+        .root_source_file = b.path("src/tests.zig"),
+        .target = target,
+        .optimize = optimize,
+        .imports = &.{
+            .{ .name = "config", .module = config_mod },
+        },
+    });
+    test_mod.link_libc = true;
+    test_mod.addCMacro("ENABLE_ZBOX", "0");
+    if (enable_sqlite) {
+        test_mod.addCMacro("ENABLE_SQLITE", "1");
+        test_mod.linkSystemLibrary("sqlite3", .{});
+        test_mod.addIncludePath(.{ .cwd_relative = sqlite_include_path });
+        if (sqlite_lib_path) |lib_path| {
+            test_mod.addLibraryPath(.{ .cwd_relative = lib_path });
+        }
+        test_mod.addImport("sqlite3_c", sqlite3_mod);
     }
+
+    const unit_tests = b.addTest(.{ .root_module = test_mod });
+    const run_unit_tests = b.addRunArtifact(unit_tests);
+    test_step.dependOn(&run_unit_tests.step);
 
     // Benchmark executable
     const benchmark_exe = b.addExecutable(.{

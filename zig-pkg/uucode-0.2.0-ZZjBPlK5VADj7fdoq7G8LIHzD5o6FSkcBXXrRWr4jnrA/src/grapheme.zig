@@ -1,5 +1,23 @@
 const std = @import("std");
 
+const EnumFieldInfo = struct { name: [:0]const u8, value: comptime_int };
+
+/// Comptime-only compat shim for the flattened `@typeInfo(T).@"enum"`
+/// API (see structFields).
+fn EnumFieldsOf(comptime T: type) type {
+    return [@typeInfo(T).@"enum".field_names.len]EnumFieldInfo;
+}
+
+fn enumFields(comptime T: type) EnumFieldsOf(T) {
+    const info = @typeInfo(T).@"enum";
+    var tmp: [info.field_names.len]EnumFieldInfo = undefined;
+    for (info.field_names, info.field_values, 0..) |n, v, i| {
+        tmp[i] = .{ .name = n, .value = v };
+    }
+    return tmp;
+}
+
+
 const types = @import("types.zig");
 const getpkg = @import("get.zig");
 const utf8 = @import("utf8.zig");
@@ -535,8 +553,8 @@ pub fn GraphemeBreakTable(comptime GB: type, comptime State: type) type {
         result: bool,
         state: State,
     };
-    const gb_fields = @typeInfo(GB).@"enum".fields;
-    const state_fields = @typeInfo(State).@"enum".fields;
+    const gb_fields = enumFields(GB);
+    const state_fields = enumFields(State);
     const n_gb = gb_fields.len;
     const n_gb_2 = n_gb * n_gb;
     const n_state = state_fields.len;
@@ -572,8 +590,8 @@ pub fn buildGraphemeBreakTable(
     @setEvalBranchQuota(20_000);
     var table: GraphemeBreakTable(GB, State) = undefined;
 
-    const gb_fields = @typeInfo(GB).@"enum".fields;
-    const state_fields = @typeInfo(State).@"enum".fields;
+    const gb_fields = enumFields(GB);
+    const state_fields = enumFields(State);
 
     for (state_fields) |state_field| {
         for (gb_fields) |gb1_field| {

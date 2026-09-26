@@ -256,11 +256,13 @@ pub fn exitAltScreen(self: *Vaxis, tty: *std.Io.Writer) !void {
 /// Event loops can wake up this futex when cap_da1 is received
 pub fn queryTerminal(self: *Vaxis, tty: *std.Io.Writer, timeout: std.Io.Duration) !void {
     try self.queryTerminalSend(tty);
+    // Pass the futex as a plain u32: newer Zig 0.17 std.Io futex helpers
+    // can no longer @bitCast a struct type (e.g. atomic.Value(u32)).
     try std.Io.futexWaitTimeout(
         self.io,
-        atomic.Value(u32),
-        &self.query_futex,
-        .init(0),
+        u32,
+        &self.query_futex.raw,
+        0,
         .{
             .duration = .{
                 .clock = .real,

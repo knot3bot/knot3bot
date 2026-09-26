@@ -65,14 +65,6 @@
         .sqlite3 = .{
             .path = "vendor/sqlite3",
         },
-        .websocket = .{
-            .url = "git+https://github.com/nullclaw/websocket#6a62e67405d883206a526cb25d667cf2e6fc4b2c",
-            .hash = "websocket-0.1.0-ZPISdRt7AwCgmiEnDNUp_kwBgzTEyVeLAPhTHZ7UZhMI",
-        },
-        .wasm3 = .{
-            .url = "git+https://github.com/nullclaw/wasm3#8a29b0080f1f65dbbe8b8f8c4d8148480feff377",
-            .hash = "wasm3-0.5.1-hrMdNS09BQAWSU0TI6mVS8KfW4hxexjFvyOQINgphwKu",
-        },
         .vaxis = .{
             .url = "git+https://github.com/rockorager/libvaxis.git#60a507c25b5335e222eb12320aa7514db684d4a4",
             .hash = "vaxis-0.6.0-BWNV_HHwCQCy33z_jb0RHLjoinqQ8tgQVZI9z2e5Yqdd",

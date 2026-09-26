@@ -1,5 +1,25 @@
 //! This file defines the low(er)-level `get` method, returning `Data`.
 const std = @import("std");
+
+const FieldInfo = struct { name: [:0]const u8, type: type };
+
+/// Comptime-only compat shim: newer Zig 0.17 dev snapshots removed
+/// `std.meta.fields` and the `StructField` array in favor of flattened
+/// `field_names` / `field_types` / `field_attrs`. This rebuilds a
+/// name/type pair array for the sites that only need those two.
+fn FieldsOf(comptime T: type) type {
+    return [@typeInfo(T).@"struct".field_names.len]FieldInfo;
+}
+
+fn structFields(comptime T: type) FieldsOf(T) {
+    const info = @typeInfo(T).@"struct";
+    var tmp: [info.field_names.len]FieldInfo = undefined;
+    for (info.field_names, info.field_types, 0..) |n, t, i| {
+        tmp[i] = .{ .name = n, .type = t };
+    }
+    return tmp;
+}
+
 const tables_module = @import("tables");
 const tables = tables_module.tables;
 
@@ -11,10 +31,11 @@ fn TableData(comptime Table: anytype) type {
     return @typeInfo(DataSlice).pointer.child;
 }
 
-fn tableInfoFor(comptime field: []const u8) std.builtin.Type.StructField {
-    inline for (@typeInfo(@TypeOf(tables)).@"struct".fields) |tableInfo| {
-        if (@hasField(TableData(tableInfo.type), field)) {
-            return tableInfo;
+fn tableInfoFor(comptime field: []const u8) struct { name: []const u8, type: type } {
+    const info = @typeInfo(@TypeOf(tables)).@"struct";
+    inline for (info.field_names, info.field_types) |name, T| {
+        if (@hasField(TableData(T), field)) {
+            return .{ .name = name, .type = T };
         }
     }
 
@@ -22,8 +43,8 @@ fn tableInfoFor(comptime field: []const u8) std.builtin.Type.StructField {
 }
 
 pub fn hasField(comptime field: []const u8) bool {
-    inline for (@typeInfo(@TypeOf(tables)).@"struct".fields) |tableInfo| {
-        if (@hasField(TableData(tableInfo.type), field)) {
+    inline for (@typeInfo(@TypeOf(tables)).@"struct".field_types) |T| {
+        if (@hasField(TableData(T), field)) {
             return true;
         }
     }
@@ -49,9 +70,10 @@ fn tableFor(comptime field: []const u8) TableFor(field) {
 }
 
 fn GetTable(comptime table_name: []const u8) type {
-    inline for (@typeInfo(@TypeOf(tables)).@"struct".fields) |tableInfo| {
-        if (std.mem.eql(u8, tableInfo.name, table_name)) {
-            return tableInfo.type;
+    const info = @typeInfo(@TypeOf(tables)).@"struct";
+    inline for (info.field_names, info.field_types) |name, T| {
+        if (std.mem.eql(u8, name, table_name)) {
+            return T;
         }
     }
 
@@ -83,8 +105,8 @@ pub fn TypeOfAll(comptime table_name: []const u8) type {
 
 pub const FieldEnum = blk: {
     var fields_len: usize = 0;
-    for (@typeInfo(@TypeOf(tables)).@"struct".fields) |tableInfo| {
-        fields_len += @typeInfo(TableData(tableInfo.type)).@"struct".fields.len;
+    for (structFields(@TypeOf(tables))) |tableInfo| {
+        fields_len += structFields(TableData(tableInfo.type)).len;
     }
 
     const TagInt = std.math.IntFittingRange(0, fields_len - 1);
@@ -92,8 +114,8 @@ pub const FieldEnum = blk: {
     var field_values: [fields_len]TagInt = undefined;
     var i: usize = 0;
 
-    for (@typeInfo(@TypeOf(tables)).@"struct".fields) |tableInfo| {
-        for (@typeInfo(TableData(tableInfo.type)).@"struct".fields) |f| {
+    for (structFields(@TypeOf(tables))) |tableInfo| {
+        for (structFields(TableData(tableInfo.type))) |f| {
             field_names[i] = f.name;
             field_values[i] = i;
             i += 1;

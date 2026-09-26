@@ -75,7 +75,7 @@ pub fn Row(
     @setEvalBranchQuota(50_000);
     var field_names: [fields.len][]const u8 = undefined;
     var field_types: [fields.len]type = undefined;
-    var field_attrs: [fields.len]std.builtin.Type.StructField.Attributes = undefined;
+    var field_attrs: [fields.len]std.builtin.Type.Struct.FieldAttributes = undefined;
 
     for (fields, fields_is_packed, 0..) |field, is_field_packed, i| {
         const F = Field(field, is_field_packed or table_packing == .@"packed");
@@ -104,7 +104,7 @@ pub fn DeclStruct(
     @setEvalBranchQuota(fields.len * 100 + 1000);
     var field_names: [fields.len][]const u8 = undefined;
     var field_types: [fields.len]type = undefined;
-    var field_attrs: [fields.len]std.builtin.Type.StructField.Attributes = undefined;
+    var field_attrs: [fields.len]std.builtin.Type.Struct.FieldAttributes = undefined;
     var i: usize = 0;
 
     for (fields, fields_is_packed) |field, is_field_packed| {
@@ -872,17 +872,17 @@ pub fn Union(comptime T: type, comptime _ShiftInt: type, comptime is_packed: boo
     else
         void;
 
-    var field_names: [info.fields.len][]const u8 = undefined;
-    var field_types: [info.fields.len]type = undefined;
-    var field_attrs: [info.fields.len]std.builtin.Type.UnionField.Attributes = undefined;
-    for (info.fields, 0..) |f, i| {
-        const FieldType = if (is_shift and f.type == u21)
+    var field_names: [info.field_names.len][]const u8 = undefined;
+    var field_types: [info.field_names.len]type = undefined;
+    var field_attrs: [info.field_names.len]std.builtin.Type.Union.FieldAttributes = undefined;
+    for (info.field_names, info.field_types, 0..) |fname, F, i| {
+        const FieldType = if (is_shift and F == u21)
             ShiftMember
-        else if (is_packed and is_shift and f.type == void)
+        else if (is_packed and is_shift and F == void)
             ShiftMember
         else
-            f.type;
-        field_names[i] = f.name;
+            F;
+        field_names[i] = fname;
         field_types[i] = FieldType;
         field_attrs[i] = .{
             .@"align" = if (is_packed) null else @alignOf(FieldType),
