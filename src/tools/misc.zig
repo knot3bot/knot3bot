@@ -56,8 +56,10 @@ pub const CalculatorTool = struct {
                 num_idx += 1;
             } else if (c == '+' or c == '-' or c == '*' or c == '/' or c == '=') {
                 if (num_idx > 0) {
-                    num_buf[num_idx] = 0;
-                    const num = std.fmt.parseFloat(f64, &num_buf) catch 0;
+                    // Parse only the digits collected — the rest of num_buf is
+                    // uninitialised and makes parseFloat fail (tool returned 0
+                    // for every expression).
+                    const num = std.fmt.parseFloat(f64, num_buf[0..num_idx]) catch 0;
                     if (op == '+') result += num else if (op == '-') result -= num else if (op == '*') result *= num else if (op == '/') result /= num;
                     num_idx = 0;
                 }
@@ -67,8 +69,7 @@ pub const CalculatorTool = struct {
 
         // Process the last number in the expression
         if (num_idx > 0) {
-            num_buf[num_idx] = 0;
-            const num = std.fmt.parseFloat(f64, &num_buf) catch 0;
+            const num = std.fmt.parseFloat(f64, num_buf[0..num_idx]) catch 0;
             if (op == '+') result += num else if (op == '-') result -= num else if (op == '*') result *= num else if (op == '/') result /= num;
         }
 

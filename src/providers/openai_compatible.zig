@@ -355,10 +355,27 @@ pub const LLMClient = struct {
             .allocator = allocator,
             .provider = provider,
             .api_key = api_key,
-            .base_url = provider.baseUrl(),
+            .base_url = resolveBaseUrl(provider),
             .model = actual_model,
             .timeout_seconds = 120,
         };
+    }
+
+    /// Provider base URL, overridable via `{PROVIDER}_BASE_URL` (e.g.
+    /// `OPENAI_BASE_URL`) — the standard OpenAI SDK convention, also used to
+    /// point the stack at a local mock for end-to-end testing. The override
+    /// references the process-lifetime environ map, so no ownership is taken.
+    pub fn resolveBaseUrl(provider: Provider) []const u8 {
+        var name_buf: [64]u8 = undefined;
+        var upper_buf: [32]u8 = undefined;
+        const iname = provider.internalName();
+        if (iname.len + "_BASE_URL".len > name_buf.len or iname.len > upper_buf.len) return provider.baseUrl();
+        for (upper_buf[0..iname.len], 0..) |*b, i| b.* = std.ascii.toUpper(iname[i]);
+        const env_key = std.fmt.bufPrint(&name_buf, "{s}_BASE_URL", .{upper_buf[0..iname.len]}) catch return provider.baseUrl();
+        if (shared.context.getenv(env_key)) |override| {
+            if (override.len > 0) return override;
+        }
+        return provider.baseUrl();
     }
 
     pub fn deinit(self: *LLMClient) void {
@@ -692,6 +709,8 @@ pub const LLMClient = struct {
 
         const result = std.process.run(self.allocator, shared.context.io(), .{
             .argv = argv,
+            .stdout_limit = .limited(16 * 1024 * 1024),
+            .stderr_limit = .limited(64 * 1024),
         }) catch {
             return error.CurlSpawnError;
         };
@@ -816,6 +835,8 @@ pub const LLMClient = struct {
 
         const result = std.process.run(self.allocator, shared.context.io(), .{
             .argv = argv,
+            .stdout_limit = .limited(16 * 1024 * 1024),
+            .stderr_limit = .limited(64 * 1024),
         }) catch {
             return error.CurlSpawnError;
         };

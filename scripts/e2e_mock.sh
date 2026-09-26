@@ -1,0 +1,65 @@
+#!/bin/bash
+# End-to-end smoke test: knot3bot server against a local mock LLM.
+#
+# Exercises the full stack — HTTP server → auth → agent ReAct loop →
+# LLM client (incl. SSE streaming) → tool execution → second LLM round —
+# without any real API key, via the OPENAI_BASE_URL override pointing at
+# scripts/mock_llm.py.
+#
+# Usage: scripts/e2e_mock.sh [port]
+set -u
+cd "$(dirname "$0")/.."
+
+PORT="${1:-8123}"
+MOCK_PORT=$((PORT + 1))
+BOT_LOG=$(mktemp)
+cleanup() { kill "${MOCK_PID:-}" "${BOT_PID:-}" 2>/dev/null; rm -f "$BOT_LOG"; }
+trap cleanup EXIT
+
+fail() { echo "E2E FAIL: $1"; exit 1; }
+
+python3 scripts/mock_llm.py "$MOCK_PORT" &
+MOCK_PID=$!
+sleep 0.5
+
+OPENAI_API_KEY=test-key \
+OPENAI_BASE_URL="http://127.0.0.1:$MOCK_PORT/v1" \
+./zig-out/bin/knot3bot --server --port "$PORT" > "$BOT_LOG" 2>&1 &
+BOT_PID=$!
+
+# Wait for the server to come up (poll /health, up to 15s)
+for i in $(seq 1 30); do
+  curl -s -m 2 -o /dev/null "http://127.0.0.1:$PORT/health" && break
+  sleep 0.5
+done
+
+URL="http://127.0.0.1:$PORT/v1/chat/completions"
+AUTH="Authorization: Bearer test-key"
+
+# 1) auth rejected without credentials
+CODE=$(curl -s -m 10 -o /dev/null -w '%{http_code}' -X POST "$URL" \
+  -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4o","messages":[{"role":"user","content":"Hi"}]}')
+[ "$CODE" = "401" ] || fail "expected 401 without auth, got $CODE"
+echo "PASS: auth rejects unauthenticated requests"
+
+# 2) non-stream chat round trip
+R=$(curl -s -m 30 -X POST "$URL" -H "$AUTH" -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4o","messages":[{"role":"user","content":"Hi there"}]}')
+echo "$R" | grep -q "Hello from mock LLM" || fail "non-stream chat: $R"
+echo "PASS: non-stream chat round trip"
+
+# 3) streaming SSE
+S=$(curl -s -N -m 30 -X POST "$URL" -H "$AUTH" -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4o","messages":[{"role":"user","content":"Hello"}],"stream":true}')
+echo "$S" | grep -q "\[DONE\]" || fail "stream missing [DONE]: $S"
+echo "$S" | grep -q "Hello" || fail "stream missing content: $S"
+echo "PASS: streaming SSE"
+
+# 4) tool-calling round trip (mock invokes the real calculator tool)
+T=$(curl -s -m 60 -X POST "$URL" -H "$AUTH" -H "Content-Type: application/json" \
+  -d '{"model":"gpt-4o","messages":[{"role":"user","content":"please use the calculator tool to compute 4 times 7"}]}')
+echo "$T" | grep -qE "Tool result:.*28" || fail "tool round trip: $T"
+echo "PASS: tool-calling round trip (calculator 4*7)"
+
+echo "E2E PASS"

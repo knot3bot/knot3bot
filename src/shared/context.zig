@@ -32,7 +32,9 @@ pub fn gpa() std.mem.Allocator {
 
 /// Get environment variable value or null.
 pub fn getenv(key: []const u8) ?[]const u8 {
-    return g_environ.?.get(key);
+    // Null-safe: unit tests run without context.init(environ).
+    const map = g_environ orelse return null;
+    return map.get(key);
 }
 
 /// Compatibility helpers for std.fs.cwd() operations migrated to std.Io
