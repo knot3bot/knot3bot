@@ -54,7 +54,7 @@ test "getString - extracts string value" {
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_str, .{});
     defer parsed.deinit();
 
-    const obj = &parsed.value.object;
+    const obj = parsed.value.object;
     const name = root.getString(obj, "name");
     try std.testing.expect(name != null);
     try std.testing.expectEqualStrings("test", name.?);
@@ -69,7 +69,7 @@ test "getString - returns null for non-string values" {
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_str, .{});
     defer parsed.deinit();
 
-    const obj = &parsed.value.object;
+    const obj = parsed.value.object;
     const count = root.getString(obj, "count");
     try std.testing.expect(count == null);
 }
@@ -83,7 +83,7 @@ test "getString - returns null for missing keys" {
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_str, .{});
     defer parsed.deinit();
 
-    const obj = &parsed.value.object;
+    const obj = parsed.value.object;
     const missing = root.getString(obj, "nonexistent");
     try std.testing.expect(missing == null);
 }
@@ -97,7 +97,7 @@ test "getBool - extracts boolean value" {
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_str, .{});
     defer parsed.deinit();
 
-    const obj = &parsed.value.object;
+    const obj = parsed.value.object;
     const enabled = root.getBool(obj, "enabled");
     try std.testing.expect(enabled != null);
     try std.testing.expect(enabled.? == true);
@@ -116,7 +116,7 @@ test "getBool - returns null for non-boolean values" {
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_str, .{});
     defer parsed.deinit();
 
-    const obj = &parsed.value.object;
+    const obj = parsed.value.object;
     const count = root.getBool(obj, "count");
     try std.testing.expect(count == null);
 }
@@ -130,7 +130,7 @@ test "getInt - extracts integer value" {
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_str, .{});
     defer parsed.deinit();
 
-    const obj = &parsed.value.object;
+    const obj = parsed.value.object;
     const count = root.getInt(obj, "count");
     try std.testing.expect(count != null);
     try std.testing.expect(count.? == 42);
@@ -145,7 +145,7 @@ test "getInt - returns null for non-integer values" {
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_str, .{});
     defer parsed.deinit();
 
-    const obj = &parsed.value.object;
+    const obj = parsed.value.object;
     const name = root.getInt(obj, "name");
     try std.testing.expect(name == null);
 
@@ -162,7 +162,7 @@ test "getValue - extracts raw JSON value" {
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_str, .{});
     defer parsed.deinit();
 
-    const obj = &parsed.value.object;
+    const obj = parsed.value.object;
     const nested = root.getValue(obj, "nested");
     try std.testing.expect(nested != null);
     try std.testing.expect(nested.? == .object);
@@ -181,7 +181,7 @@ test "getValue - returns null for missing keys" {
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_str, .{});
     defer parsed.deinit();
 
-    const obj = &parsed.value.object;
+    const obj = parsed.value.object;
     const missing = root.getValue(obj, "nonexistent");
     try std.testing.expect(missing == null);
 }
@@ -195,7 +195,7 @@ test "getStringArray - extracts array of strings" {
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_str, .{});
     defer parsed.deinit();
 
-    const obj = &parsed.value.object;
+    const obj = parsed.value.object;
     const names = root.getStringArray(obj, "names");
     try std.testing.expect(names != null);
     try std.testing.expectEqual(@as(usize, 3), names.?.len);
@@ -210,7 +210,7 @@ test "getStringArray - returns null for non-array values" {
     const parsed = try std.json.parseFromSlice(std.json.Value, allocator, json_str, .{});
     defer parsed.deinit();
 
-    const obj = &parsed.value.object;
+    const obj = parsed.value.object;
     const count = root.getStringArray(obj, "count");
     try std.testing.expect(count == null);
 }
@@ -221,7 +221,7 @@ test "getStringArray - returns null for non-array values" {
 
 test "ToolRegistry.init - creates empty registry" {
     const allocator = std.testing.allocator;
-    var registry = ToolRegistry.init(allocator);
+    var registry = try ToolRegistry.init(allocator);
     defer registry.deinit();
 
     try std.testing.expectEqual(@as(usize, 0), registry.count());
@@ -229,7 +229,7 @@ test "ToolRegistry.init - creates empty registry" {
 
 test "ToolRegistry.list - returns empty slice for new registry" {
     const allocator = std.testing.allocator;
-    var registry = ToolRegistry.init(allocator);
+    var registry = try ToolRegistry.init(allocator);
     defer registry.deinit();
 
     const tools = registry.list();

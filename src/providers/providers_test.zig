@@ -1,11 +1,11 @@
 //! Provider and model tests
 const std = @import("std");
-const providers = @import("providers/root.zig");
+const providers = @import("root.zig");
 const Provider = providers.Provider;
-const models = @import("models.zig");
+const models = @import("../models.zig");
 const ModelRegistry = models.ModelRegistry;
-const ModelRequirement = models.ModelRequirement;
-const Model = models.Model;
+const TaskRequirements = models.TaskRequirements;
+const ModelMetadata = models.ModelMetadata;
 
 // ============================================================================
 // Provider Tests
@@ -13,29 +13,34 @@ const Model = models.Model;
 
 test "Provider enum has expected values" {
     // Verify all expected providers exist
-    try std.testing.expectEqual(@as(u8, 0), @intFromEnum(Provider.openai));
-    try std.testing.expectEqual(@as(u8, 1), @intFromEnum(Provider.anthropic));
-    try std.testing.expectEqual(@as(u8, 2), @intFromEnum(Provider.kimi));
-    try std.testing.expectEqual(@as(u8, 3), @intFromEnum(Provider.minimax));
-    try std.testing.expectEqual(@as(u8, 4), @intFromEnum(Provider.zai));
-    try std.testing.expectEqual(@as(u8, 5), @intFromEnum(Provider.bailian));
-    try std.testing.expectEqual(@as(u8, 6), @intFromEnum(Provider.volcano));
+    try std.testing.expectEqual(@as(u8, 0), @backingInt(Provider.openai));
+    try std.testing.expectEqual(@as(u8, 1), @backingInt(Provider.anthropic));
+    try std.testing.expectEqual(@as(u8, 2), @backingInt(Provider.deepseek));
+    try std.testing.expectEqual(@as(u8, 3), @backingInt(Provider.kimi));
+    try std.testing.expectEqual(@as(u8, 4), @backingInt(Provider.minimax));
+    try std.testing.expectEqual(@as(u8, 5), @backingInt(Provider.zai));
+    try std.testing.expectEqual(@as(u8, 6), @backingInt(Provider.bailian));
+    try std.testing.expectEqual(@as(u8, 7), @backingInt(Provider.volcano));
 }
 
 test "Provider.name returns expected string" {
-    try std.testing.expectEqualStrings("openai", Provider.openai.name());
-    try std.testing.expectEqualStrings("anthropic", Provider.anthropic.name());
-    try std.testing.expectEqualStrings("kimi", Provider.kimi.name());
-    try std.testing.expectEqualStrings("minimax", Provider.minimax.name());
-    try std.testing.expectEqualStrings("zai", Provider.zai.name());
-    try std.testing.expectEqualStrings("bailian", Provider.bailian.name());
-    try std.testing.expectEqualStrings("volcano", Provider.volcano.name());
+    try std.testing.expectEqualStrings("OpenAI", Provider.openai.name());
+    try std.testing.expectEqualStrings("Anthropic", Provider.anthropic.name());
+    try std.testing.expectEqualStrings("Kimi (Moonshot)", Provider.kimi.name());
+    try std.testing.expectEqualStrings("MiniMax", Provider.minimax.name());
+    try std.testing.expectEqualStrings("Z.ai (Zhipu)", Provider.zai.name());
+    try std.testing.expectEqualStrings("Bailian (Alibaba)", Provider.bailian.name());
+    try std.testing.expectEqualStrings("Volcano Engine", Provider.volcano.name());
 }
 
 test "Provider.models returns non-empty list" {
     const openai_models = Provider.openai.models();
     try std.testing.expect(openai_models.len > 0);
-    try std.testing.expect(std.mem.indexOf([]const u8, openai_models, "gpt-4o") != null);
+    var has_gpt4o = false;
+    for (openai_models) |model_name| {
+        if (std.mem.eql(u8, model_name, "gpt-4o")) has_gpt4o = true;
+    }
+    try std.testing.expect(has_gpt4o);
 
     const anthropic_models = Provider.anthropic.models();
     try std.testing.expect(anthropic_models.len > 0);
@@ -50,7 +55,7 @@ test "ModelRegistry.init creates empty registry" {
     var registry = try ModelRegistry.init(allocator);
     defer registry.deinit();
 
-    try std.testing.expectEqual(@as(usize, 0), registry.count());
+    try std.testing.expectEqual(@as(usize, 0), registry.list().len);
 }
 
 test "ModelRegistry.register adds models" {
@@ -60,15 +65,17 @@ test "ModelRegistry.register adds models" {
 
     try registry.register(.{
         .name = "test-model",
-        .provider = Provider.openai,
+        .display_name = "test-model",
+        .max_output_tokens = 4096,
+        .provider = "openai",
         .context_window = 128000,
         .supports_function_calling = true,
         .supports_streaming = true,
-        .cost_per_1k_input = 0.002,
-        .cost_per_1k_output = 0.008,
+        .cost_per_million_input = 2.0,
+        .cost_per_million_output = 8.0,
     });
 
-    try std.testing.expectEqual(@as(usize, 1), registry.count());
+    try std.testing.expectEqual(@as(usize, 1), registry.list().len);
 }
 
 test "ModelRegistry.get finds registered models" {
@@ -78,12 +85,14 @@ test "ModelRegistry.get finds registered models" {
 
     try registry.register(.{
         .name = "find-me",
-        .provider = Provider.openai,
+        .display_name = "find-me",
+        .max_output_tokens = 4096,
+        .provider = "openai",
         .context_window = 128000,
         .supports_function_calling = true,
         .supports_streaming = true,
-        .cost_per_1k_input = 0.002,
-        .cost_per_1k_output = 0.008,
+        .cost_per_million_input = 2.0,
+        .cost_per_million_output = 8.0,
     });
 
     const found = registry.get("find-me");
@@ -107,22 +116,26 @@ test "ModelRegistry.list returns all models" {
 
     try registry.register(.{
         .name = "model-a",
-        .provider = Provider.openai,
+        .display_name = "model-a",
+        .max_output_tokens = 4096,
+        .provider = "openai",
         .context_window = 128000,
         .supports_function_calling = true,
         .supports_streaming = true,
-        .cost_per_1k_input = 0.001,
-        .cost_per_1k_output = 0.002,
+        .cost_per_million_input = 1.0,
+        .cost_per_million_output = 2.0,
     });
 
     try registry.register(.{
         .name = "model-b",
-        .provider = Provider.anthropic,
+        .display_name = "model-b",
+        .max_output_tokens = 4096,
+        .provider = "anthropic",
         .context_window = 200000,
         .supports_function_calling = true,
         .supports_streaming = true,
-        .cost_per_1k_input = 0.003,
-        .cost_per_1k_output = 0.015,
+        .cost_per_million_input = 3.0,
+        .cost_per_million_output = 15.0,
     });
 
     const models_list = registry.list();
@@ -137,23 +150,27 @@ test "ModelRegistry.route selects appropriate model" {
     // Register a function-calling model
     try registry.register(.{
         .name = "fc-model",
-        .provider = Provider.openai,
+        .display_name = "fc-model",
+        .max_output_tokens = 4096,
+        .provider = "openai",
         .context_window = 128000,
         .supports_function_calling = true,
         .supports_streaming = true,
-        .cost_per_1k_input = 0.001,
-        .cost_per_1k_output = 0.002,
+        .cost_per_million_input = 1.0,
+        .cost_per_million_output = 2.0,
     });
 
     // Register a streaming model
     try registry.register(.{
         .name = "stream-model",
-        .provider = Provider.openai,
+        .display_name = "stream-model",
+        .max_output_tokens = 4096,
+        .provider = "openai",
         .context_window = 128000,
         .supports_function_calling = false,
         .supports_streaming = true,
-        .cost_per_1k_input = 0.0005,
-        .cost_per_1k_output = 0.001,
+        .cost_per_million_input = 0.5,
+        .cost_per_million_output = 1.0,
     });
 
     // Route for function calling should return fc-model
@@ -162,7 +179,7 @@ test "ModelRegistry.route selects appropriate model" {
         .needs_streaming = false,
     });
     try std.testing.expect(fc_result != null);
-    try std.testing.expectEqualStrings("fc-model", fc_result.?.name);
+    try std.testing.expectEqualStrings("fc-model", fc_result.?.model.name);
 
     // Route for streaming should return stream-model
     const stream_result = registry.route(.{
@@ -170,7 +187,7 @@ test "ModelRegistry.route selects appropriate model" {
         .needs_streaming = true,
     });
     try std.testing.expect(stream_result != null);
-    try std.testing.expectEqualStrings("stream-model", stream_result.?.name);
+    try std.testing.expectEqualStrings("stream-model", stream_result.?.model.name);
 }
 
 // ============================================================================
@@ -178,41 +195,42 @@ test "ModelRegistry.route selects appropriate model" {
 // ============================================================================
 
 test "Model struct has expected fields" {
-    const model = Model{
+    const model = ModelMetadata{
         .name = "test",
-        .provider = Provider.openai,
+        .display_name = "Test Model",
+        .max_output_tokens = 4096,
+        .provider = "openai",
         .context_window = 128000,
         .supports_function_calling = true,
         .supports_streaming = true,
-        .cost_per_1k_input = 0.002,
-        .cost_per_1k_output = 0.008,
+        .cost_per_million_input = 2.0,
+        .cost_per_million_output = 8.0,
     };
 
     try std.testing.expectEqualStrings("test", model.name);
-    try std.testing.expectEqual(Provider.openai, model.provider);
+    try std.testing.expectEqualStrings("openai", model.provider);
     try std.testing.expectEqual(@as(u32, 128000), model.context_window);
     try std.testing.expect(model.supports_function_calling);
     try std.testing.expect(model.supports_streaming);
 }
 
-test "ModelRequirement struct defaults" {
-    const req = ModelRequirement{};
+test "TaskRequirements struct defaults" {
+    const req = TaskRequirements{};
     try std.testing.expect(!req.needs_function_calling);
-    try std.testing.expect(!req.needs_streaming);
-    try std.testing.expect(!req.prefer_low_cost);
-    try std.testing.expect(!req.prefer_low_latency);
-    try std.testing.expect(!req.prefer_large_context);
+    try std.testing.expect(!req.needs_vision);
+    try std.testing.expect(req.needs_streaming);
+    try std.testing.expectEqual(@as(u32, 128000), req.min_context_window);
 }
 
-test "ModelRequirement struct with options" {
-    const req = ModelRequirement{
+test "TaskRequirements struct with options" {
+    const req = TaskRequirements{
         .needs_function_calling = true,
-        .needs_streaming = true,
-        .prefer_low_cost = true,
-        .prefer_large_context = true,
+        .needs_vision = true,
+        .budget_sensitive = true,
+        .min_context_window = 200000,
     };
     try std.testing.expect(req.needs_function_calling);
-    try std.testing.expect(req.needs_streaming);
-    try std.testing.expect(req.prefer_low_cost);
-    try std.testing.expect(req.prefer_large_context);
+    try std.testing.expect(req.needs_vision);
+    try std.testing.expect(req.budget_sensitive);
+    try std.testing.expectEqual(@as(u32, 200000), req.min_context_window);
 }

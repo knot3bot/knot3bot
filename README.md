@@ -1,6 +1,6 @@
 # knot3bot
 
-A high-performance AI coding agent in Zig. Single binary, zero runtime dependencies.
+A high-performance AI coding agent in Zig. Single binary; links the system `libsqlite3` for session storage.
 
 ## Quick Start
 
@@ -11,7 +11,7 @@ knot3bot --help
 
 # Build from source
 zig build
-./zig-out/bin/knot3bot --provider deepseek --model deepseek-v4-pro
+./zig-out/bin/knot3bot --provider deepseek --model deepseek-chat
 
 # Server mode with dashboard
 DEEPSEEK_API_KEY=sk-xxx ./zig-out/bin/knot3bot --server --port 8080
@@ -44,12 +44,14 @@ DEEPSEEK_API_KEY=sk-xxx ./zig-out/bin/knot3bot --server --port 8080
 - **Metrics panel** — requests, latency, tokens, errors with 5s auto-refresh
 - **Session management** — per-session message history
 
-### Tools (30)
+### Tools (44)
 `shell`, `read_file`, `write_file`, `list_directory`, `grep`, `glob`, `todo`, `calculator`,
 `git`, `cron`, `http_request`, `web_fetch`, `web_search`, `web_extract`, `browser`, `spawn`,
 `task_planner`, `diff`, `approval`, `url_safety`, `session_search`, `homeassistant`,
 `image_generation`, `send_message`, `transcription`, `tts`, `vision`, `screen_capture`,
-`clarify`, `env_passthrough`
+`clarify`, `env_passthrough`, `interrupt`, `mcp`, `mcp_list_servers`, `checkpoint`,
+`delegate`, `delegate_result`, `skill_self_improve`, `credential_files`, `code_execution`,
+`memory`, `skills_list`, `skill_view`, `skill_manage`, `skill_run`
 
 ### Providers (10)
 | Provider | Models | Env Variable |
@@ -136,7 +138,7 @@ curl http://localhost:8080/health
 
 ```bash
 zig build              # Build (default: ReleaseSafe)
-zig build test         # Run tests (79 tests)
+zig build test         # Run tests (356 tests via unified root src/tests.zig)
 zig build benchmark    # Performance benchmarks
 zig fmt src/           # Format code
 ```

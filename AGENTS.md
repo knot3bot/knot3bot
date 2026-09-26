@@ -11,15 +11,23 @@ See `README.md` for project overview and `dev.md` for architecture design (in Ch
 ```
 knot3bot/
 ├── src/
-│   ├── agent/          # ReAct loop, context compression, trajectory
+│   ├── agent/          # ReAct loop, context compression, trajectory, skills
 │   ├── memory/          # In-memory + SQLite backends
 │   ├── providers/       # LLM provider adapters
-│   ├── server/          # HTTP API server
+│   ├── server/          # HTTP API server, rate limiter, circuit breaker
 │   ├── adapters/        # ACP IDE protocol adapter
-│   ├── tools/           # 30+ built-in tools
+│   ├── tools/           # 44 built-in tools (default registry)
+│   ├── gateway/         # Multi-platform message routing
+│   ├── tui/             # libvaxis terminal UI
 │   ├── shared/          # Logging, JSON utilities
+│   ├── skills/          # Built-in skill packs (11 SKILL.md)
+│   ├── option-skills/   # Optional skill packs (4 SKILL.md)
+│   ├── tests.zig        # Unified test root (all suites, one binary)
 │   └── main.zig         # CLI entry point
-├── vendor/sqlite3/      # SQLite C source
+├── ui/                  # Dashboard web assets (HTMX + Alpine.js)
+├── npm/                 # npm installer package
+├── docs/                # Architecture and migration docs
+├── vendor/sqlite3/      # SQLite C header (system libsqlite3 is linked)
 ├── build.zig
 ├── build.zig.zon
 ├── README.md
@@ -42,7 +50,7 @@ knot3bot/
 - **Memory Management**: ArenaAllocator for request-scoped allocations, GeneralPurposeAllocator for long-lived state
 - **Concurrency**: std.Thread thread pools
 - **Tool Registry**: comptime tool registration and static dispatch
-- **FFI Strategy**: @cImport for SQLite; pure Zig for JSON/HTTP
+- **FFI Strategy**: `addTranslateC` translates `vendor/sqlite3/sqlite3.h` (0.17 removed `@cImport`); system libsqlite3 is linked; pure Zig for JSON/HTTP
 
 ## Code Style
 
@@ -54,20 +62,27 @@ knot3bot/
 ## Testing
 
 ```bash
-# Run all tests
+# Run all tests (356 tests across one unified binary, src/tests.zig)
 zig build test
 
-# Run specific test
-zig test src/module.zig --test-filter "test_name"
+# Per-suite breakdown
+zig build test --summary all
+
+# Run a single test while iterating
+zig test src/validation.zig --test-filter "test_name"
 ```
+
+Test files rooted outside their import directory (e.g. cross-directory
+imports) must be listed in `src/tests.zig`; standalone `zig test <file>`
+only works for files whose imports stay inside their own directory.
 
 ## Key Dependencies
 
 | Dependency | Purpose | Integration |
 |------------|---------|-------------|
-| SQLite | Session storage | @cImport via C ABI |
-| websocket | WebSocket support | @cImport |
-| wasm3 | WASM runtime | @cImport |
+| SQLite (system libsqlite3) | Session storage | `addTranslateC` on `vendor/sqlite3/sqlite3.h`, `linkSystemLibrary` |
+| libvaxis 0.6.0 | Terminal UI | zig package (`b.dependency`), patched for 0.17 in `zig-pkg/` |
+| uucode / zigimg | vaxis transitive deps | fetched into `zig-pkg/`, patched for 0.17 |
 
 ## Notes for Agents
 

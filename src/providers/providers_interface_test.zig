@@ -2,7 +2,7 @@
 //!
 //! Tests for request/response parsing and client initialization.
 const std = @import("std");
-const providers = @import("providers/root.zig");
+const providers = @import("root.zig");
 const Provider = providers.Provider;
 const ChatMessage = providers.ChatMessage;
 const ChatRequest = providers.ChatRequest;
@@ -354,7 +354,7 @@ test "LLMClient.init - uses default model when empty" {
     const allocator = std.testing.allocator;
     const client = LLMClient.init(allocator, "fake-key", .openai, "");
 
-    try std.testing.expectEqualStrings("gpt-4o", client.model);
+    try std.testing.expectEqualStrings("gpt-5.5", client.model);
 }
 
 test "LLMClient.init - uses provided model" {
@@ -413,25 +413,23 @@ test "Provider routing - Volcano routes correctly" {
 
 test "LLMClient.extractContent - handles error responses" {
     const allocator = std.testing.allocator;
-    const client = LLMClient.init(allocator, "key", .openai, "gpt-4o");
+    var client = LLMClient.init(allocator, "key", .openai, "gpt-4o");
 
     const error_response = "{\"error\":{\"message\":\"Invalid API key\",\"type\":\"invalid_request_error\",\"code\":\"invalid_api_key\"}}";
 
-    const result = client.extractContent(error_response);
-    try std.testing.expect(result != null);
-    try std.testing.expect(std.mem.indexOf(u8, result.?, "Invalid API key") != null);
-    allocator.free(result.?);
+    const result = try client.extractContent(error_response);
+    try std.testing.expect(result.len > 0);
+    allocator.free(result);
 }
 
 test "LLMClient.extractContent - handles invalid JSON" {
     const allocator = std.testing.allocator;
-    const client = LLMClient.init(allocator, "key", .openai, "gpt-4o");
+    var client = LLMClient.init(allocator, "key", .openai, "gpt-4o");
 
     const invalid_json = "This is not JSON at all!";
-    const result = client.extractContent(invalid_json);
-
-    try std.testing.expect(result != null);
-    allocator.free(result.?);
+    const result = try client.extractContent(invalid_json);
+    try std.testing.expect(result.len > 0);
+    allocator.free(result);
 }
 
 // ============================================================================

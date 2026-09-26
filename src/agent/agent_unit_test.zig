@@ -181,7 +181,9 @@ const AgentLoop = struct {
     fn init(allocator: std.mem.Allocator) @This() {
         return .{ .messages = std.ArrayList(Message).initCapacity(allocator, 4) catch @panic("OOM") };
     }
-    fn deinit(self: *@This()) void { self.messages.deinit(std.testing.allocator); }
+    fn deinit(self: *@This()) void {
+        self.messages.deinit(std.testing.allocator);
+    }
     fn addMessage(self: *@This(), role: []const u8, content: []const u8) !void {
         try self.messages.append(std.testing.allocator, .{ .role = role, .content = content });
     }

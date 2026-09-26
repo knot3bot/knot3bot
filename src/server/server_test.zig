@@ -30,7 +30,8 @@ test "RateLimiter remaining() returns correct count" {
     _ = limiter.check(ip);
     try std.testing.expectEqual(@as(u32, 3), limiter.remaining(ip));
 
-    // Consume remaining
+    // Consume remaining (burst_size is 5 — a fifth token after the first four)
+    _ = limiter.check(ip);
     _ = limiter.check(ip);
     _ = limiter.check(ip);
     try std.testing.expectEqual(@as(u32, 0), limiter.remaining(ip));

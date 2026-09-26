@@ -3,8 +3,8 @@
 //! Tests for token estimation, boundary alignment, message pruning,
 //! compression logic, and memory pressure scenarios.
 const std = @import("std");
-const context_compressor = @import("agent/context_compressor.zig");
-const Agent = @import("agent/agent.zig");
+const context_compressor = @import("context_compressor.zig");
+const Agent = @import("agent.zig");
 const Message = Agent.Message;
 const Role = Agent.Role;
 const estimateTokens = context_compressor.estimateTokens;
@@ -83,40 +83,43 @@ test "estimateTokens - all roles handled correctly" {
 // ============================================================================
 
 test "pruneOldToolResults - empty array returns zero" {
-    var messages: []Message = &.{};
-    const pruned = pruneOldToolResults(messages, 3);
+    var messages: [0]Message = .{};
+    const pruned = pruneOldToolResults(&messages, 3);
     try std.testing.expectEqual(@as(u32, 0), pruned);
 }
 
 test "pruneOldToolResults - short tool results not pruned" {
-    var messages: []Message = &[_]Message{
+    var messages = [_]Message{
         .{ .role = .tool, .content = "short" },
         .{ .role = .user, .content = "Hello" },
     };
-    const pruned = pruneOldToolResults(messages, 3);
+    const pruned = pruneOldToolResults(&messages, 3);
     try std.testing.expectEqual(@as(u32, 0), pruned);
 }
 
 test "pruneOldToolResults - long tool results pruned" {
-    var messages: []Message = &[_]Message{
-        .{ .role = .tool, .content = "This is a very long tool result that definitely exceeds two hundred characters and should be replaced with the pruned placeholder" },
+    var messages = [_]Message{
+        .{ .role = .tool, .content = "This is a very long tool result that definitely exceeds two hundred characters and should be replaced with the pruned placeholder because it contains a large amount of generated output that is no longer needed for the ongoing conversation" },
         .{ .role = .user, .content = "Hello" },
+        .{ .role = .assistant, .content = "Hi" },
+        .{ .role = .user, .content = "Recent" },
+        .{ .role = .assistant, .content = "Recent reply" },
     };
-    const pruned = pruneOldToolResults(messages, 3);
+    const pruned = pruneOldToolResults(&messages, 3);
     try std.testing.expectEqual(@as(u32, 1), pruned);
     try std.testing.expectEqualStrings(context_compressor.PRUNED_PLACEHOLDER, messages[0].content);
 }
 
 test "pruneOldToolResults - preserves recent messages" {
     // Protect 3 recent messages - only index 0 should be pruned
-    var messages: []Message = &[_]Message{
-        .{ .role = .tool, .content = "Old tool output that is definitely longer than two hundred characters and should be pruned away" },
-        .{ .role = .tool, .content = "Another old tool message that exceeds two hundred characters in length and should also be replaced" },
+    var messages = [_]Message{
+        .{ .role = .tool, .content = "Old tool output that is definitely longer than two hundred characters and should be pruned away because keeping every tool result in the context window quickly exhausts the available token budget for the rest of this conversation" },
+        .{ .role = .tool, .content = "Another old tool message that exceeds two hundred characters in length and should also be replaced with a short placeholder so that the newer messages retain as much room as possible within the context window" },
         .{ .role = .user, .content = "Recent user message" },
         .{ .role = .assistant, .content = "Recent assistant response" },
         .{ .role = .tool, .content = "Most recent tool result" },
     };
-    const pruned = pruneOldToolResults(messages, 3);
+    const pruned = pruneOldToolResults(&messages, 3);
     try std.testing.expectEqual(@as(u32, 2), pruned);
     // First two should be pruned
     try std.testing.expectEqualStrings(context_compressor.PRUNED_PLACEHOLDER, messages[0].content);
@@ -126,21 +129,24 @@ test "pruneOldToolResults - preserves recent messages" {
 }
 
 test "pruneOldToolResults - non-tool roles not affected" {
-    var messages: []Message = &[_]Message{
+    var messages = [_]Message{
         .{ .role = .user, .content = "User message that is definitely longer than two hundred characters and should not be pruned because it is not a tool result" },
         .{ .role = .assistant, .content = "Assistant message also longer than two hundred characters but should remain unchanged" },
     };
-    const pruned = pruneOldToolResults(messages, 3);
+    const pruned = pruneOldToolResults(&messages, 3);
     try std.testing.expectEqual(@as(u32, 0), pruned);
     try std.testing.expect(!std.mem.eql(u8, messages[0].content, context_compressor.PRUNED_PLACEHOLDER));
 }
 
 test "pruneOldToolResults - already pruned not counted twice" {
-    var messages: []Message = &[_]Message{
+    var messages = [_]Message{
         .{ .role = .tool, .content = context_compressor.PRUNED_PLACEHOLDER },
-        .{ .role = .tool, .content = "Another tool result with more than two hundred characters of content that should be pruned" },
+        .{ .role = .tool, .content = "Another tool result with more than two hundred characters of content that should be pruned away because it is long outdated and its information is no longer relevant to what the user is currently asking about right now" },
+        .{ .role = .user, .content = "Hello" },
+        .{ .role = .assistant, .content = "Hi" },
+        .{ .role = .user, .content = "Recent" },
     };
-    const pruned = pruneOldToolResults(messages, 3);
+    const pruned = pruneOldToolResults(&messages, 3);
     try std.testing.expectEqual(@as(u32, 1), pruned);
 }
 
@@ -315,12 +321,13 @@ test "serializeForSummary - formats all roles" {
         .{ .role = .tool, .content = "Tool result" },
     };
 
-    const output = try serializeForSummary(allocator, messages);
-    defer allocator.free(output);
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const output = try serializeForSummary(arena.allocator(), messages);
 
     try std.testing.expect(std.mem.indexOf(u8, output, "[system]") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "[user]") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "[assistant]") != null);
+    try std.testing.expect(std.mem.indexOf(u8, output, "[ASSISTANT]") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "[TOOL RESULT]") != null);
 }
 
@@ -330,8 +337,9 @@ test "serializeForSummary - truncates long content" {
     @memset(&long_content, 'A');
     const messages = &[_]Message{.{ .role = .user, .content = &long_content }};
 
-    const output = try serializeForSummary(allocator, messages);
-    defer allocator.free(output);
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const output = try serializeForSummary(arena.allocator(), messages);
 
     // Should contain truncation markers
     try std.testing.expect(std.mem.indexOf(u8, output, "...[truncated]...") != null);
@@ -343,8 +351,9 @@ test "serializeForSummary - preserves short content" {
     const allocator = std.testing.allocator;
     const messages = &[_]Message{.{ .role = .user, .content = "Hello world" }};
 
-    const output = try serializeForSummary(allocator, messages);
-    defer allocator.free(output);
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const output = try serializeForSummary(arena.allocator(), messages);
 
     try std.testing.expect(std.mem.indexOf(u8, output, "Hello world") != null);
     try std.testing.expect(std.mem.indexOf(u8, output, "...[truncated]...") == null);
@@ -371,7 +380,7 @@ test "ContextCompressor.shouldCompress - below threshold returns false" {
     defer cc.deinit();
 
     try std.testing.expect(!cc.shouldCompress(1000));
-    try std.testing.expect(!cc.shouldCompress(64000));
+    try std.testing.expect(!cc.shouldCompress(63999));
 }
 
 test "ContextCompressor.shouldCompress - at threshold returns true" {
@@ -466,30 +475,29 @@ test "ContextCompressor - consecutive compressions increment counter" {
 // ============================================================================
 
 test "Memory pressure - large number of messages" {
-    const allocator = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(std.testing.allocator);
+    defer arena.deinit();
+    const allocator = arena.allocator();
     var cc = ContextCompressor.init(allocator, "gpt-4o", .openai, "fake-key", 128000);
     cc.quiet_mode = true;
-    defer cc.deinit();
 
     // Create 500 messages (stress test)
     var messages_arr: [500]Message = undefined;
+    var contents: [500][]u8 = undefined;
     for (0..500) |i| {
-        const content = try std.fmt.allocPrint(allocator, "Message number {d} with some content", .{i});
-        defer allocator.free(content);
-        messages_arr[i] = .{ .role = if (i % 2 == 0) .user else .assistant, .content = content };
+        contents[i] = try std.fmt.allocPrint(allocator, "Message number {d} with some content", .{i});
+        messages_arr[i] = .{ .role = if (i % 2 == 0) .user else .assistant, .content = contents[i] };
     }
+    defer for (contents) |content| allocator.free(content);
 
     const messages: []Message = messages_arr[0..500];
 
     // Should handle without OOM (though may not actually compress without API key)
-    const result = cc.compress(messages, null);
     // Either succeeds or fails gracefully
-    _ = result;
+    _ = cc.compress(messages, null) catch {};
 }
 
 test "Memory pressure - very long single message" {
-    const allocator = std.testing.allocator;
-
     // Create a message with 100KB of content
     var large_content: [102400]u8 = undefined;
     for (large_content[0..], 0..) |*byte, i| {

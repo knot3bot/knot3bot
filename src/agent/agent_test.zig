@@ -110,13 +110,13 @@ test "UsageStats.update - calculates total tokens" {
     try std.testing.expectEqual(@as(u32, 150), stats.total_tokens);
 }
 
-test "UsageStats.update - overwrites previous values" {
+test "UsageStats.update - accumulates across calls" {
     var stats = Agent.UsageStats{};
     stats.update(100, 50);
     stats.update(200, 100);
-    try std.testing.expectEqual(@as(u32, 200), stats.prompt_tokens);
-    try std.testing.expectEqual(@as(u32, 100), stats.completion_tokens);
-    try std.testing.expectEqual(@as(u32, 300), stats.total_tokens);
+    try std.testing.expectEqual(@as(u32, 300), stats.prompt_tokens);
+    try std.testing.expectEqual(@as(u32, 150), stats.completion_tokens);
+    try std.testing.expectEqual(@as(u32, 450), stats.total_tokens);
 }
 
 // ============================================================================
@@ -205,10 +205,10 @@ test "ReActStep.toJSON - serializes step with error" {
 // ============================================================================
 
 test "Role enum - has expected values" {
-    try std.testing.expectEqual(@as(u8, 0), @intFromEnum(Agent.Role.system));
-    try std.testing.expectEqual(@as(u8, 1), @intFromEnum(Agent.Role.user));
-    try std.testing.expectEqual(@as(u8, 2), @intFromEnum(Agent.Role.assistant));
-    try std.testing.expectEqual(@as(u8, 3), @intFromEnum(Agent.Role.tool));
+    try std.testing.expectEqual(@as(u8, 0), @backingInt(Agent.Role.system));
+    try std.testing.expectEqual(@as(u8, 1), @backingInt(Agent.Role.user));
+    try std.testing.expectEqual(@as(u8, 2), @backingInt(Agent.Role.assistant));
+    try std.testing.expectEqual(@as(u8, 3), @backingInt(Agent.Role.tool));
 }
 
 // ============================================================================
@@ -357,7 +357,7 @@ test "AgentError - all error variants exist" {
 
 test "createDefaultSystemPrompt - generates non-empty prompt" {
     const allocator = std.testing.allocator;
-    var registry = ToolRegistry.init(allocator);
+    var registry = try ToolRegistry.init(allocator);
     defer registry.deinit();
 
     // Add a dummy tool
