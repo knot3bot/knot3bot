@@ -147,3 +147,21 @@ var gpa = std.heap.GeneralPurposeAllocator(.{ .verbose_log = true }){};
 - [ ] Async I/O throughout the HTTP server
 - [ ] Shared memory for multi-process deployments
 - [ ] SIMD-accelerated tokenization
+
+## Performance Baseline (2026-09-26, debug build, Apple Silicon macOS)
+
+Measured via `zig build benchmark` (`./zig-out/bin/benchmark`). Debug-build
+numbers — release builds are expected to be faster; use these only as a
+regression reference.
+
+| Benchmark | Result |
+|-----------|--------|
+| TokenBudget ops | 2ns/op |
+| IterationBudget ops | 3ns/op |
+| UsageStats updates | 5ns/op |
+| ReActStep.toJSON | 483µs/op |
+| ToolResult.ok / .fail | 3–4ns/op |
+| JSON parsing (tool args) | 183µs/op |
+| ToolRegistry init (44 tools) | 48µs/op |
+| String duplication (10k) | 43µs/op |
+| Arena allocation (10k) | 88µs/op |

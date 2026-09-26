@@ -222,6 +222,7 @@ pub fn build(b: *std.Build) void {
     const benchmark_step = b.step("benchmark", "Run performance benchmarks");
     const run_benchmark = b.addRunArtifact(benchmark_exe);
     benchmark_step.dependOn(&run_benchmark.step);
+    b.installArtifact(benchmark_exe);
 
     // Just like flags, top level steps are also listed in the `--help` menu.
     //
