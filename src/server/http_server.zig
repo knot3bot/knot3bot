@@ -960,10 +960,11 @@ pub const Server = struct {
         const model = self.agent_config.model;
         const tool_count = self.registry.count();
         const skill_status: []const u8 = if (self.enable_skill_self_improve) "enabled" else "disabled";
-        const version = @import("config").version;
+        const version = @import("config").release_version;
+        const commit = @import("config").version;
         const rss_bytes = getProcessRss();
         const total_requests = self.metrics.total_requests;
-        const response = try std.fmt.allocPrint(self.allocator, "{{\"status\":\"ok\",\"service\":\"knot3bot\",\"version\":\"{s}\",\"uptime_seconds\":{d},\"provider\":\"{s}\",\"model\":\"{s}\",\"tools\":{d},\"skill_self_improve\":\"{s}\",\"request_id\":\"{s}\",\"memory_rss_bytes\":{d},\"total_requests\":{d}}}", .{ version, uptime, provider, model, tool_count, skill_status, request_id, rss_bytes, total_requests });
+        const response = try std.fmt.allocPrint(self.allocator, "{{\"status\":\"ok\",\"service\":\"knot3bot\",\"version\":\"{s}\",\"commit\":\"{s}\",\"uptime_seconds\":{d},\"provider\":\"{s}\",\"model\":\"{s}\",\"tools\":{d},\"skill_self_improve\":\"{s}\",\"request_id\":\"{s}\",\"memory_rss_bytes\":{d},\"total_requests\":{d}}}", .{ version, commit, uptime, provider, model, tool_count, skill_status, request_id, rss_bytes, total_requests });
         defer self.allocator.free(response);
         try self.sendJson(conn, 200, response, request_id);
     }
@@ -1282,7 +1283,7 @@ pub const Server = struct {
         const tool_count = self.registry.count();
         const provider = self.agent_config.provider.name();
         const model = self.agent_config.model;
-        const resp = try std.fmt.allocPrint(self.allocator, "{{\"status\":\"ok\",\"provider\":\"{s}\",\"model\":\"{s}\",\"tools\":{d},\"uptime\":{d},\"total_requests\":{d},\"errors\":{d},\"streaming\":{d},\"circuit_state\":\"{s}\",\"version\":\"{s}\"}}", .{ provider, model, tool_count, uptime, self.metrics.total_requests, self.metrics.error_count, self.metrics.streaming_requests, @tagName(self.circuit_brk.getState()), @import("config").version });
+        const resp = try std.fmt.allocPrint(self.allocator, "{{\"status\":\"ok\",\"provider\":\"{s}\",\"model\":\"{s}\",\"tools\":{d},\"uptime\":{d},\"total_requests\":{d},\"errors\":{d},\"streaming\":{d},\"circuit_state\":\"{s}\",\"version\":\"{s}\"}}", .{ provider, model, tool_count, uptime, self.metrics.total_requests, self.metrics.error_count, self.metrics.streaming_requests, @tagName(self.circuit_brk.getState()), @import("config").release_version });
         defer self.allocator.free(resp);
         try self.sendJson(conn, 200, resp, request_id);
     }

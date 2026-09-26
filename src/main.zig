@@ -638,7 +638,7 @@ pub fn main(init: std.process.Init) !u8 {
     const io = init.io;
     var log_buf: [4096]u8 = undefined;
     json_logger.init(std.Io.File.stderr().writer(io, &log_buf).interface);
-    std.log.info("knot3bot v0.0.1 starting...", .{});
+    std.log.info("knot3bot v{s} starting...", .{@import("config").release_version});
     std.log.info("Provider: {s} | Model: {s} | Memory: {s} | Tools: {d}", .{
         config.provider.name(),
         config.model,
