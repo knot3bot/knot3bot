@@ -3,7 +3,9 @@ const std = @import("std");
 const Agent = @import("../agent/root.zig").Agent;
 const ToolRegistry = @import("../tools/root.zig").ToolRegistry;
 
-pub const PlatformType = enum { cli, http, websocket, telegram, discord };
+/// Platforms with a real adapter implementation. websocket/telegram/discord
+/// adapters are not implemented yet — add them here when they land.
+pub const PlatformType = enum { cli, http };
 pub const Message = struct { id: []const u8, session_id: []const u8, content: []const u8, role: Role = .user, timestamp: i64 };
 pub const Role = enum { system, user, assistant, tool };
 pub const Response = struct { message_id: []const u8, content: []const u8, role: Role = .assistant, tool_calls: ?[]const u8 = null, finish_reason: FinishReason = .stop, usage: ?Usage = null };
