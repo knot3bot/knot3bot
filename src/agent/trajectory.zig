@@ -94,6 +94,7 @@ pub const TrajectoryRecorder = struct {
             try w.print(",\"duration_ms\":{d}}}", .{step.duration_ms});
         }
         try w.writeAll("]}");
+        json_buf = allocating.toArrayList();
 
         // Try to open existing file, create if it doesn't exist
         const file_exists = shared.context.cwd().statFile(shared.context.io(), filename, .{}) catch null;

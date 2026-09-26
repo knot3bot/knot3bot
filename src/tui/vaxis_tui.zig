@@ -124,7 +124,9 @@ pub const App = struct {
         return a;
     }
 
-    pub fn quit(self: *App) void { self.should_quit = true; }
+    pub fn quit(self: *App) void {
+        self.should_quit = true;
+    }
 
     /// Render the UI
     pub fn renderFrame(self: *App) !void {
@@ -140,15 +142,13 @@ pub const App = struct {
         status_win.fill(.{ .style = .{ .bg = status_bg } });
 
         var status_buf: [256]u8 = undefined;
-        const status = std.fmt.bufPrint(&status_buf, " {s} | {s} | S:{s} | T:{d}P+{d}C ",
-            .{ self.provider_name, self.model_name, self.session_id, self.token_prompt, self.token_completion }) catch " knot3bot ";
+        const status = std.fmt.bufPrint(&status_buf, " {s} | {s} | S:{s} | T:{d}P+{d}C ", .{ self.provider_name, self.model_name, self.session_id, self.token_prompt, self.token_completion }) catch " knot3bot ";
         _ = status_win.printSegment(.{ .text = status, .style = .{ .fg = .default, .bg = status_bg } }, .{});
 
         if (self.streaming) {
             const right = " STREAMING Ctrl-C:quit ";
             if (w > status.len + right.len) {
-                _ = status_win.printSegment(.{ .text = right, .style = .{ .fg = .{ .index = 3 }, .bg = .{ .rgb = .{ 0x40, 0x30, 0x30 } } } },
-                    .{ .col_offset = w -| @as(u16, @intCast(right.len)) });
+                _ = status_win.printSegment(.{ .text = right, .style = .{ .fg = .{ .index = 3 }, .bg = .{ .rgb = .{ 0x40, 0x30, 0x30 } } } }, .{ .col_offset = w -| @as(u16, @intCast(right.len)) });
             }
         }
 
@@ -175,7 +175,11 @@ pub const App = struct {
         while (row < chat_bottom and line_idx < visible_lines.items.len) : (line_idx += 1) {
             const line = visible_lines.items[line_idx];
             const prefix: []const u8 = switch (line.role) {
-                .user => "> ", .assistant => "  ", .system => "~ ", .tool => "* ", .err => "! ",
+                .user => "> ",
+                .assistant => "  ",
+                .system => "~ ",
+                .tool => "* ",
+                .err => "! ",
             };
             const color: vaxis.Cell.Color = switch (line.role) {
                 .user => .{ .rgb = .{ 0x22, 0xD3, 0xEE } },
@@ -219,54 +223,88 @@ pub const App = struct {
     // ── Input handling ──
 
     pub fn handleKey(self: *App, key: vaxis.Key) void {
-        if (key.matches('c', .{ .ctrl = true }) or key.matches('q', .{ .ctrl = true })) { self.quit(); return; }
-        if (key.matches(vaxis.Key.escape, .{})) {
-            if (self.show_help or self.show_models or self.show_tools or self.show_skills or self.show_config) {
-                self.show_help = false; self.show_models = false; self.show_tools = false;
-                self.show_skills = false; self.show_config = false; return;
-            }
-            if (self.command_mode) { self.command_mode = false; self.command_len = 0; return; }
+        if (key.matches('c', .{ .ctrl = true }) or key.matches('q', .{ .ctrl = true })) {
+            self.quit();
             return;
         }
-        if (self.show_models or self.show_tools or self.show_skills) { self.handleMenuNav(key); return; }
-        if (self.command_mode) { self.handleCommandInput(key); return; }
+        if (key.matches(vaxis.Key.escape, .{})) {
+            if (self.show_help or self.show_models or self.show_tools or self.show_skills or self.show_config) {
+                self.show_help = false;
+                self.show_models = false;
+                self.show_tools = false;
+                self.show_skills = false;
+                self.show_config = false;
+                return;
+            }
+            if (self.command_mode) {
+                self.command_mode = false;
+                self.command_len = 0;
+                return;
+            }
+            return;
+        }
+        if (self.show_models or self.show_tools or self.show_skills) {
+            self.handleMenuNav(key);
+            return;
+        }
+        if (self.command_mode) {
+            self.handleCommandInput(key);
+            return;
+        }
         self.handleNormalInput(key);
     }
 
     fn handleMenuNav(self: *App, key: vaxis.Key) void {
         const n = self.menu_items.items.len;
-        if (key.matches(vaxis.Key.up, .{})) { if (self.menu_selected > 0) self.menu_selected -= 1; }
-        if (key.matches(vaxis.Key.down, .{})) { if (self.menu_selected < n - 1) self.menu_selected += 1; }
+        if (key.matches(vaxis.Key.up, .{})) {
+            if (self.menu_selected > 0) self.menu_selected -= 1;
+        }
+        if (key.matches(vaxis.Key.down, .{})) {
+            if (self.menu_selected < n - 1) self.menu_selected += 1;
+        }
         if (key.matches(vaxis.Key.enter, .{})) {
             if (self.menu_selected < n) {
                 const sel = self.allocator.dupe(u8, self.menu_items.items[self.menu_selected]) catch return;
                 self.pending_action = .{ .send_message = sel };
             }
-            self.show_models = false; self.show_tools = false; self.show_skills = false;
+            self.show_models = false;
+            self.show_tools = false;
+            self.show_skills = false;
         }
     }
 
     fn handleCommandInput(self: *App, key: vaxis.Key) void {
         if (key.matches(vaxis.Key.enter, .{})) {
             const cmd = self.command_buf[0..self.command_len];
-            self.command_mode = false; self.command_len = 0;
+            self.command_mode = false;
+            self.command_len = 0;
             const owned = self.allocator.dupe(u8, cmd) catch return;
-            self.pending_action = .{ .send_message = owned }; return;
+            self.pending_action = .{ .send_message = owned };
+            return;
         }
-        if (key.matches(vaxis.Key.backspace, .{})) { if (self.command_len > 0) self.command_len -= 1; return; }
+        if (key.matches(vaxis.Key.backspace, .{})) {
+            if (self.command_len > 0) self.command_len -= 1;
+            return;
+        }
         if (key.codepoint >= 0x20 and key.codepoint <= 0x7E and self.command_len < self.command_buf.len) {
-            self.command_buf[self.command_len] = @intCast(key.codepoint); self.command_len += 1;
+            self.command_buf[self.command_len] = @intCast(key.codepoint);
+            self.command_len += 1;
         }
     }
 
     fn handleNormalInput(self: *App, key: vaxis.Key) void {
-        if (key.codepoint == '/' and self.input_len == 0) { self.command_mode = true; self.command_len = 0; return; }
+        if (key.codepoint == '/' and self.input_len == 0) {
+            self.command_mode = true;
+            self.command_len = 0;
+            return;
+        }
         if (key.matches(vaxis.Key.enter, .{})) {
             const text = self.input_buf[0..self.input_len];
             if (text.len > 0) {
                 self.addHistory(text) catch {};
                 const owned = self.allocator.dupe(u8, text) catch return;
-                self.input_len = 0; self.cursor_pos = 0;
+                self.input_len = 0;
+                self.cursor_pos = 0;
                 self.pending_action = .{ .send_message = owned };
             }
             return;
@@ -274,19 +312,30 @@ pub const App = struct {
         if (key.matches(vaxis.Key.backspace, .{})) {
             if (self.input_len > 0 and self.cursor_pos > 0) {
                 for (self.cursor_pos - 1..self.input_len - 1) |i| self.input_buf[i] = self.input_buf[i + 1];
-                self.input_len -= 1; self.cursor_pos -= 1;
+                self.input_len -= 1;
+                self.cursor_pos -= 1;
             }
             return;
         }
-        if (key.matches(vaxis.Key.left, .{})) { if (self.cursor_pos > 0) self.cursor_pos -= 1; return; }
-        if (key.matches(vaxis.Key.right, .{})) { if (self.cursor_pos < self.input_len) self.cursor_pos += 1; return; }
+        if (key.matches(vaxis.Key.left, .{})) {
+            if (self.cursor_pos > 0) self.cursor_pos -= 1;
+            return;
+        }
+        if (key.matches(vaxis.Key.right, .{})) {
+            if (self.cursor_pos < self.input_len) self.cursor_pos += 1;
+            return;
+        }
         if (key.matches(vaxis.Key.up, .{})) {
-            if (self.history_idx == null and self.history.items.len > 0) { self.history_idx = self.history.items.len - 1; }
-            else if (self.history_idx) |i| { if (i > 0) self.history_idx = i - 1; }
+            if (self.history_idx == null and self.history.items.len > 0) {
+                self.history_idx = self.history.items.len - 1;
+            } else if (self.history_idx) |i| {
+                if (i > 0) self.history_idx = i - 1;
+            }
             if (self.history_idx) |i| {
                 const entry = std.mem.sliceTo(&self.history.items[i], 0);
                 @memcpy(self.input_buf[0..entry.len], entry);
-                self.input_len = entry.len; self.cursor_pos = entry.len;
+                self.input_len = entry.len;
+                self.cursor_pos = entry.len;
             }
             return;
         }
@@ -295,25 +344,40 @@ pub const App = struct {
                 if (i + 1 < self.history.items.len) {
                     self.history_idx = i + 1;
                     const entry = std.mem.sliceTo(&self.history.items[i + 1], 0);
-                    @memcpy(self.input_buf[0..entry.len], entry); self.input_len = entry.len; self.cursor_pos = entry.len;
-                } else { self.history_idx = null; self.input_len = 0; self.cursor_pos = 0; }
+                    @memcpy(self.input_buf[0..entry.len], entry);
+                    self.input_len = entry.len;
+                    self.cursor_pos = entry.len;
+                } else {
+                    self.history_idx = null;
+                    self.input_len = 0;
+                    self.cursor_pos = 0;
+                }
             }
             return;
         }
-        if (key.matches(vaxis.Key.page_up, .{})) { self.scroll_offset += 10; return; }
-        if (key.matches(vaxis.Key.page_down, .{})) { if (self.scroll_offset >= 10) self.scroll_offset -= 10 else self.scroll_offset = 0; return; }
+        if (key.matches(vaxis.Key.page_up, .{})) {
+            self.scroll_offset += 10;
+            return;
+        }
+        if (key.matches(vaxis.Key.page_down, .{})) {
+            if (self.scroll_offset >= 10) self.scroll_offset -= 10 else self.scroll_offset = 0;
+            return;
+        }
         if (key.codepoint >= 0x20 and key.codepoint <= 0x7E and self.input_len < self.input_buf.len - 1) {
             var pos = self.input_len;
             while (pos > self.cursor_pos) : (pos -= 1) self.input_buf[pos] = self.input_buf[pos - 1];
             self.input_buf[self.cursor_pos] = @intCast(key.codepoint);
-            self.input_len += 1; self.cursor_pos += 1;
+            self.input_len += 1;
+            self.cursor_pos += 1;
         }
     }
 };
 
 // ── Helpers ──
 
-pub fn shared_io() std.Io { return std.Io.Threaded.global_single_threaded.io(); }
+pub fn shared_io() std.Io {
+    return std.Io.Threaded.global_single_threaded.io();
+}
 
 const VisibleLine = struct { text: []const u8, role: Role };
 
@@ -368,8 +432,7 @@ fn renderMenu(_: *App, win: *const vaxis.Window, w: u16, h: u16, title: []const 
         const idx = offset + i;
         if (idx == selected)
             _ = box.printSegment(.{ .text = ">", .style = .{ .fg = .{ .rgb = .{ 0x22, 0xD3, 0xEE } } } }, .{ .col_offset = 1, .row_offset = @intCast(i + 3) });
-        _ = box.printSegment(.{ .text = item, .style = if (idx == selected) .{ .fg = .{ .rgb = .{ 0x22, 0xD3, 0xEE } }, .bold = true } else .{ .fg = .default } },
-            .{ .col_offset = 3, .row_offset = @intCast(i + 3) });
+        _ = box.printSegment(.{ .text = item, .style = if (idx == selected) .{ .fg = .{ .rgb = .{ 0x22, 0xD3, 0xEE } }, .bold = true } else .{ .fg = .default } }, .{ .col_offset = 3, .row_offset = @intCast(i + 3) });
     }
     _ = box.printSegment(.{ .text = "arrows:nav Enter:pick Esc:back", .style = .{ .fg = .{ .index = 8 } } }, .{ .col_offset = 2, .row_offset = oh - 2 });
 }
@@ -388,7 +451,7 @@ fn renderConfig(self: *App, win: *const vaxis.Window, w: u16, h: u16) !void {
         std.fmt.bufPrint(&buf, "Model:     {s}", .{self.model_name}) catch "",
         std.fmt.bufPrint(&buf, "Session:   {s}", .{self.session_id}) catch "",
         std.fmt.bufPrint(&buf, "Tools:     {d}", .{self.tools_count}) catch "",
-        std.fmt.bufPrint(&buf, "Tokens:    {d}P + {d}C", .{self.token_prompt, self.token_completion}) catch "",
+        std.fmt.bufPrint(&buf, "Tokens:    {d}P + {d}C", .{ self.token_prompt, self.token_completion }) catch "",
         "ESC: close",
     };
     for (lines, 0..) |line, i| {

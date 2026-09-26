@@ -152,7 +152,7 @@ pub fn ToolVTable(comptime T: type) Tool.VTable {
                 if (comptime @hasDecl(T, "deinit")) {
                     const DeinitFn = @TypeOf(T.deinit);
                     const fn_info = @typeInfo(DeinitFn).@"fn";
-                    if (fn_info.params.len == 2) {
+                    if (fn_info.param_types.len == 2) {
                         self.deinit(alloc);
                     } else {
                         self.deinit();
@@ -166,7 +166,8 @@ pub fn ToolVTable(comptime T: type) Tool.VTable {
 
 /// Helper to create a Tool from a heap-allocated tool struct
 pub fn toolVTable(comptime T: type, ptr: *T) Tool {
-    return .{ .ptr = @ptrCast(ptr), .vtable = &ToolVTable(T) };
+    const vtable = comptime ToolVTable(T);
+    return .{ .ptr = @ptrCast(ptr), .vtable = &vtable };
 }
 
 // ── Tool implementations ────────────────────────────────────────────────────────
@@ -265,7 +266,21 @@ pub const ToolRegistry = struct {
                 const parsed = try std.json.parseFromSlice(std.json.Value, allocator, args, .{});
                 defer parsed.deinit();
                 const obj = parsed.value.object;
-                return entry.tool.execute(allocator, obj);
+                const raw = try entry.tool.execute(allocator, obj);
+                // Tools may return slices borrowed from the parsed args; copy
+                // them out so the result stays valid after parsed.deinit().
+                // Byte-wise copy: the tool's allocator may be an arena whose
+                // reuse makes @memcpy's overlap check trip.
+                const output = try allocator.alloc(u8, raw.output.len);
+                errdefer allocator.free(output);
+                for (raw.output, 0..) |byte, i| output[i] = byte;
+                var error_msg: ?[]const u8 = null;
+                if (raw.error_msg) |em| {
+                    const em_copy = try allocator.alloc(u8, em.len);
+                    for (em, 0..) |byte, i| em_copy[i] = byte;
+                    error_msg = em_copy;
+                }
+                return .{ .success = raw.success, .output = output, .error_msg = error_msg };
             }
         }
         return ToolResult.fail("Unknown tool");

@@ -39,8 +39,8 @@ pub const ShellTool = struct {
 
         const exit_code: i32 = switch (result.term) {
             .exited => |code| code,
-            .signal => |sig| -@as(i32, @intCast(@intFromEnum(sig))),
-            .stopped => |sig| @as(i32, @intCast(@intFromEnum(sig))) + 128,
+            .signal => |sig| -@as(i32, @intCast(@backingInt(sig))),
+            .stopped => |sig| @as(i32, @intCast(@backingInt(sig))) + 128,
             else => -1,
         };
 
@@ -56,14 +56,22 @@ pub const ShellTool = struct {
     pub fn validateCommand(command: []const u8) ?[]const u8 {
         if (command.len == 0) return "empty";
         if (std.mem.indexOfScalar(u8, command, 0) != null) return "null byte";
-        for (command) |c| { if (c < 0x20 and c != '\t') return "control char"; }
+        for (command) |c| {
+            if (c < 0x20 and c != '\t') return "control char";
+        }
         if (std.mem.indexOfScalar(u8, command, '\n') != null or std.mem.indexOfScalar(u8, command, '\r') != null) return "newline";
         const meta = [_][]const u8{ "&&", "||", "|", ";", ">", "<", "$(", "`", "&>", ">&", "<>", "<<<", "<<", ">>" };
-        for (meta) |mc| { if (std.mem.indexOf(u8, command, mc) != null) return "metachar"; }
+        for (meta) |mc| {
+            if (std.mem.indexOf(u8, command, mc) != null) return "metachar";
+        }
         const prefixes = [_][]const u8{ "cd ", "export ", "source ", "eval ", "exec ", ". ", "alias ", "set ", "unset " };
-        for (prefixes) |p| { if (std.mem.startsWith(u8, command, p)) return "dangerous prefix"; }
+        for (prefixes) |p| {
+            if (std.mem.startsWith(u8, command, p)) return "dangerous prefix";
+        }
         const bare = [_][]const u8{ "cd", "eval", "exec", "source", "exit", "logout" };
-        for (bare) |w| { if (std.mem.eql(u8, command, w)) return "bare dangerous"; }
+        for (bare) |w| {
+            if (std.mem.eql(u8, command, w)) return "bare dangerous";
+        }
         return null;
     }
 

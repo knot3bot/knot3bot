@@ -225,8 +225,8 @@ pub const SpawnTool = struct {
 
             const exit_code: i32 = switch (result.term) {
                 .exited => |code| code,
-                .signal => |sig| -@as(i32, @intCast(@intFromEnum(sig))),
-                .stopped => |sig| @as(i32, @intCast(@intFromEnum(sig))) + 128,
+                .signal => |sig| -@as(i32, @intCast(@backingInt(sig))),
+                .stopped => |sig| @as(i32, @intCast(@backingInt(sig))) + 128,
                 else => -1,
             };
 
@@ -311,8 +311,8 @@ pub const SpawnTool = struct {
 
                 const exit_code: i32 = switch (term) {
                     .exited => |code| code,
-                    .signal => |sig| -@as(i32, @intCast(@intFromEnum(sig))),
-                    .stopped => |sig| @as(i32, @intCast(@intFromEnum(sig))) + 128,
+                    .signal => |sig| -@as(i32, @intCast(@backingInt(sig))),
+                    .stopped => |sig| @as(i32, @intCast(@backingInt(sig))) + 128,
                     else => -1,
                 };
 

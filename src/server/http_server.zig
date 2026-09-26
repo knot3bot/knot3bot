@@ -58,7 +58,7 @@ pub const AuthConfig = struct {
     pub fn validateOrigin(self: *const AuthConfig, origin: []const u8) bool {
         if (self.allowed_origins.len == 0) return true;
         for (self.allowed_origins) |allowed| {
-            if (std.mem.eql(u8, origin, allowed) or std.mem.eql(u8, origin, "*")) return true;
+            if (std.mem.eql(u8, origin, allowed) or std.mem.eql(u8, allowed, "*")) return true;
         }
         return false;
     }
@@ -209,7 +209,6 @@ pub const Server = struct {
     enable_skill_self_improve: bool = false,
     /// Credential pool for multi-key rotation in server mode
     credential_pool: ?credential_pool_mod.CredentialPool = null,
-
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -529,7 +528,7 @@ pub const Server = struct {
             return;
         }
 
-        const parsed = std.json.parseFromSlice(ChatCompletionRequest, allocator, body, .{.ignore_unknown_fields = true}) catch {
+        const parsed = std.json.parseFromSlice(ChatCompletionRequest, allocator, body, .{ .ignore_unknown_fields = true }) catch {
             try self.sendJson(conn, 400, "{\"error\":{\"message\":\"Invalid JSON\"}}", request_id);
             return;
         };
@@ -645,9 +644,7 @@ pub const Server = struct {
                 const chunk = response[pos..chunk_end];
                 // Build SSE event
                 var sse_buf: [4096]u8 = undefined;
-                const sse_event = std.fmt.bufPrint(&sse_buf,
-                    "data: {{\"id\":\"chatcmpl-{s}\",\"object\":\"chat.completion.chunk\",\"created\":{},\"model\":\"{s}\",\"choices\":[{{\"index\":0,\"delta\":{{\"content\":\"",
-                    .{ request_id, shared.timestamp(), model_name }) catch break;
+                const sse_event = std.fmt.bufPrint(&sse_buf, "data: {{\"id\":\"chatcmpl-{s}\",\"object\":\"chat.completion.chunk\",\"created\":{},\"model\":\"{s}\",\"choices\":[{{\"index\":0,\"delta\":{{\"content\":\"", .{ request_id, shared.timestamp(), model_name }) catch break;
                 _ = std.c.write(conn.socket.handle, sse_event.ptr, sse_event.len);
                 // Write escaped content
                 for (chunk) |c| {
@@ -658,7 +655,10 @@ pub const Server = struct {
                         '\n' => "\\n",
                         '\r' => "\\r",
                         '\t' => "\\t",
-                        else => blk: { esc[0] = c; break :blk esc[0..1]; },
+                        else => blk: {
+                            esc[0] = c;
+                            break :blk esc[0..1];
+                        },
                     };
                     _ = std.c.write(conn.socket.handle, esc_str.ptr, esc_str.len);
                 }
@@ -756,7 +756,7 @@ pub const Server = struct {
             return;
         }
 
-        const parsed = std.json.parseFromSlice(ChatCompletionRequest, allocator, body, .{.ignore_unknown_fields = true}) catch {
+        const parsed = std.json.parseFromSlice(ChatCompletionRequest, allocator, body, .{ .ignore_unknown_fields = true }) catch {
             try self.sendJson(conn, 400, "{\"error\":{\"message\":\"Invalid JSON\"}}", request_id);
             return;
         };
@@ -866,7 +866,7 @@ pub const Server = struct {
         try json_buf.appendSlice(self.allocator, ",\"model\":\"");
         try json_buf.appendSlice(self.allocator, self.agent_config.model);
         try json_buf.appendSlice(self.allocator, "\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"");
-            try appendJsonEscaped(&json_buf, self.allocator, response);
+        try appendJsonEscaped(&json_buf, self.allocator, response);
         try json_buf.appendSlice(self.allocator, "\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":");
         {
             var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &json_buf);
@@ -917,40 +917,35 @@ pub const Server = struct {
     }
 
     fn sendOptions(self: *Server, conn: std.Io.net.Stream, request_id: []const u8) !void {
-        const header = try std.fmt.allocPrint(self.allocator,
-            "HTTP/1.1 204 No Content\r\n" ++
-                "Server: knot3bot\r\n" ++
-                "X-Content-Type-Options: nosniff\r\n" ++
-                "X-Frame-Options: DENY\r\n" ++
-                "X-XSS-Protection: 1; mode=block\r\n" ++
-                "Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n" ++
-                "Access-Control-Allow-Origin: *\r\n" ++
-                "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n" ++
-                "Access-Control-Allow-Headers: Content-Type, Authorization\r\n" ++
-                "X-Request-ID: {s}\r\n\r\n",
-            .{request_id});
+        const header = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 204 No Content\r\n" ++
+            "Server: knot3bot\r\n" ++
+            "X-Content-Type-Options: nosniff\r\n" ++
+            "X-Frame-Options: DENY\r\n" ++
+            "X-XSS-Protection: 1; mode=block\r\n" ++
+            "Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n" ++
+            "Access-Control-Allow-Origin: *\r\n" ++
+            "Access-Control-Allow-Methods: GET, POST, OPTIONS\r\n" ++
+            "Access-Control-Allow-Headers: Content-Type, Authorization\r\n" ++
+            "X-Request-ID: {s}\r\n\r\n", .{request_id});
         defer self.allocator.free(header);
         try streamWriteAll(conn, header);
     }
 
     fn sendJson(self: *Server, conn: std.Io.net.Stream, status: u16, json: []const u8, request_id: []const u8) !void {
-        const header = try std.fmt.allocPrint(self.allocator,
-            "HTTP/1.1 {d} OK\r\n" ++
-                "Server: knot3bot\r\n" ++
-                "X-Content-Type-Options: nosniff\r\n" ++
-                "X-Frame-Options: DENY\r\n" ++
-                "X-XSS-Protection: 1; mode=block\r\n" ++
-                "Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n" ++
-                "Content-Type: application/json\r\n" ++
-                "Content-Length: {d}\r\n" ++
-                "Access-Control-Allow-Origin: *\r\n" ++
-                "X-Request-ID: {s}\r\n\r\n",
-            .{ status, json.len, request_id });
+        const header = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 {d} OK\r\n" ++
+            "Server: knot3bot\r\n" ++
+            "X-Content-Type-Options: nosniff\r\n" ++
+            "X-Frame-Options: DENY\r\n" ++
+            "X-XSS-Protection: 1; mode=block\r\n" ++
+            "Strict-Transport-Security: max-age=31536000; includeSubDomains\r\n" ++
+            "Content-Type: application/json\r\n" ++
+            "Content-Length: {d}\r\n" ++
+            "Access-Control-Allow-Origin: *\r\n" ++
+            "X-Request-ID: {s}\r\n\r\n", .{ status, json.len, request_id });
         defer self.allocator.free(header);
         try streamWriteAll(conn, header);
         try streamWriteAll(conn, json);
     }
-
 
     /// Get process RSS in bytes.
     /// Read /proc/self/statm on Linux (second field = RSS pages * 4096).
@@ -968,9 +963,7 @@ pub const Server = struct {
         const version = @import("config").version;
         const rss_bytes = getProcessRss();
         const total_requests = self.metrics.total_requests;
-        const response = try std.fmt.allocPrint(self.allocator,
-            "{{\"status\":\"ok\",\"service\":\"knot3bot\",\"version\":\"{s}\",\"uptime_seconds\":{d},\"provider\":\"{s}\",\"model\":\"{s}\",\"tools\":{d},\"skill_self_improve\":\"{s}\",\"request_id\":\"{s}\",\"memory_rss_bytes\":{d},\"total_requests\":{d}}}",
-            .{ version, uptime, provider, model, tool_count, skill_status, request_id, rss_bytes, total_requests });
+        const response = try std.fmt.allocPrint(self.allocator, "{{\"status\":\"ok\",\"service\":\"knot3bot\",\"version\":\"{s}\",\"uptime_seconds\":{d},\"provider\":\"{s}\",\"model\":\"{s}\",\"tools\":{d},\"skill_self_improve\":\"{s}\",\"request_id\":\"{s}\",\"memory_rss_bytes\":{d},\"total_requests\":{d}}}", .{ version, uptime, provider, model, tool_count, skill_status, request_id, rss_bytes, total_requests });
         defer self.allocator.free(response);
         try self.sendJson(conn, 200, response, request_id);
     }
@@ -1175,7 +1168,7 @@ pub const Server = struct {
         try metrics_text.appendSlice(self.allocator, "# TYPE knot3bot_circuit_breaker_state gauge\n");
         {
             var allocating = std.Io.Writer.Allocating.fromArrayList(self.allocator, &metrics_text);
-            try allocating.writer.print("knot3bot_circuit_breaker_state {d}\n", .{@intFromEnum(self.circuit_brk.getState())});
+            try allocating.writer.print("knot3bot_circuit_breaker_state {d}\n", .{@backingInt(self.circuit_brk.getState())});
             metrics_text = allocating.toArrayList();
         }
 
@@ -1289,12 +1282,7 @@ pub const Server = struct {
         const tool_count = self.registry.count();
         const provider = self.agent_config.provider.name();
         const model = self.agent_config.model;
-        const resp = try std.fmt.allocPrint(self.allocator,
-            "{{\"status\":\"ok\",\"provider\":\"{s}\",\"model\":\"{s}\",\"tools\":{d},\"uptime\":{d},\"total_requests\":{d},\"errors\":{d},\"streaming\":{d},\"circuit_state\":\"{s}\",\"version\":\"{s}\"}}",
-            .{ provider, model, tool_count, uptime, self.metrics.total_requests, self.metrics.error_count,
-               self.metrics.streaming_requests,
-               @tagName(self.circuit_brk.getState()),
-               @import("config").version });
+        const resp = try std.fmt.allocPrint(self.allocator, "{{\"status\":\"ok\",\"provider\":\"{s}\",\"model\":\"{s}\",\"tools\":{d},\"uptime\":{d},\"total_requests\":{d},\"errors\":{d},\"streaming\":{d},\"circuit_state\":\"{s}\",\"version\":\"{s}\"}}", .{ provider, model, tool_count, uptime, self.metrics.total_requests, self.metrics.error_count, self.metrics.streaming_requests, @tagName(self.circuit_brk.getState()), @import("config").version });
         defer self.allocator.free(resp);
         try self.sendJson(conn, 200, resp, request_id);
     }
@@ -1360,12 +1348,12 @@ const ChatMessage = struct {
 };
 
 test "validateChatRequest - accepts valid request" {
-    const messages = &[_]ChatMessage{
+    var messages = [_]ChatMessage{
         .{ .role = "user", .content = "Hello" },
     };
     const req = ChatCompletionRequest{
         .model = "gpt-4",
-        .messages = messages,
+        .messages = &messages,
         .temperature = 0.7,
         .max_tokens = 100,
     };
@@ -1373,38 +1361,38 @@ test "validateChatRequest - accepts valid request" {
 }
 
 test "validateChatRequest - rejects invalid role" {
-    const messages = &[_]ChatMessage{
+    var messages = [_]ChatMessage{
         .{ .role = "invalid", .content = "Hello" },
     };
-    const req = ChatCompletionRequest{ .messages = messages };
+    const req = ChatCompletionRequest{ .messages = &messages };
     try std.testing.expect(!validateChatRequest(&req));
 }
 
 test "validateChatRequest - rejects empty content" {
-    const messages = &[_]ChatMessage{
+    var messages = [_]ChatMessage{
         .{ .role = "user", .content = "" },
     };
-    const req = ChatCompletionRequest{ .messages = messages };
+    const req = ChatCompletionRequest{ .messages = &messages };
     try std.testing.expect(!validateChatRequest(&req));
 }
 
 test "validateChatRequest - rejects out of range temperature" {
-    const messages = &[_]ChatMessage{
+    var messages = [_]ChatMessage{
         .{ .role = "user", .content = "Hello" },
     };
     const req = ChatCompletionRequest{
-        .messages = messages,
+        .messages = &messages,
         .temperature = 3.0,
     };
     try std.testing.expect(!validateChatRequest(&req));
 }
 
 test "validateChatRequest - rejects zero max_tokens" {
-    const messages = &[_]ChatMessage{
+    var messages = [_]ChatMessage{
         .{ .role = "user", .content = "Hello" },
     };
     const req = ChatCompletionRequest{
-        .messages = messages,
+        .messages = &messages,
         .max_tokens = 0,
     };
     try std.testing.expect(!validateChatRequest(&req));

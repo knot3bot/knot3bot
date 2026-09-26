@@ -7,9 +7,15 @@ const JsonObjectMap = root.JsonObjectMap;
 
 var global_interrupt = std.atomic.Value(bool).init(false);
 
-pub fn setInterrupt(active: bool) void { global_interrupt.store(active, .monotonic); }
-pub fn isInterrupted() bool { return global_interrupt.load(.monotonic); }
-pub fn clearInterrupt() void { global_interrupt.store(false, .monotonic); }
+pub fn setInterrupt(active: bool) void {
+    global_interrupt.store(active, .monotonic);
+}
+pub fn isInterrupted() bool {
+    return global_interrupt.load(.monotonic);
+}
+pub fn clearInterrupt() void {
+    global_interrupt.store(false, .monotonic);
+}
 
 pub const InterruptTool = struct {
     pub const tool_name = "interrupt";
@@ -22,8 +28,14 @@ pub const InterruptTool = struct {
 
     pub fn execute(_: *InterruptTool, allocator: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
         const action = root.getString(args, "action") orelse "check";
-        if (std.mem.eql(u8, action, "set")) { setInterrupt(true); return ToolResult.ok("{\"interrupted\":true}"); }
-        if (std.mem.eql(u8, action, "clear")) { clearInterrupt(); return ToolResult.ok("{\"interrupted\":false}"); }
+        if (std.mem.eql(u8, action, "set")) {
+            setInterrupt(true);
+            return ToolResult.ok("{\"interrupted\":true}");
+        }
+        if (std.mem.eql(u8, action, "clear")) {
+            clearInterrupt();
+            return ToolResult.ok("{\"interrupted\":false}");
+        }
         const state = isInterrupted();
         const resp = try std.fmt.allocPrint(allocator, "{{\"interrupted\":{s}}}", .{if (state) "true" else "false"});
         return ToolResult.ok(resp);

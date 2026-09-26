@@ -13,7 +13,9 @@ pub const CheckpointManagerTool = struct {
     pub const tool_description = "Save or load agent evolution checkpoints for state persistence";
     pub const tool_params = "{\"type\":\"object\",\"properties\":{\"action\":{\"type\":\"string\",\"enum\":[\"save\",\"load\",\"list\",\"delete\"]},\"checkpoint_id\":{\"type\":\"string\",\"description\":\"Checkpoint identifier\"},\"state\":{\"type\":\"string\",\"description\":\"JSON state to save\"}},\"required\":[\"action\"]}";
 
-    pub fn tool(self: *CheckpointManagerTool) Tool { return .{ .ptr = @ptrCast(self), .vtable = &vtable }; }
+    pub fn tool(self: *CheckpointManagerTool) Tool {
+        return .{ .ptr = @ptrCast(self), .vtable = &vtable };
+    }
 
     pub fn execute(self: *CheckpointManagerTool, allocator: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
         const action = getString(args, "action") orelse return ToolResult.fail("action is required");

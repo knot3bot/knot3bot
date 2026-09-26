@@ -53,9 +53,7 @@ pub const MCPTool = struct {
         };
 
         // Build response
-        const resp = try std.fmt.allocPrint(allocator,
-            "{{\"error\":\"MCP tool calls require async infrastructure. Server '{s}' tool '{s}'. Full MCP support requires async event loop and MCP SDK integration.\"}}",
-            .{ server, mcp_tool_name });
+        const resp = try std.fmt.allocPrint(allocator, "{{\"error\":\"MCP tool calls require async infrastructure. Server '{s}' tool '{s}'. Full MCP support requires async event loop and MCP SDK integration.\"}}", .{ server, mcp_tool_name });
         return ToolResult{ .success = false, .output = resp };
     }
 

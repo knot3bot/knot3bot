@@ -17,12 +17,18 @@ pub const PlatformAdapter = struct {
     onToolCall: *const fn (ptr: *anyopaque, tool_name: []const u8, args: []const u8, result: []const u8) void,
 };
 pub const Gateway = struct {
-    allocator: std.mem.Allocator, agent: ?*Agent = null, registry: ?*ToolRegistry = null,
-    platforms: std.StringHashMap(PlatformAdapter), sessions: std.StringHashMap([]const u8),
+    allocator: std.mem.Allocator,
+    agent: ?*Agent = null,
+    registry: ?*ToolRegistry = null,
+    platforms: std.StringHashMap(PlatformAdapter),
+    sessions: std.StringHashMap([]const u8),
     pub fn init(allocator: std.mem.Allocator) Gateway {
         return .{ .allocator = allocator, .platforms = std.StringHashMap(PlatformAdapter).init(allocator), .sessions = std.StringHashMap([]const u8).init(allocator) };
     }
-    pub fn deinit(self: *Gateway) void { self.platforms.deinit(); self.sessions.deinit(); }
+    pub fn deinit(self: *Gateway) void {
+        self.platforms.deinit();
+        self.sessions.deinit();
+    }
     pub fn registerPlatform(self: *Gateway, name: []const u8, adapter: PlatformAdapter) !void {
         const nc = try self.allocator.dupe(u8, name);
         try self.platforms.put(nc, adapter);

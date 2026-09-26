@@ -17,8 +17,8 @@ const ToolResult = root.ToolResult;
 const JsonObjectMap = root.JsonObjectMap;
 
 const SANDBOX_ALLOWED_TOOLS = [_][]const u8{
-    "web_search", "web_extract", "read_file", "write_file",
-    "search_files", "patch", "terminal",
+    "web_search",   "web_extract", "read_file", "write_file",
+    "search_files", "patch",       "terminal",
 };
 
 const DEFAULT_TIMEOUT_SECS = 60;
@@ -188,11 +188,11 @@ fn readFileToString(allocator: std.mem.Allocator, path: []const u8) ![]const u8 
 
 fn detectDangerousCode(allocator: std.mem.Allocator, code: []const u8) ?[]const u8 {
     const dangerous = [_][]const u8{
-        "import os",       "import sys",     "import subprocess",
-        "import socket",   "eval(",          "exec(",
-        "__import__",      "ctypes",         "multiprocessing",
-        "threading",       "import pty",     "import resource",
-        "setrlimit",       "chroot",
+        "import os",     "import sys", "import subprocess",
+        "import socket", "eval(",      "exec(",
+        "__import__",    "ctypes",     "multiprocessing",
+        "threading",     "import pty", "import resource",
+        "setrlimit",     "chroot",
     };
 
     for (dangerous) |pattern| {

@@ -1,9 +1,9 @@
 const std = @import("std");
 
 pub const SafetyLevel = enum(u2) {
-    low,      // Safe: read-only, no side effects
-    medium,   // Moderate: file writes, web requests
-    high,     // Dangerous: shell execution, code execution
+    low, // Safe: read-only, no side effects
+    medium, // Moderate: file writes, web requests
+    high, // Dangerous: shell execution, code execution
     critical, // Requires explicit user approval: system changes, network access
 
     pub fn fromString(s: []const u8) SafetyLevel {
@@ -96,7 +96,10 @@ pub const SkillRegistry = struct {
         for (skill.required_tools) |tool_name| {
             var found = false;
             for (available_tools) |available| {
-                if (std.mem.eql(u8, tool_name, available)) { found = true; break; }
+                if (std.mem.eql(u8, tool_name, available)) {
+                    found = true;
+                    break;
+                }
             }
             if (!found) return "Missing required tool";
         }

@@ -9,7 +9,7 @@ const Role = agent_module.Role;
 const LLMClient = providers.openai_compatible.LLMClient;
 const ChatMessage = providers.ChatMessage;
 
-const PRUNED_PLACEHOLDER = "[Old tool output cleared to save context space]";
+pub const PRUNED_PLACEHOLDER = "[Old tool output cleared to save context space]";
 const SUMMARY_PREFIX = "[CONTEXT COMPACTION] Earlier turns in this conversation were compacted to save context space. The summary below describes work that was already completed, and the current session state may still reflect that work (for example, files may already be changed). Use the summary and the current session state to continue from where things left off, and avoid repeating work:";
 const MIN_SUMMARY_TOKENS = 2000;
 const SUMMARY_RATIO = 0.20;
@@ -364,7 +364,7 @@ fn duplicateMessages(allocator: std.mem.Allocator, messages: []const Message) ![
     return result;
 }
 
-fn pruneOldToolResults(messages: []Message, protect_tail_count: u32) u32 {
+pub fn pruneOldToolResults(messages: []Message, protect_tail_count: u32) u32 {
     if (messages.len == 0) return 0;
     const prune_boundary: usize = if (messages.len > protect_tail_count) messages.len - protect_tail_count else 0;
     var pruned: u32 = 0;
@@ -379,7 +379,7 @@ fn pruneOldToolResults(messages: []Message, protect_tail_count: u32) u32 {
     return pruned;
 }
 
-fn alignBoundaryForward(messages: []const Message, idx: u32) u32 {
+pub fn alignBoundaryForward(messages: []const Message, idx: u32) u32 {
     var i = idx;
     while (i < messages.len and messages[i].role == .tool) {
         i += 1;
@@ -387,8 +387,8 @@ fn alignBoundaryForward(messages: []const Message, idx: u32) u32 {
     return i;
 }
 
-fn alignBoundaryBackward(messages: []const Message, idx: u32) u32 {
-    if (idx == 0 or idx >= messages.len) return idx;
+pub fn alignBoundaryBackward(messages: []const Message, idx: u32) u32 {
+    if (idx == 0 or idx > messages.len) return idx;
     var check: i64 = @as(i64, idx) - 1;
     while (check >= 0 and messages[@as(usize, @intCast(check))].role == .tool) {
         check -= 1;
@@ -399,7 +399,7 @@ fn alignBoundaryBackward(messages: []const Message, idx: u32) u32 {
     return idx;
 }
 
-fn findTailCutByTokens(messages: []const Message, head_end: u32, token_budget: u32, min_tail: u32) u32 {
+pub fn findTailCutByTokens(messages: []const Message, head_end: u32, token_budget: u32, min_tail: u32) u32 {
     const n = messages.len;
     var accumulated: u32 = 0;
     var cut_idx: u32 = @as(u32, @intCast(n));
@@ -428,7 +428,7 @@ fn findTailCutByTokens(messages: []const Message, head_end: u32, token_budget: u
     return @max(cut_idx, head_end + 1);
 }
 
-fn computeSummaryBudget(turns: []const Message, max_summary_tokens: u32) u32 {
+pub fn computeSummaryBudget(turns: []const Message, max_summary_tokens: u32) u32 {
     var content_chars: usize = 0;
     for (turns) |msg| {
         content_chars += msg.content.len;
@@ -438,9 +438,10 @@ fn computeSummaryBudget(turns: []const Message, max_summary_tokens: u32) u32 {
     return @max(MIN_SUMMARY_TOKENS, @min(budget, max_summary_tokens));
 }
 
-fn serializeForSummary(arena_alloc: std.mem.Allocator, turns: []const Message) ![]const u8 {
+pub fn serializeForSummary(arena_alloc: std.mem.Allocator, turns: []const Message) ![]const u8 {
+    // The arena owns the returned buffer — do not free it here (a `defer
+    // parts.deinit` would retract/poison the memory the caller still reads).
     var parts = std.ArrayList(u8).empty;
-    defer parts.deinit(arena_alloc);
     var allocating = std.Io.Writer.Allocating.fromArrayList(arena_alloc, &parts);
     for (turns) |msg| {
         if (parts.items.len > 0) try allocating.writer.writeAll("\n\n");
@@ -494,9 +495,12 @@ test "estimateTokens basic" {
 
 test "pruneOldToolResults" {
     const messages = &[_]Message{
-        .{ .role = .tool, .content = "This is a very long tool result that should definitely be pruned because it exceeds two hundred characters easily and contains lots of useful information that we don't want to keep around forever" },
+        .{ .role = .tool, .content = "This is a very long tool result that should definitely be pruned because it exceeds two hundred characters easily and contains lots of useful information that we don't want to keep around forever, plus additional generated output that pushes the total length well beyond the two hundred character pruning threshold" },
         .{ .role = .user, .content = "Hello" },
         .{ .role = .assistant, .content = "Hi" },
+        .{ .role = .user, .content = "Follow-up" },
+        .{ .role = .assistant, .content = "Recent answer" },
+        .{ .role = .user, .content = "Latest" },
     };
     // Need mutable array for pruning
     var alloc = std.testing.allocator;

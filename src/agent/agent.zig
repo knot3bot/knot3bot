@@ -56,7 +56,6 @@ pub const Message = struct {
     tool_calls_json: ?[]const u8 = null,
 };
 
-
 pub const ToolCall = struct {
     id: []const u8,
     name: []const u8,
@@ -79,7 +78,7 @@ pub const ReActStep = struct {
         errdefer output.deinit(allocator);
 
         // Track temporary allocations to free them later
-        var temp_allocs = std.ArrayList([]u8).init(allocator);
+        var temp_allocs: std.ArrayList([]u8) = .empty;
         defer {
             for (temp_allocs.items) |slice| allocator.free(slice);
             temp_allocs.deinit(allocator);
@@ -257,7 +256,7 @@ pub const Agent = struct {
     pub fn init(allocator: std.mem.Allocator, config: AgentConfig, registry: *const ToolRegistry) !Agent {
         var messages: ArrayList(Message) = .empty;
         if (config.system_prompt) |prompt| {
-            try messages.append(allocator, .{ .role = .system, .content = prompt });
+            try messages.append(allocator, .{ .role = .system, .content = try allocator.dupe(u8, prompt) });
         }
         var client: ?LLMClient = null;
         var anthropic_client: ?providers.anthropic.AnthropicClient = null;
@@ -459,8 +458,7 @@ pub const Agent = struct {
 
                     // Transfer ownership: tool_result is already an allocated copy
                     // For null result, use a dup'd error string so deinit can free uniformly
-                    const result_str: []const u8 = if (tool_result) |tr| tr else
-                        try self.allocator.dupe(u8, "Tool execution failed");
+                    const result_str: []const u8 = if (tool_result) |tr| tr else try self.allocator.dupe(u8, "Tool execution failed");
 
                     if (self.config.verbose) {
                         std.debug.print("[Tool {s} took {}ms]\n", .{ tc.function.name, tool_duration });
@@ -510,8 +508,7 @@ pub const Agent = struct {
                             if (cr.should_checkpoint and self.config.verbose) {
                                 std.debug.print("[Skill Self-Improve] Checkpoint triggered: {d} suggestions\n", .{cr.suggestions.len});
                                 for (cr.suggestions) |s| {
-                                    std.debug.print("  - {s}: {s} (confidence: {d:.2})\n", .{
-                                        @tagName(s.action), s.reason, s.confidence});
+                                    std.debug.print("  - {s}: {s} (confidence: {d:.2})\n", .{ @tagName(s.action), s.reason, s.confidence });
                                 }
                             }
                         }
@@ -691,7 +688,6 @@ pub const Agent = struct {
         for (result.output, 0..) |byte, i| copy_result[i] = byte;
         return copy_result;
     }
-
 
     fn callLLMWithTools(self: *Agent) !LLMResult {
         if (!self.has_api_key or (self.client == null and self.anthropic_client == null)) {
@@ -998,7 +994,6 @@ pub const Agent = struct {
             .usage = usage,
         };
     }
-
 
     fn escapeJsonStringToBuffer(buf: *std.ArrayList(u8), allocator: std.mem.Allocator, str: []const u8) !void {
         return json_mod.appendJsonEscaped(buf, allocator, str);

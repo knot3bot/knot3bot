@@ -89,9 +89,9 @@ fn validateApiKeyFormat(key: []const u8, provider: providers.Provider) void {
 
 fn getApiKeyFromEnv(environ: *const std.process.Environ.Map) ?[]const u8 {
     const env_vars = &[_][]const u8{
-        "BAILIAN_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY",
-        "KIMI_API_KEY", "MINIMAX_API_KEY", "ZAI_API_KEY",
-        "VOLCANO_API_KEY", "OPENROUTER_API_KEY", "TENCENT_API_KEY",
+        "BAILIAN_API_KEY",   "OPENAI_API_KEY",     "DEEPSEEK_API_KEY",
+        "KIMI_API_KEY",      "MINIMAX_API_KEY",    "ZAI_API_KEY",
+        "VOLCANO_API_KEY",   "OPENROUTER_API_KEY", "TENCENT_API_KEY",
         "ANTHROPIC_API_KEY",
     };
 
@@ -197,7 +197,6 @@ fn parseArgs(args: std.process.Args, environ: *const std.process.Environ.Map) !C
 
     // Override with environment variables
     config.api_key = getApiKeyFromEnv(environ);
-
 
     // Override with environment variables
     if (config.api_key == null) {
@@ -388,27 +387,40 @@ fn runCliMode(config: *CliConfig, registry: *ToolRegistry) !void {
 
                     // Slash commands
                     if (trimmed.len > 0 and trimmed[0] == '/') {
-                        if (std.mem.eql(u8, trimmed, "/help") or std.mem.eql(u8, trimmed, "/h")) { vx_tui.show_help = true; }
-                        else if (std.mem.eql(u8, trimmed, "/quit") or std.mem.eql(u8, trimmed, "/q")) { vx_tui.quit(); }
-                        else if (std.mem.eql(u8, trimmed, "/new")) { try vx_tui.addMessage(.system, "New session."); }
-                        else if (std.mem.eql(u8, trimmed, "/config")) { vx_tui.show_config = true; }
-                        else if (std.mem.eql(u8, trimmed, "/model")) {
+                        if (std.mem.eql(u8, trimmed, "/help") or std.mem.eql(u8, trimmed, "/h")) {
+                            vx_tui.show_help = true;
+                        } else if (std.mem.eql(u8, trimmed, "/quit") or std.mem.eql(u8, trimmed, "/q")) {
+                            vx_tui.quit();
+                        } else if (std.mem.eql(u8, trimmed, "/new")) {
+                            try vx_tui.addMessage(.system, "New session.");
+                        } else if (std.mem.eql(u8, trimmed, "/config")) {
+                            vx_tui.show_config = true;
+                        } else if (std.mem.eql(u8, trimmed, "/model")) {
                             vx_tui.menu_items.clearRetainingCapacity();
                             for (config.provider.models()) |m| try vx_tui.menu_items.append(m);
-                            vx_tui.menu_title = "Select Model"; vx_tui.menu_selected = 0; vx_tui.show_models = true;
+                            vx_tui.menu_title = "Select Model";
+                            vx_tui.menu_selected = 0;
+                            vx_tui.show_models = true;
                         } else if (std.mem.eql(u8, trimmed, "/tools")) {
                             vx_tui.menu_items.clearRetainingCapacity();
                             for (registry.list()) |e| try vx_tui.menu_items.append(e.spec.name);
-                            vx_tui.menu_title = "Tools"; vx_tui.menu_selected = 0; vx_tui.show_tools = true;
+                            vx_tui.menu_title = "Tools";
+                            vx_tui.menu_selected = 0;
+                            vx_tui.show_tools = true;
                         } else if (std.mem.eql(u8, trimmed, "/skills")) {
                             vx_tui.menu_items.clearRetainingCapacity();
                             try vx_tui.menu_items.append("(no skills)");
-                            vx_tui.menu_title = "Skills"; vx_tui.menu_selected = 0; vx_tui.show_skills = true;
+                            vx_tui.menu_title = "Skills";
+                            vx_tui.menu_selected = 0;
+                            vx_tui.show_skills = true;
                         } else if (std.mem.startsWith(u8, trimmed, "/model ")) {
                             const name = try allocator.dupe(u8, trimmed["/model ".len..]);
-                            config.model = name; vx_tui.model_name = name;
+                            config.model = name;
+                            vx_tui.model_name = name;
                             try vx_tui.addMessage(.system, try std.fmt.allocPrint(allocator, "Model: {s}", .{name}));
-                        } else { try vx_tui.addMessage(.err, try std.fmt.allocPrint(allocator, "Unknown: {s}", .{trimmed})); }
+                        } else {
+                            try vx_tui.addMessage(.err, try std.fmt.allocPrint(allocator, "Unknown: {s}", .{trimmed}));
+                        }
                         try vx_tui.renderFrame();
                         continue;
                     }
@@ -432,11 +444,16 @@ fn runCliMode(config: *CliConfig, registry: *ToolRegistry) !void {
                         cp = credential_pool.CredentialPool.init(allocator, collectKeysForProvider(allocator, shared.context.environ(), config.provider));
                         const agent_config = Agent.AgentConfig{
                             .max_iterations = @intCast(config.max_iterations),
-                            .model = config.model, .api_key = config.api_key, .provider = config.provider,
+                            .model = config.model,
+                            .api_key = config.api_key,
+                            .provider = config.provider,
                             .system_prompt = try createDefaultSystemPrompt(allocator, registry),
-                            .context_compressor = compressor, .enable_trajectory_recording = true,
-                            .trajectory_recorder = &recorder, .model_registry = &model_registry,
-                            .enable_smart_routing = true, .enable_skill_self_improve = config.enable_skill_self_improve,
+                            .context_compressor = compressor,
+                            .enable_trajectory_recording = true,
+                            .trajectory_recorder = &recorder,
+                            .model_registry = &model_registry,
+                            .enable_smart_routing = true,
+                            .enable_skill_self_improve = config.enable_skill_self_improve,
                             .skill_self_improve = if (si_engine) |*si| si else null,
                             .credential_pool = if (cp.keys.len > 0) &cp else null,
                         };
@@ -571,7 +588,6 @@ fn runSetupWizard(config: *CliConfig) !void {
 
     std.debug.print("\n{s}Setup complete!{s} Type /help for commands.\n\n", .{ display.Colors.green, display.Colors.reset });
 }
-
 
 pub fn main(init: std.process.Init) !u8 {
     try setupSignalHandlers();
