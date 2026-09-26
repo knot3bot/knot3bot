@@ -31,6 +31,7 @@ test {
     _ = @import("server/server_test.zig");
     _ = @import("shared/json_test.zig");
     _ = @import("tools/factory_test.zig");
+    _ = @import("tools/mcp_test.zig");
     _ = @import("tools/shell_test.zig");
     _ = @import("tools/tools_test.zig");
 }
