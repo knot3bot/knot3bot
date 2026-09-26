@@ -157,6 +157,24 @@ knot3bot_errors 5
 knot3bot_circuit_breaker_state 0
 ```
 
+### Dashboard
+
+```
+GET /dashboard
+```
+
+Serves the web dashboard (HTMX + Alpine.js) with real-time SSE chat.
+
+### Management API (dashboard backend)
+
+```
+GET /api/dashboard   # aggregate status for the dashboard view
+GET /api/config      # current provider/model/settings
+GET /api/sessions    # stored conversation sessions
+GET /api/skills      # available skills
+GET /api/tools       # tool registry with enabled state
+```
+
 ## Authentication
 
 ### API Key Authentication
@@ -238,9 +256,10 @@ Circuit breaker state is exposed in `/metrics`.
 }
 ```
 
-## WebSocket (Advanced)
+## WebSocket (Planned)
 
-WebSocket support for streaming responses:
+> Not implemented yet — the gateway enum only ships `cli` and `http`
+> adapters. Planned endpoint shape:
 
 ```
 ws://localhost:8080/ws
