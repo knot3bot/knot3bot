@@ -275,13 +275,14 @@ pub const Server = struct {
         std.log.info("Max request size: {d} bytes", .{self.config.max_request_size});
         std.log.info("Max concurrent connections: {d}", .{self.config.max_connections});
 
-        // Verify provider connectivity at startup
+        // Verify provider connectivity in the background: the check spawns
+        // curl with up to a 10s timeout and would otherwise block the accept
+        // loop (queued connections time out waiting for /health).
         if (self.agent_config.api_key != null) {
-            std.log.info("Checking provider connectivity...", .{});
-            if (self.verifyProviderConnectivity(io)) {
-                std.log.info("Provider connectivity: OK", .{});
+            if (std.Thread.spawn(.{}, checkProviderConnectivityWorker, .{ self, io })) |thread| {
+                thread.detach();
             } else |err| {
-                std.log.warn("Provider connectivity check failed: {s} (server will start anyway)", .{@errorName(err)});
+                std.log.warn("Connectivity check thread failed to spawn: {s}", .{@errorName(err)});
             }
         } else {
             std.log.warn("No API key configured — provider calls will fail", .{});
@@ -387,6 +388,15 @@ pub const Server = struct {
         const status_code = std.fmt.parseInt(u16, status_str, 10) catch return error.InvalidResponse;
         if (status_code >= 500) return error.ProviderError;
         if (status_code == 401 or status_code == 403) return error.InvalidApiKey;
+    }
+
+    fn checkProviderConnectivityWorker(self: *Server, io: std.Io) void {
+        std.log.info("Checking provider connectivity...", .{});
+        if (self.verifyProviderConnectivity(io)) {
+            std.log.info("Provider connectivity: OK", .{});
+        } else |err| {
+            std.log.warn("Provider connectivity check failed: {s} (server will start anyway)", .{@errorName(err)});
+        }
     }
 
     fn handleConnection(self: *Server, conn: std.Io.net.Stream) !void {
