@@ -1,9 +1,13 @@
-//! ACP (Agent Client Protocol) Adapter
+//! ACP (Agent Client Protocol) Adapter — EXPERIMENTAL / NOT WIRED
 //!
-//! This adapter enables knot3bot to run as a coding agent inside IDEs like
-//! VS Code, Zed, and JetBrains via the Agent Client Protocol.
+//! Sketch of IDE integration (VS Code, Zed, JetBrains) via the Agent Client
+//! Protocol (JSON-RPC over stdio).
 //!
-//! ACP uses JSON-RPC over stdio to communicate between the IDE and agent.
+//! STATUS: this module still targets the pre-0.17 std APIs (std.fs.File.*,
+//! std.process.Child.init, std.json.Value object literals) and is never
+//! referenced from main.zig, so it is not analyzed by the compiler and its
+//! runtime path (connect() also spawns the child three times) is untested.
+//! Rewrite against std.Io before wiring a --acp entry point.
 
 const std = @import("std");
 const Agent = @import("../agent/root.zig").Agent;
@@ -38,8 +42,8 @@ pub const ACAdapter = struct {
     cwd: []const u8,
     session_id: ?[]const u8 = null,
     process: ?std.process.Child = null,
-    stdin_writer: ?std.fs.File.Writer = null,
-    stdout_reader: ?std.fs.File.Reader = null,
+    stdin_writer: ?std.Io.File.Writer = null,
+    stdout_reader: ?std.Io.File.Reader = null,
     next_id: usize = 0,
     agent: ?*Agent.Agent = null,
 

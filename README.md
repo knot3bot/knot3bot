@@ -98,8 +98,9 @@ src/
 ├── memory/          # In-memory + SQLite (FTS5) backends
 ├── providers/       # LLM client implementations
 ├── server/          # HTTP API server + rate limiter + circuit breaker
-├── tools/           # 30 tool implementations
-├── gateway/         # Multi-platform message routing
+├── tools/           # 44 tool implementations
+├── gateway/         # Message routing (cli + http adapters)
+├── adapters/        # ACP IDE adapter (experimental, not wired)
 └── shared/          # JSON utilities, logger, context
 ```
 
