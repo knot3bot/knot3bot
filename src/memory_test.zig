@@ -213,6 +213,9 @@ test "MemorySystem.getRecent - returns sessions by update time" {
     try memory.createSession("newest");
     try memory.addMessage("newest", "user", "New message");
 
+    // Make "newest" strictly more recent (ms-resolution timestamps may tie otherwise)
+    memory.getSession("newest").?.updated_at = memory.getSession("oldest").?.updated_at + 100;
+
     const results = try memory.getRecent(allocator, 10);
     defer {
         for (results) |r| {
