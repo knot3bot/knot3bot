@@ -10,6 +10,7 @@ const cli = @import("cli.zig");
 const Server = @import("root.zig").Server;
 const ServerConfig = @import("root.zig").ServerConfig;
 const AuthConfig = @import("root.zig").AuthConfig;
+const acp = @import("adapters/acp_adapter.zig");
 const models = @import("root.zig").models;
 const context_compressor = @import("root.zig").context_compressor;
 const trajectory = @import("root.zig").trajectory;
@@ -63,6 +64,7 @@ const CliConfig = struct {
     max_iterations: usize,
     provider: providers.Provider,
     server_mode: bool,
+    acp_mode: bool,
     port: u16,
     config_mode: bool,
     enable_skill_self_improve: bool,
@@ -190,6 +192,7 @@ fn parseArgs(args: std.process.Args, environ: *const std.process.Environ.Map) !C
         .max_iterations = 10,
         .provider = .openai,
         .server_mode = false,
+        .acp_mode = false,
         .port = 38789,
         .config_mode = false,
         .enable_skill_self_improve = false,
@@ -235,6 +238,8 @@ fn parseArgs(args: std.process.Args, environ: *const std.process.Environ.Map) !C
             }
         } else if (std.mem.eql(u8, arg, "--server")) {
             config.server_mode = true;
+        } else if (std.mem.eql(u8, arg, "--acp")) {
+            config.acp_mode = true;
         } else if (std.mem.eql(u8, arg, "--port")) {
             const port_str = args_iter.next() orelse return error.MissingPort;
             config.port = try std.fmt.parseInt(u16, port_str, 10);
@@ -265,6 +270,7 @@ fn printHelp() !void {
         \\  --provider <name>       LLM provider: openai, deepseek, kimi, minimax, zai, bailian, volcano, openrouter, tencent (+ -plan variants)
         \\  --max-iterations <n>    Max ReAct iterations (default: 10)
         \\  --server                Run in HTTP server mode
+        \\  --acp                   Serve ACP (Agent Client Protocol) over stdio
         \\  --port <port>           Server port (default: 8080)
         \\  --enable-skill-self-improve  Enable skill self-improvement (default: off)
         \\
@@ -657,6 +663,29 @@ pub fn main(init: std.process.Init) !u8 {
         if (!config.config_mode) {
             std.log.warn("No API key configured. Set *_API_KEY env var or use --config wizard.", .{});
         }
+    }
+
+    if (config.acp_mode) {
+        std.log.info("ACP mode: serving JSON-RPC over stdio", .{});
+        const agent_config = Agent.AgentConfig{
+            .max_iterations = @intCast(config.max_iterations),
+            .model = config.model,
+            .api_key = config.api_key,
+            .provider = config.provider,
+        };
+        // Per-process arena like the server's request handling: agent and
+        // parse lifetimes are bounded by the process, and several agent code
+        // paths assume arena-backed allocations.
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        defer arena.deinit();
+
+        var agent = try Agent.Agent.init(arena.allocator(), agent_config, &registry);
+        defer agent.deinit();
+        try agent.appendMessage(.system, "You are knot3bot, an AI coding agent. Be concise and helpful.");
+
+        var acp_server = acp.AcpServer.init(allocator, &agent);
+        try acp_server.serveStdio(io);
+        return 0;
     }
 
     if (config.server_mode) {

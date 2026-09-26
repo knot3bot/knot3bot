@@ -8,6 +8,8 @@
 //! their import root, such as agent/context_compressor_test.zig importing
 //! "agent/...", only resolve with this unified layout.
 
+const std = @import("std");
+
 test {
     // Inline tests in regular source files
     _ = @import("validation.zig");
@@ -31,6 +33,12 @@ test {
     _ = @import("server/server_test.zig");
     _ = @import("shared/json_test.zig");
     _ = @import("tools/factory_test.zig");
+    _ = @import("tools/mcp_test.zig");
+
+    // Keep the ACP adapter compiled and analyzed (it is wired via --acp).
+    comptime {
+        std.testing.refAllDecls(@import("adapters/acp_adapter.zig"));
+    }
     _ = @import("tools/mcp_test.zig");
     _ = @import("tools/shell_test.zig");
     _ = @import("tools/tools_test.zig");

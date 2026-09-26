@@ -100,7 +100,7 @@ src/
 ├── server/          # HTTP API server + rate limiter + circuit breaker
 ├── tools/           # 44 tool implementations
 ├── gateway/         # Message routing (cli + http adapters)
-├── adapters/        # ACP IDE adapter (experimental, not wired)
+├── adapters/        # ACP IDE adapter (--acp, minimal JSON-RPC subset)
 └── shared/          # JSON utilities, logger, context
 ```
 

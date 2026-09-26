@@ -343,7 +343,7 @@ pub const Agent = struct {
         self.step_logs.clearRetainingCapacity();
         self.usage = UsageStats{};
 
-        try self.messages.append(self.allocator, .{ .role = .user, .content = query });
+        try self.messages.append(self.allocator, .{ .role = .user, .content = try self.allocator.dupe(u8, query) });
         errdefer {
             for (self.messages.items) |msg| self.allocator.free(msg.content);
         }
@@ -584,7 +584,7 @@ pub const Agent = struct {
     pub fn runStreaming(self: *Agent, query: []const u8, callback: StreamCallback, user_data: ?*anyopaque) ![]const u8 {
         self.step_logs.clearRetainingCapacity();
         self.usage = UsageStats{};
-        try self.messages.append(self.allocator, .{ .role = .user, .content = query });
+        try self.messages.append(self.allocator, .{ .role = .user, .content = try self.allocator.dupe(u8, query) });
         if (!self.has_api_key or self.client == null) {
             const no_key_msg = "Final Answer: API key not configured.";
             callback(no_key_msg, user_data);

@@ -8,7 +8,7 @@ knot3bot 是一个用 Zig 编写的高性能 AI coding agent，产物为单一�
 
 1. **CLI 交互模式**（默认）——REPL + 斜杠命令 + setup 向导
 2. **服务端模式**（`--server`）——OpenAI 兼容 REST API + Dashboard
-3. **ACP 模式**——IDE 集成适配器，*实验性，尚未接线*（见 `src/adapters/acp_adapter.zig` 顶部状态说明）
+3. **ACP 模式**（`--acp`）——IDE 集成：stdio 上的 JSON-RPC（initialize / session/new / session/prompt 最小子集）
 
 ## 模块地图
 
@@ -80,5 +80,5 @@ curl → tcp accept → handleConnection
 - `process_registry` 的 spawn、`session_search`、`vision`/`screen_capture` 部分逻辑为占位
 - `memory.openviking` 后端枚举值未实现（返回 `error.NotImplemented`）
 - gateway 仅实现 cli/http 两个平台
-- ACP 适配器未接线（见上）
+- ACP 适配器实现的是最小子集（无 session/update 流式通知、无 fs/tool 桥接）
 - 真实 LLM API 的端到端行为需要有效 key 验证，仓库测试全部使用 mock/fake key

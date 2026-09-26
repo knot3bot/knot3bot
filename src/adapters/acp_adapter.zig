@@ -1,252 +1,197 @@
-//! ACP (Agent Client Protocol) Adapter — EXPERIMENTAL / NOT WIRED
+//! ACP (Agent Client Protocol) Adapter — JSON-RPC over stdio.
 //!
-//! Sketch of IDE integration (VS Code, Zed, JetBrains) via the Agent Client
-//! Protocol (JSON-RPC over stdio).
+//! Lets IDEs (VS Code, Zed, JetBrains) drive knot3bot via `--acp`: each
+//! request line on stdin is answered with one response line on stdout.
 //!
-//! STATUS: this module still targets the pre-0.17 std APIs (std.fs.File.*,
-//! std.process.Child.init, std.json.Value object literals) and is never
-//! referenced from main.zig, so it is not analyzed by the compiler and its
-//! runtime path (connect() also spawns the child three times) is untested.
-//! Rewrite against std.Io before wiring a --acp entry point.
+//! Implemented methods (minimal but functional subset of ACP):
+//!   initialize      -> protocol version + server info
+//!   session/new     -> fresh session id
+//!   session/prompt  -> runs the agent, returns the final answer as text
+//!
+//! The full ACP surface (session/update streaming notifications, fs/tool
+//! bridging, server-initiated requests) is out of scope for this adapter.
 
 const std = @import("std");
+const shared = @import("../shared/context.zig");
 const Agent = @import("../agent/root.zig").Agent;
-const AgentConfig = Agent.AgentConfig;
-const ToolRegistry = @import("../tools/root.zig").ToolRegistry;
-const createDefaultSystemPrompt = @import("../agent/root.zig").createDefaultSystemPrompt;
 
-/// ACP Message types
-pub const AcpMessage = struct {
-    jsonrpc: []const u8,
-    id: ?usize = null,
-    method: ?[]const u8 = null,
-    params: ?std.json.Value = null,
-    result: ?std.json.Value = null,
-    err: ?AcpError = null,
-};
+const max_message_bytes = 1024 * 1024;
 
-/// ACP Error
-pub const AcpError = struct {
-    code: i32,
-    message: []const u8,
-};
-
-/// ACP Session info
-pub const AcpSessionInfo = struct {
-    session_id: []const u8,
-};
-
-/// ACP Adapter for IDE integration
-pub const ACAdapter = struct {
+/// Serves ACP over stdin/stdout, driven by the provided agent.
+pub const AcpServer = struct {
     allocator: std.mem.Allocator,
-    cwd: []const u8,
-    session_id: ?[]const u8 = null,
-    process: ?std.process.Child = null,
-    stdin_writer: ?std.Io.File.Writer = null,
-    stdout_reader: ?std.Io.File.Reader = null,
-    next_id: usize = 0,
-    agent: ?*Agent.Agent = null,
+    agent: *Agent.Agent,
 
-    pub fn init(allocator: std.mem.Allocator, cwd: []const u8) ACAdapter {
-        return .{
-            .allocator = allocator,
-            .cwd = cwd,
-            .session_id = null,
-            .process = null,
-            .stdin_writer = null,
-            .stdout_reader = null,
-            .next_id = 0,
-            .agent = null,
-        };
+    pub fn init(allocator: std.mem.Allocator, agent: *Agent.Agent) AcpServer {
+        return .{ .allocator = allocator, .agent = agent };
     }
 
-    pub fn setAgent(self: *ACAdapter, agent: *Agent.Agent) void {
-        self.agent = agent;
-    }
+    /// Read request lines from stdin until EOF; write one response line each.
+    pub fn serveStdio(self: *AcpServer, io: std.Io) !void {
+        const stdin_file = std.Io.File.stdin();
+        var read_buf: [4096]u8 = undefined;
+        var stdin = stdin_file.reader(io, &read_buf);
 
-    pub fn deinit(self: *ACAdapter) void {
-        if (self.process) |*proc| {
-            proc.kill() catch {};
-            proc.wait() catch {};
-        }
-        self.* = undefined;
-    }
+        const stdout_file = std.Io.File.stdout();
+        var write_buf: [4096]u8 = undefined;
+        var stdout = stdout_file.writer(io, &write_buf);
 
-    /// Connect to the copilot ACP server
-    pub fn connect(self: *ACAdapter, command: []const u8, args: []const []const u8) !void {
-        self.process = std.process.Child.init(&[_][]const u8{command}, self.allocator);
-        self.process.?.cwd_dir = std.fs.cwd();
-        self.process.?.argv = args;
+        var line_buf: std.ArrayList(u8) = .empty;
+        defer line_buf.deinit(self.allocator);
+        var chunk: [1]u8 = undefined;
 
-        const stdout = try self.process.?.spawn();
-        self.stdout_reader = stdout.reader();
-        self.stdin_writer = (try self.process.?.spawn()).writer();
-
-        // Start the process
-        _ = try self.process.?.spawn();
-    }
-
-    /// Send a JSON-RPC request and wait for response
-    fn sendRequest(self: *ACAdapter, method: []const u8, params: std.json.Value) !AcpMessage {
-        self.next_id += 1;
-        const id = self.next_id;
-
-        var request = std.json.ObjectMap.init(self.allocator);
-        defer request.deinit();
-        try request.put("jsonrpc", std.json.Value{ .string = "2.0" });
-        try request.put("id", std.json.Value{ .integer = @intCast(id) });
-        try request.put("method", std.json.Value{ .string = method });
-        try request.put("params", params);
-
-        const request_str = try std.json.stringifyAlloc(self.allocator, std.json.Value{ .object = &request }, .{});
-        defer self.allocator.free(request_str);
-
-        try self.stdin_writer.?.print("{s}\n", .{request_str});
-        try self.stdin_writer.?.flush();
-
-        // Wait for response with matching id
-        const deadline = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds() + 900; // 15 min timeout
-        while (std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds() < deadline) {
-            const line = try self.stdout_reader.?.readUntilDelimiterAlloc(self.allocator, '\n', 1024 * 1024);
-            defer self.allocator.free(line);
-
-            var parser = std.json.Parser.init(self.allocator, .{});
-            defer parser.deinit();
-
-            const response = try parser.parse(line);
-            const obj = response.object orelse continue;
-
-            if (obj.get("id")) |resp_id| {
-                if (resp_id.integer == id) {
-                    return AcpMessage{
-                        .jsonrpc = "2.0",
-                        .id = id,
-                        .result = obj.get("result"),
-                        .err = if (obj.get("error")) |e| AcpError{
-                            .code = if (e.object) |o| o.get("code") orelse std.json.Value{ .integer = -32603 } else std.json.Value{ .integer = -32603 },
-                            .message = if (e.object) |o| o.get("message") orelse std.json.Value{ .string = "Unknown error" } else std.json.Value{ .string = "Unknown error" },
-                        } else null,
-                    };
+        while (true) {
+            line_buf.clearRetainingCapacity();
+            var hit_eof = false;
+            while (true) {
+                const n = stdin.interface.readSliceShort(&chunk) catch break;
+                if (n == 0) {
+                    hit_eof = true;
+                    break;
                 }
+                if (chunk[0] == '\n') break;
+                try line_buf.append(self.allocator, chunk[0]);
+                if (line_buf.items.len > max_message_bytes) return error.MessageTooLong;
+            }
+            if (line_buf.items.len == 0 and hit_eof) return; // EOF
+            if (line_buf.items.len == 0) continue;
+
+            const response = self.handleLine(line_buf.items) catch |err| switch (err) {
+                error.OutOfMemory => return err,
+                else => try self.composeError(null, -32700, "Parse error"),
+            };
+            defer self.allocator.free(response);
+            try stdout.interface.writeAll(response);
+            try stdout.interface.writeAll("\n");
+            try stdout.interface.flush();
+        }
+    }
+
+    fn handleLine(self: *AcpServer, line: []const u8) ![]const u8 {
+        var parsed = try std.json.parseFromSlice(std.json.Value, self.allocator, line, .{});
+        defer parsed.deinit();
+        if (parsed.value != .object) return error.ParseError;
+        const obj = parsed.value.object;
+
+        const id_val = obj.get("id");
+        const method_val = obj.get("method") orelse return error.ParseError;
+        if (method_val != .string) return error.ParseError;
+        const method = method_val.string;
+
+        if (std.mem.eql(u8, method, "initialize")) {
+            const result = try self.handleInitialize();
+            defer self.allocator.free(result);
+            return self.composeResponse(id_val, result);
+        } else if (std.mem.eql(u8, method, "session/new")) {
+            const result = try self.handleSessionNew();
+            defer self.allocator.free(result);
+            return self.composeResponse(id_val, result);
+        } else if (std.mem.eql(u8, method, "session/prompt")) {
+            const result = self.handleSessionPrompt(obj.get("params")) catch {
+                return self.composeError(id_val, -32000, "Agent execution failed");
+            };
+            defer self.allocator.free(result);
+            return self.composeResponse(id_val, result);
+        }
+        return self.composeError(id_val, -32601, "Method not found");
+    }
+
+    fn handleInitialize(self: *AcpServer) ![]const u8 {
+        var server_info: std.json.ObjectMap = .empty;
+        defer server_info.deinit(self.allocator);
+        try server_info.put(self.allocator, "name", .{ .string = "knot3bot" });
+        try server_info.put(self.allocator, "version", .{ .string = @import("config").release_version });
+        var result: std.json.ObjectMap = .empty;
+        defer result.deinit(self.allocator);
+        try result.put(self.allocator, "protocolVersion", .{ .integer = 1 });
+        try result.put(self.allocator, "serverInfo", .{ .object = server_info });
+        return std.json.Stringify.valueAlloc(self.allocator, std.json.Value{ .object = result }, .{});
+    }
+
+    fn handleSessionNew(self: *AcpServer) ![]const u8 {
+        var result: std.json.ObjectMap = .empty;
+        defer result.deinit(self.allocator);
+        const session_id = try std.fmt.allocPrint(self.allocator, "sess_{d}", .{shared.timestamp()});
+        defer self.allocator.free(session_id);
+        try result.put(self.allocator, "sessionId", .{ .string = session_id });
+        return std.json.Stringify.valueAlloc(self.allocator, std.json.Value{ .object = result }, .{});
+    }
+
+    /// Extract the text items from an ACP prompt array and run the agent.
+    fn handleSessionPrompt(self: *AcpServer, params: ?std.json.Value) ![]const u8 {
+        const p = params orelse return error.InvalidParams;
+        if (p != .object) return error.InvalidParams;
+        const prompt_val = p.object.get("prompt") orelse return error.InvalidParams;
+        if (prompt_val != .array) return error.InvalidParams;
+
+        var prompt_text: std.ArrayList(u8) = .empty;
+        defer prompt_text.deinit(self.allocator);
+        for (prompt_val.array.items) |item| {
+            if (item != .object) continue;
+            const item_type = item.object.get("type") orelse continue;
+            if (item_type != .string or !std.mem.eql(u8, item_type.string, "text")) continue;
+            const text = item.object.get("text") orelse continue;
+            if (text == .string) try prompt_text.appendSlice(self.allocator, text.string);
+        }
+
+        // The agent allocates from the process arena (see main.zig) — the
+        // arena owns the answer; do not free it with a different allocator.
+        const answer = try self.agent.run(prompt_text.items);
+
+        var result: std.json.ObjectMap = .empty;
+        defer result.deinit(self.allocator);
+        try result.put(self.allocator, "text", .{ .string = answer });
+        return std.json.Stringify.valueAlloc(self.allocator, std.json.Value{ .object = result }, .{});
+    }
+
+    fn composeResponse(self: *AcpServer, id_val: ?std.json.Value, result_json: []const u8) ![]const u8 {
+        var out: std.ArrayList(u8) = .empty;
+        errdefer out.deinit(self.allocator);
+        try out.appendSlice(self.allocator, "{\"jsonrpc\":\"2.0\",\"id\":");
+        try appendJsonId(self.allocator, &out, id_val);
+        try out.appendSlice(self.allocator, ",\"result\":");
+        try out.appendSlice(self.allocator, result_json);
+        try out.appendSlice(self.allocator, "}");
+        return out.toOwnedSlice(self.allocator);
+    }
+
+    fn composeError(self: *AcpServer, id_val: ?std.json.Value, code: i32, message: []const u8) ![]const u8 {
+        var out: std.ArrayList(u8) = .empty;
+        errdefer out.deinit(self.allocator);
+        try out.appendSlice(self.allocator, "{\"jsonrpc\":\"2.0\",\"id\":");
+        try appendJsonId(self.allocator, &out, id_val);
+        try out.appendSlice(self.allocator, ",\"error\":{\"code\":");
+        const code_str = try std.fmt.allocPrint(self.allocator, "{d}", .{code});
+        defer self.allocator.free(code_str);
+        try out.appendSlice(self.allocator, code_str);
+        try out.appendSlice(self.allocator, ",\"message\":\"");
+        for (message) |c| {
+            if (c == '"') {
+                try out.append(self.allocator, '\\');
+                try out.append(self.allocator, '"');
+            } else {
+                try out.append(self.allocator, c);
             }
         }
-
-        return error.Timeout;
+        try out.appendSlice(self.allocator, "\"}}");
+        return out.toOwnedSlice(self.allocator);
     }
 
-    /// Handle initialize method
-    fn handleInitialize(_: *ACAdapter, message: AcpMessage) !AcpMessage {
-        _ = message;
-        return AcpMessage{
-            .jsonrpc = "2.0",
-            .id = 1,
-            .result = std.json.Value{ .object = &.{
-                .{ .key = "protocolVersion", .value = .{ .integer = 1 } },
-                .{ .key = "serverInfo", .value = .{ .object = &.{
-                    .{ .key = "name", .value = .{ .string = "knot3bot" } },
-                    .{ .key = "version", .value = .{ .string = "0.0.1" } },
-                } } },
-            } },
-        };
-    }
-
-    /// Handle session/new method
-    fn handleSessionNew(self: *ACAdapter, message: AcpMessage) !AcpMessage {
-        _ = message;
-        const session_id = try std.fmt.allocPrint(self.allocator, "sess_{}", .{std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds()});
-        self.session_id = session_id;
-        return AcpMessage{
-            .jsonrpc = "2.0",
-            .id = 1,
-            .result = std.json.Value{ .object = &.{
-                .{ .key = "sessionId", .value = .{ .string = session_id } },
-            } },
-        };
-    }
-
-    /// Handle incoming ACP message
-    pub fn handleMessage(self: *ACAdapter, message: AcpMessage) !AcpMessage {
-        if (message.method) |method| {
-            if (std.mem.eql(u8, method, "initialize")) {
-                return self.handleInitialize(message);
-            } else if (std.mem.eql(u8, method, "session/new")) {
-                return self.handleSessionNew(message);
-            } else if (std.mem.eql(u8, method, "session/prompt")) {
-                return self.handleSessionPrompt(message);
+    fn appendJsonId(allocator: std.mem.Allocator, out: *std.ArrayList(u8), id_val: ?std.json.Value) !void {
+        if (id_val) |v| {
+            if (v == .integer) {
+                const s = try std.fmt.allocPrint(allocator, "{d}", .{v.integer});
+                defer allocator.free(s);
+                try out.appendSlice(allocator, s);
+                return;
+            }
+            if (v == .string) {
+                try out.append(allocator, '"');
+                try out.appendSlice(allocator, v.string);
+                try out.append(allocator, '"');
+                return;
             }
         }
-
-        return AcpMessage{
-            .jsonrpc = "2.0",
-            .id = message.id,
-            .err = &.{ .code = -32601, .message = "Method not found" },
-        };
-    }
-
-    /// Handle session/prompt - send prompt to copilot and collect response
-    fn handleSessionPrompt(self: *ACAdapter, message: AcpMessage) !AcpMessage {
-        const params = message.params orelse return error.InvalidParams;
-        const obj = params.object orelse return error.InvalidParams;
-
-        const session_id = obj.get("sessionId") orelse return error.InvalidParams;
-        const prompt = obj.get("prompt") orelse return error.InvalidParams;
-
-        // Extract text from prompt array
-        var prompt_text = std.array_list.AlignedManaged(u8, null).init(self.allocator);
-        defer prompt_text.deinit();
-
-        if (prompt.array) |arr| {
-            for (arr.items) |item| {
-                if (item.object) |o| {
-                    if (std.mem.eql(u8, (o.get("type") orelse std.json.Value{ .string = "" }).string, "text")) {
-                        if (o.get("text")) |t| {
-                            try prompt_text.writer().print("{s}", .{t.string});
-                        }
-                    }
-                }
-            }
-        }
-
-        // Use local agent if available, otherwise forward to remote ACP server
-        if (self.agent) |agent| {
-            const answer = agent.run(prompt_text.items) catch {
-                return AcpMessage{
-                    .jsonrpc = "2.0",
-                    .id = message.id,
-                    .result = std.json.Value{ .object = &.{
-                        .{ .key = "text", .value = .{ .string = "Agent execution failed" } },
-                    } },
-                };
-            };
-            defer agent.allocator.free(answer);
-            return AcpMessage{
-                .jsonrpc = "2.0",
-                .id = message.id,
-                .result = std.json.Value{ .object = &.{
-                    .{ .key = "text", .value = .{ .string = answer } },
-                } },
-            };
-        }
-
-        const request_params = std.json.Value{ .object = &.{
-            .{ .key = "sessionId", .value = session_id },
-            .{ .key = "prompt", .value = prompt },
-        } };
-
-        const response = self.sendRequest("session/prompt", request_params) catch {
-            return AcpMessage{
-                .jsonrpc = "2.0",
-                .id = message.id,
-                .result = std.json.Value{ .object = &.{
-                    .{ .key = "text", .value = .{ .string = "ACP connection not available" } },
-                } },
-            };
-        };
-
-        return AcpMessage{
-            .jsonrpc = "2.0",
-            .id = message.id,
-            .result = response.result,
-        };
+        try out.appendSlice(allocator, "null");
     }
 };

@@ -15,7 +15,7 @@ knot3bot/
 │   ├── memory/          # In-memory + SQLite backends
 │   ├── providers/       # LLM provider adapters
 │   ├── server/          # HTTP API server, rate limiter, circuit breaker
-│   ├── adapters/        # ACP IDE protocol adapter (experimental, not wired)
+│   ├── adapters/        # ACP IDE protocol adapter (--acp, minimal subset)
 │   ├── tools/           # 44 built-in tools (default registry)
 │   ├── gateway/         # Multi-platform message routing
 │   ├── tui/             # libvaxis terminal UI
