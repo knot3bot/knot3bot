@@ -16,7 +16,12 @@ BOT_LOG=$(mktemp)
 cleanup() { kill "${MOCK_PID:-}" "${BOT_PID:-}" 2>/dev/null; rm -f "$BOT_LOG"; }
 trap cleanup EXIT
 
-fail() { echo "E2E FAIL: $1"; exit 1; }
+fail() {
+  echo "E2E FAIL: $1"
+  echo "--- bot log ---"
+  cat "$BOT_LOG" 2>/dev/null || true
+  exit 1
+}
 
 python3 scripts/mock_llm.py "$MOCK_PORT" &
 MOCK_PID=$!
@@ -27,11 +32,18 @@ OPENAI_BASE_URL="http://127.0.0.1:$MOCK_PORT/v1" \
 ./zig-out/bin/knot3bot --server --port "$PORT" > "$BOT_LOG" 2>&1 &
 BOT_PID=$!
 
-# Wait for the server to come up (poll /health, up to 15s)
-for i in $(seq 1 30); do
-  curl -s -m 2 -o /dev/null "http://127.0.0.1:$PORT/health" && break
+# Wait for the server to come up (poll /health, up to 30s)
+UP=0
+for i in $(seq 1 60); do
+  CODE=$(curl -s -m 2 -o /dev/null -w '%{http_code}' "http://127.0.0.1:$PORT/health" 2>/dev/null)
+  if [ "$CODE" = "200" ]; then UP=1; break; fi
   sleep 0.5
 done
+if [ "$UP" != "1" ]; then
+  echo "E2E FAIL: server did not become healthy; bot log:"
+  cat "$BOT_LOG"
+  exit 1
+fi
 
 URL="http://127.0.0.1:$PORT/v1/chat/completions"
 AUTH="Authorization: Bearer test-key"

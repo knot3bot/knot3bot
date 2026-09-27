@@ -49,8 +49,8 @@ jobs:
       fail-fast: false
       matrix:
         target:
-          - x86_64-macos-gnu
-          - aarch64-macos-gnu
+          - x86_64-macos-none
+          - aarch64-macos-none
     steps:
       - uses: actions/checkout@v4
       - name: Install Zig ${{ env.ZIG_VERSION }}
