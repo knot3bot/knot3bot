@@ -5,6 +5,10 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+  packages: write
+
 # Pinned to the exact toolchain the code is validated against. The macos
 # targets are cross-compiled on linux (zig bundles the macOS libc stubs).
 env:

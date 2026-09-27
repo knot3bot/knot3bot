@@ -48,30 +48,30 @@ fi
 URL="http://127.0.0.1:$PORT/v1/chat/completions"
 AUTH="Authorization: Bearer test-key"
 
-# 1) auth rejected without credentials
+# 1) auth rejected without credentials (exit 41 = this stage failed)
 CODE=$(curl -s -m 10 -o /dev/null -w '%{http_code}' -X POST "$URL" \
   -H "Content-Type: application/json" \
   -d '{"model":"gpt-4o","messages":[{"role":"user","content":"Hi"}]}')
-[ "$CODE" = "401" ] || fail "expected 401 without auth, got $CODE"
+[ "$CODE" = "401" ] || { echo "expected 401 without auth, got $CODE"; exit 41; }
 echo "PASS: auth rejects unauthenticated requests"
 
 # 2) non-stream chat round trip
 R=$(curl -s -m 30 -X POST "$URL" -H "$AUTH" -H "Content-Type: application/json" \
   -d '{"model":"gpt-4o","messages":[{"role":"user","content":"Hi there"}]}')
-echo "$R" | grep -q "Hello from mock LLM" || fail "non-stream chat: $R"
+echo "$R" | grep -q "Hello from mock LLM" || { echo "non-stream chat: $R"; exit 42; }
 echo "PASS: non-stream chat round trip"
 
 # 3) streaming SSE
 S=$(curl -s -N -m 30 -X POST "$URL" -H "$AUTH" -H "Content-Type: application/json" \
   -d '{"model":"gpt-4o","messages":[{"role":"user","content":"Hello"}],"stream":true}')
-echo "$S" | grep -q "\[DONE\]" || fail "stream missing [DONE]: $S"
-echo "$S" | grep -q "Hello" || fail "stream missing content: $S"
+echo "$S" | grep -q "\[DONE\]" || { echo "stream missing [DONE]: $S"; exit 43; }
+echo "$S" | grep -q "Hello" || { echo "stream missing content: $S"; exit 43; }
 echo "PASS: streaming SSE"
 
 # 4) tool-calling round trip (mock invokes the real calculator tool)
 T=$(curl -s -m 60 -X POST "$URL" -H "$AUTH" -H "Content-Type: application/json" \
   -d '{"model":"gpt-4o","messages":[{"role":"user","content":"please use the calculator tool to compute 4 times 7"}]}')
-echo "$T" | grep -qE "Tool result:.*28" || fail "tool round trip: $T"
+echo "$T" | grep -qE "Tool result:.*28" || { echo "tool round trip: $T"; exit 44; }
 echo "PASS: tool-calling round trip (calculator 4*7)"
 
 echo "E2E PASS"
