@@ -1,6 +1,7 @@
 //! Code Execution Tool - Sandbox-based code execution
 //!
-//! Executes Python code in a rootless Linux sandbox using zbox.
+//! Executes Python code safely. A zbox-based rootless Linux sandbox was
+//! planned but never shipped; see executeInSandbox.
 //! Provides resource limits (CPU, memory) and syscall filtering.
 //!
 //! Architecture:
@@ -69,9 +70,11 @@ pub const CodeExecutionTool = struct {
 };
 
 fn executeInSandbox(allocator: std.mem.Allocator, code: []const u8, timeout_secs: i64, memory_limit_mb: i64) !ToolResult {
-    if (@import("builtin").os.tag == .linux) {
-        return executeWithZbox(allocator, code, timeout_secs, memory_limit_mb);
-    }
+    // The zbox sandbox was never shipped (its vendored source was a dangling
+    // gitlink); code execution currently falls back to a guided refusal.
+    _ = code;
+    _ = timeout_secs;
+    _ = memory_limit_mb;
     return executeFallback(allocator);
 }
 
@@ -79,9 +82,8 @@ fn executeFallback(allocator: std.mem.Allocator) !ToolResult {
     var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
     defer buf.deinit();
 
-    try buf.appendSlice("Code execution is only available on Linux with zbox support.\n");
-    try buf.appendSlice("To enable, rebuild with: zig build -Denable-zbox=true\n\n");
-    try buf.appendSlice("Available tools in sandbox:\n");
+    try buf.appendSlice("Code execution sandbox is not available in this build.\n\n");
+    try buf.appendSlice("Sandboxed tools that would be available:\n");
 
     for (SANDBOX_ALLOWED_TOOLS, 0..) |t, i| {
         if (i > 0) try buf.appendSlice(", ");
@@ -96,89 +98,6 @@ fn executeFallback(allocator: std.mem.Allocator) !ToolResult {
     try buf.appendSlice("  print(results)\n");
 
     return ToolResult{ .success = false, .output = try buf.toOwnedSlice() };
-}
-
-fn executeWithZbox(allocator: std.mem.Allocator, code: []const u8, timeout_secs: i64, memory_limit_mb: i64) !ToolResult {
-    _ = timeout_secs;
-
-    const zbox = @import("zbox");
-
-    shared.cwdMakePath(SANDBOX_ROOT) catch {};
-
-    const script_path = try std.fmt.allocPrint(allocator, "{s}/script.py", .{SANDBOX_ROOT});
-    defer allocator.free(script_path);
-
-    shared.cwdWriteFile(script_path, code) catch return ToolResult.fail("Failed to write script");
-
-    const wrapper_path = try std.fmt.allocPrint(allocator, "{s}/run.sh", .{SANDBOX_ROOT});
-    defer allocator.free(wrapper_path);
-
-    shared.cwdWriteFile(wrapper_path, "#!/bin/sh\npython3 /sandbox/script.py") catch return ToolResult.fail("Failed to write wrapper");
-
-    var config_builder = zbox.ConfigBuilder.init(allocator);
-    defer config_builder.deinit();
-
-    const config = config_builder
-        .set_name("knot3bot-code-exec") catch return ToolResult.fail("Failed to set sandbox name")
-        .set_root(SANDBOX_ROOT) catch return ToolResult.fail("Failed to set sandbox root")
-        .set_binary("/bin/sh") catch return ToolResult.fail("Failed to set sandbox binary")
-        .set_cpu_cores(1)
-        .set_cpu_limit(DEFAULT_CPU_LIMIT_PERCENT) catch return ToolResult.fail("Failed to set CPU limit")
-        .set_memory_limit(@intCast(memory_limit_mb))
-        .enable_network(false)
-        .build() catch return ToolResult.fail("Failed to build sandbox config");
-    defer config.deinit(allocator);
-
-    const stdout_path = try std.fmt.allocPrint(allocator, "{s}/stdout.txt", .{SANDBOX_ROOT});
-    defer allocator.free(stdout_path);
-    const stderr_path = try std.fmt.allocPrint(allocator, "{s}/stderr.txt", .{SANDBOX_ROOT});
-    defer allocator.free(stderr_path);
-
-    var sandbox = zbox.Sandbox.init(allocator, .{ .config = config, .child_args_count = 2 }) catch
-        return ToolResult.fail("Failed to initialize sandbox");
-    defer sandbox.deinit();
-
-    sandbox.set_strict_errors(true);
-
-    const io = shared.io();
-    const stdout_fd = try std.Io.Dir.openFileAbsolute(io, stdout_path, .{ .mode = .write_only, .create = true, .truncate = true });
-    defer stdout_fd.close(io);
-    try sandbox.set_stdout(stdout_fd);
-
-    const stderr_fd = try std.Io.Dir.openFileAbsolute(io, stderr_path, .{ .mode = .write_only, .create = true, .truncate = true });
-    defer stderr_fd.close(io);
-    try sandbox.set_stderr(stderr_fd);
-
-    sandbox.set_child_args(&.{ "/bin/sh", "/sandbox/run.sh" });
-
-    sandbox.spawn() catch return ToolResult.fail("Failed to spawn sandbox");
-
-    const result = sandbox.wait() catch return ToolResult.fail("Failed to wait for sandbox");
-
-    const stdout = readFileToString(allocator, stdout_path) catch "";
-    const stderr = readFileToString(allocator, stderr_path) catch "";
-
-    var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-    defer buf.deinit();
-
-    try buf.appendSlice("=== Sandbox Execution Result ===\n\n");
-
-    const success: bool = if (result == .exited) result.exited == 0 else false;
-
-    const header = switch (result) {
-        .exited => |exit_code| try std.fmt.allocPrint(allocator, "Exit Code: {}\n\n", .{exit_code}),
-        .signaled => |sig| try std.fmt.allocPrint(allocator, "Exit Code: -1 (killed by signal {})\n\n", .{sig}),
-        else => try std.fmt.allocPrint(allocator, "Exit Code: -1 (unknown)\n\n", .{}),
-    };
-    defer allocator.free(header);
-    try buf.appendSlice(header);
-
-    try buf.appendSlice("STDOUT:\n");
-    try buf.appendSlice(stdout);
-    try buf.appendSlice("\n\nSTDERR:\n");
-    try buf.appendSlice(stderr);
-
-    return ToolResult{ .success = success, .output = try buf.toOwnedSlice() };
 }
 
 fn readFileToString(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
