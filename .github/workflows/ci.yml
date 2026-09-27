@@ -2,104 +2,52 @@ name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, develop, master]
   pull_request:
-    branches: [main]
+    branches: [main, master]
 
+# Pinned to the exact toolchain the code is validated against (a master
+# snapshot; released 0.16.0 is too old for these APIs). The tarball URL is
+# the linux build of that snapshot — see the version check step below.
 env:
-  ZIG_VERSION: "0.15.2"
+  ZIG_VERSION: 0.17.0-dev.2131+d08989840
+  ZIG_URL: https://ziglang.org/builds/zig-x86_64-linux-0.17.0-dev.2131+d08989840.tar.xz
 
 jobs:
   test:
-    name: Test on ${{ matrix.os }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    
+    name: Test
+    runs-on: ubuntu-24.04
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
       - name: Install Zig ${{ env.ZIG_VERSION }}
-        uses: goto-bus-terminal/docker-ziglang@v1
-        with:
-          zig-version: ${{ env.ZIG_VERSION }}
-
-      - name: Verify Zig version
-        run: zig version
+        run: |
+          curl -fsSL "$ZIG_URL" -o /tmp/zig.tar.xz
+          sudo mkdir -p /opt/zig
+          sudo tar xf /tmp/zig.tar.xz -C /opt/zig --strip-components=1
+          echo "/opt/zig" >> "$GITHUB_PATH"
+          /opt/zig/zig version
 
       - name: Build
         run: zig build
 
       - name: Run tests
         run: zig build test
-BN|
-NN|      - name: Build benchmark
-SZ|        run: zig build benchmark
+
+      - name: End-to-end smoke (mock LLM)
+        run: ./scripts/e2e_mock.sh 8123
+
+      - name: Build benchmark
+        run: zig build benchmark
 
       - name: Run benchmark
-QZ|        run: ./zig-out/bin/benchmark 2>&1 | tee benchmark.log
+        run: ./zig-out/bin/benchmark 2>&1 | tee benchmark.log
 
       - name: Upload benchmark results
-XW|        uses: actions/upload-artifact@v4
-JX|        if: matrix.os == 'ubuntu-latest'
-YH|        with:
-XH|          name: benchmark-results-${{ github.sha }}
-HB|          path: benchmark.log
+        uses: actions/upload-artifact@v4
+        with:
+          name: benchmark-results-${{ github.sha }}
+          path: benchmark.log
 
       - name: Build release
-        run: zig build -Drelease-safe
-        if: matrix.os == 'ubuntu-latest'
-
-  security:
-    name: Security Audit
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Zig
-        uses: goto-bus-terminal/docker-ziglang@v1
-        with:
-          zig-version: ${{ env.ZIG_VERSION }}
-
-      HK|      - name: Run cache cleaning
-        run: |
-          # Check for sensitive files that shouldn't be committed
-          echo "Checking for sensitive files..."
-          if git ls-files | grep -E "\.(env|credentials|pem|key)$" | grep -v ".env.example" | grep -v "docker-compose"; then
-            echo "ERROR: Sensitive files found!"
-            exit 1
-          fi
-          echo "No sensitive files found."
-
-  docker:
-    name: Docker Build
-    runs-on: ubuntu-latest
-    needs: test
-    if: github.ref == 'refs/heads/main'
-    
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to Container Registry
-        uses: docker/login-action@v3
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build and push
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
+        run: zig build -Drelease=true

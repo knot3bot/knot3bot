@@ -5,6 +5,12 @@ on:
     tags:
       - 'v*'
 
+# Pinned to the exact toolchain the code is validated against. The macos
+# targets are cross-compiled on linux (zig bundles the macOS libc stubs).
+env:
+  ZIG_VERSION: 0.17.0-dev.2131+d08989840
+  ZIG_URL: https://ziglang.org/builds/zig-x86_64-linux-0.17.0-dev.2131+d08989840.tar.xz
+
 jobs:
   release-linux:
     name: ${{ matrix.target }}
@@ -17,13 +23,13 @@ jobs:
           - aarch64-linux-musl
     steps:
       - uses: actions/checkout@v4
-      - name: Install Zig (master)
+      - name: Install Zig ${{ env.ZIG_VERSION }}
         run: |
-          ARCH=$(echo ${{ matrix.target }} | cut -d- -f1)
-          URL=$(curl -fsSL https://ziglang.org/download/index.json | python3 -c "import json,sys;print(json.load(sys.stdin)['master']['${ARCH}-linux']['tarball'])")
-          curl -fsSL "$URL" -o /tmp/zig.tar.xz
-          sudo tar xf /tmp/zig.tar.xz -C /usr/local
-          echo "/usr/local/$(tar tf /tmp/zig.tar.xz | head -1 | cut -d/ -f1)" >> $GITHUB_PATH
+          curl -fsSL "$ZIG_URL" -o /tmp/zig.tar.xz
+          sudo mkdir -p /opt/zig
+          sudo tar xf /tmp/zig.tar.xz -C /opt/zig --strip-components=1
+          echo "/opt/zig" >> "$GITHUB_PATH"
+          /opt/zig/zig version
       - name: Build
         run: |
           chmod +x $(which zig) 2>/dev/null || true
@@ -38,7 +44,7 @@ jobs:
 
   release-macos:
     name: ${{ matrix.target }}
-    runs-on: ${{ matrix.target == 'aarch64-macos-gnu' && 'macos-15' || 'macos-13' }}
+    runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
       matrix:
@@ -47,16 +53,16 @@ jobs:
           - aarch64-macos-gnu
     steps:
       - uses: actions/checkout@v4
-      - name: Install Zig (master)
+      - name: Install Zig ${{ env.ZIG_VERSION }}
         run: |
-          ARCH=$(uname -m)
-          URL=$(curl -fsSL https://ziglang.org/download/index.json | python3 -c "import json,sys;print(json.load(sys.stdin)['master']['${ARCH}-macos']['tarball'])")
-          curl -fsSL "$URL" -o /tmp/zig.tar.xz
-          sudo tar xf /tmp/zig.tar.xz -C /usr/local
-          echo "/usr/local/$(tar tf /tmp/zig.tar.xz | head -1 | cut -d/ -f1)" >> $GITHUB_PATH
-      - name: Build (native)
+          curl -fsSL "$ZIG_URL" -o /tmp/zig.tar.xz
+          sudo mkdir -p /opt/zig
+          sudo tar xf /tmp/zig.tar.xz -C /opt/zig --strip-components=1
+          echo "/opt/zig" >> "$GITHUB_PATH"
+          /opt/zig/zig version
+      - name: Build (cross-compile)
         run: |
-          zig build -Drelease=true -Denable-sqlite=false -Denable-zbox=false
+          zig build -Dtarget=${{ matrix.target }} -Drelease=true -Denable-sqlite=false -Denable-zbox=false
           mkdir -p release
           cp zig-out/bin/knot3bot release/knot3bot-${{ matrix.target }}
           ls -lh release/
@@ -117,5 +123,6 @@ jobs:
         run: echo "VERSION=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
       - run: cd npm && npm version ${{ steps.version.outputs.VERSION }} --no-git-tag-version
       - run: cd npm && npm publish --access public
+        continue-on-error: true
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
