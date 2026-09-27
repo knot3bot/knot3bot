@@ -28,6 +28,9 @@ jobs:
           echo "/opt/zig" >> "$GITHUB_PATH"
           /opt/zig/zig version
 
+      - name: Install system deps
+        run: sudo apt-get update && sudo apt-get install -y libsqlite3-dev
+
       - name: Build
         run: zig build
 
