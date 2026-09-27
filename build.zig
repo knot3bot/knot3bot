@@ -111,7 +111,7 @@ pub fn build(b: *std.Build) void {
 
     // Config options module for conditional compilation
     // Keep app_version in sync with build.zig.zon .version and npm/package.json.
-    const app_version = "0.4.1";
+    const app_version = "0.4.2";
     const config_options = b.addOptions();
     config_options.addOption(bool, "enable_sqlite", enable_sqlite);
     config_options.addOption([]const u8, "release_version", app_version);
