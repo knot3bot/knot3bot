@@ -18,8 +18,15 @@ trap cleanup EXIT
 
 fail() {
   echo "E2E FAIL: $1"
-  echo "--- bot log ---"
-  cat "$BOT_LOG" 2>/dev/null || true
+  # Emit the bot log as workflow-command annotations — they surface via the
+  # checks API even when raw logs need admin rights.
+  if [ -f "$BOT_LOG" ]; then
+    while IFS= read -r line; do
+      echo "::error::BOTLOG $line"
+    done < "$BOT_LOG"
+  else
+    echo "::error::BOTLOG <missing: server never wrote a log>"
+  fi
   exit 1
 }
 
@@ -40,9 +47,7 @@ for i in $(seq 1 60); do
   sleep 0.5
 done
 if [ "$UP" != "1" ]; then
-  echo "E2E FAIL: server did not become healthy; bot log:"
-  cat "$BOT_LOG"
-  exit 1
+  fail "server did not become healthy within 30s"
 fi
 
 URL="http://127.0.0.1:$PORT/v1/chat/completions"
