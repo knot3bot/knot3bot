@@ -1231,7 +1231,7 @@ pub const Server = struct {
         defer json_buf.deinit(self.allocator);
         try json_buf.appendSlice(self.allocator, "{\"skills\":[");
 
-        var dir = shared.cwdOpenDir(skills_dir, .{}) catch {
+        var dir = shared.cwdOpenDir(skills_dir, .{ .iterate = true }) catch {
             try json_buf.appendSlice(self.allocator, "]}");
             try self.sendJson(conn, 200, try json_buf.toOwnedSlice(self.allocator), request_id);
             return;

@@ -45,7 +45,7 @@ pub const CheckpointManagerTool = struct {
         }
 
         if (std.mem.eql(u8, action, "list")) {
-            var dir = shared.cwdOpenDir(checkpoint_dir, .{}) catch return ToolResult.ok("{\"success\":true,\"checkpoints\":[]}");
+            var dir = shared.cwdOpenDir(checkpoint_dir, .{ .iterate = true }) catch return ToolResult.ok("{\"success\":true,\"checkpoints\":[]}");
             defer dir.close(shared.io());
             var output: std.ArrayList(u8) = .empty;
             defer output.deinit(allocator);

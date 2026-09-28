@@ -106,7 +106,7 @@ pub const ListDirectoryTool = struct {
         const full_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ self.workspace_dir, path });
         defer allocator.free(full_path);
 
-        var dir = shared.context.cwdOpenDir(full_path, .{}) catch {
+        var dir = shared.context.cwdOpenDir(full_path, .{ .iterate = true }) catch {
             return ToolResult.fail("Failed to open directory");
         };
         defer dir.close(shared.context.io());
@@ -202,7 +202,7 @@ pub const GlobTool = struct {
             return ToolResult.fail("Invalid or unsafe pattern");
         };
 
-        var dir = shared.context.cwdOpenDir(self.workspace_dir, .{}) catch {
+        var dir = shared.context.cwdOpenDir(self.workspace_dir, .{ .iterate = true }) catch {
             return ToolResult.fail("Failed to open workspace directory");
         };
         defer dir.close(shared.context.io());

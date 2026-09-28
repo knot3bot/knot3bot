@@ -298,7 +298,7 @@ pub const SkillsListTool = struct {
 
         try output.appendSlice(allocator, "{\"success\":true,\"skills\":[");
 
-        var dir = shared.cwdOpenDir(skill_path, .{}) catch {
+        var dir = shared.cwdOpenDir(skill_path, .{ .iterate = true }) catch {
             try output.appendSlice(allocator, "],\"count\":0}");
             return ToolResult.ok(try output.toOwnedSlice(allocator));
         };
@@ -491,7 +491,7 @@ pub const SkillManagerTool = struct {
         const skill_path = try std.fmt.allocPrint(allocator, "{s}/skills", .{self.skills_dir});
         defer allocator.free(skill_path);
 
-        var dir = shared.cwdOpenDir(skill_path, .{}) catch {
+        var dir = shared.cwdOpenDir(skill_path, .{ .iterate = true }) catch {
             return ToolResult.ok("No skills directory found");
         };
         defer dir.close(shared.io());

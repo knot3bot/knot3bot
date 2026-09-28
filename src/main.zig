@@ -150,7 +150,7 @@ fn setupBuiltinSkills(allocator: std.mem.Allocator, workspace_dir: []const u8) !
         // Check if source directory exists
         shared.context.cwdAccess(src_dir) catch continue;
 
-        var dir = shared.context.cwdOpenDir(src_dir, .{}) catch continue;
+        var dir = shared.context.cwdOpenDir(src_dir, .{ .iterate = true }) catch continue;
         defer dir.close(shared.context.io());
 
         var iter = dir.iterate();
