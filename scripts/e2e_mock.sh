@@ -12,8 +12,8 @@ cd "$(dirname "$0")/.."
 
 PORT="${1:-8123}"
 MOCK_PORT=$((PORT + 1))
-BOT_LOG=$(mktemp)
-cleanup() { kill "${MOCK_PID:-}" "${BOT_PID:-}" 2>/dev/null; rm -f "$BOT_LOG"; }
+BOT_LOG="${E2E_BOT_LOG:-/tmp/knot3bot_e2e_bot.log}"
+cleanup() { kill "${MOCK_PID:-}" "${BOT_PID:-}" 2>/dev/null; }
 trap cleanup EXIT
 
 fail() {

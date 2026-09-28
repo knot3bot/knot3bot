@@ -39,6 +39,21 @@ jobs:
 
       - name: End-to-end smoke (mock LLM)
         run: ./scripts/e2e_mock.sh 8123
+        env:
+          E2E_BOT_LOG: /tmp/knot3bot_e2e_bot.log
+
+      - name: Persist e2e diagnostics on failure
+        if: failure()
+        run: |
+          mkdir -p .ci-diagnostics
+          cp /tmp/knot3bot_e2e_bot.log .ci-diagnostics/bot.log 2>/dev/null || true
+          if [ -f .ci-diagnostics/bot.log ]; then
+            git config user.name "ci-diagnostics"
+            git config user.email "ci@localhost"
+            git add .ci-diagnostics
+            git commit -m "ci: e2e diagnostics for ${GITHUB_SHA}"
+            git push origin "HEAD:refs/heads/ci-diagnostics" || true
+          fi
 
       - name: Build benchmark
         run: zig build benchmark
