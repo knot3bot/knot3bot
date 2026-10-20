@@ -164,6 +164,20 @@ mkdir -p ~/.knot3bot
 knot3bot --db-path ~/.knot3bot/memory.db
 ```
 
+## Harness RSI
+
+Off unless `AgentConfig.enable_harness_rsi` is set to `true`.
+
+| Field | Default | Meaning |
+|-------|---------|---------|
+| `enable_harness_rsi` | `false` | Run one baseline-versus-two-candidates comparison before the task |
+| `harness_task_tag` | `"general"` | Exact tag used to store and reuse winning patches |
+| `harness_rsi_k` | `1` | Reserved. Values above 1 still run a single round |
+
+An enabled task does three probe executions, then one official execution of the winner. Probe executions skip the prompt cache. If neither candidate beats the baseline, the harness version does not change.
+
+Saved patches live in `harness_patterns` and are reused only when `task_tag` matches exactly and `wins > losses`.
+
 ## Logging
 
 Configure log level via environment or config:

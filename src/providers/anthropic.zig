@@ -40,7 +40,7 @@ pub const AnthropicClient = struct {
         _ = self;
     }
 
-    pub fn chat(self: *AnthropicClient, messages: []const AnthropicMessage) Error![]const u8 {
+    pub fn chat(self: *AnthropicClient, messages: []const AnthropicMessage) ![]const u8 {
         const body = try self.buildRequestBody(messages);
         defer self.allocator.free(body);
 
@@ -68,7 +68,7 @@ pub const AnthropicClient = struct {
         return try self.runCurl(argv, body);
     }
 
-    pub fn chatWithTools(self: *AnthropicClient, messages: []const AnthropicMessage, tools: []const ToolDef) Error![]const u8 {
+    pub fn chatWithTools(self: *AnthropicClient, messages: []const AnthropicMessage, tools: []const ToolDef) ![]const u8 {
         const body = try self.buildRequestBodyWithTools(messages, tools);
         defer self.allocator.free(body);
 

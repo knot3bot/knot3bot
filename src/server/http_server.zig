@@ -1001,10 +1001,12 @@ pub const Server = struct {
         var db_healthy = true;
         var provider_healthy = true;
         if (self.db_path) |path| {
-            var test_db = SqliteMemorySystem.init(self.allocator, path) catch {
+            if (SqliteMemorySystem.init(self.allocator, path)) |test_db| {
+                var db = test_db;
+                db.deinit();
+            } else |_| {
                 db_healthy = false;
-            };
-            if (db_healthy) test_db.deinit();
+            }
         }
 
         // Check provider has an API key configured

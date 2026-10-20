@@ -20,27 +20,11 @@ pub const ImageGenerationTool = struct {
         return .{ .ptr = @ptrCast(self), .vtable = &vtable };
     }
 
-    pub fn execute(_: *ImageGenerationTool, allocator: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
-        const prompt = root.getString(args, "prompt") orelse {
+    pub fn execute(_: *ImageGenerationTool, _: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
+        _ = root.getString(args, "prompt") orelse {
             return ToolResult.fail("prompt is required for image generation");
         };
-        const size = root.getString(args, "size") orelse "1024x1024";
-        const style = root.getString(args, "style") orelse "vivid";
-
-        var buf: std.ArrayList(u8) = .empty;
-        defer buf.deinit(allocator);
-
-        try buf.appendSlice(allocator, "{\"success\":true,\"image_url\":null,\"prompt\":\"");
-        try buf.appendSlice(allocator, prompt);
-        const dim = try std.fmt.allocPrint(allocator, "\",\"size\":\"{s}\",\"style\":\"{s}\"", .{ size, style });
-        defer allocator.free(dim);
-        try buf.appendSlice(allocator, dim);
-        try buf.appendSlice(allocator, ",\"message\":\"Image generation requires API integration.\"}");
-
-        return ToolResult{
-            .success = true,
-            .output = try buf.toOwnedSlice(allocator),
-        };
+        return ToolResult.fail("not_available");
     }
 
     pub const vtable = root.ToolVTable(@This());

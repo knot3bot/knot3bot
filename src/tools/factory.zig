@@ -116,41 +116,8 @@ fn addExtendedTools(registry: *ToolRegistry, allocator: std.mem.Allocator, works
         t.* = .{};
         try registry.register(t.tool());
     }
-    {
-        const t = try allocator.create(root.homeassistant_tool.HomeAssistantTool);
-        t.* = .{};
-        try registry.register(t.tool());
-    }
-    {
-        const t = try allocator.create(root.image_generation.ImageGenerationTool);
-        t.* = .{};
-        try registry.register(t.tool());
-    }
-    {
-        const t = try allocator.create(root.send_message_tool.SendMessageTool);
-        t.* = .{};
-        try registry.register(t.tool());
-    }
-    {
-        const t = try allocator.create(root.transcription_tools.TranscriptionTool);
-        t.* = .{};
-        try registry.register(t.tool());
-    }
-    {
-        const t = try allocator.create(root.tts_tool.TtsTool);
-        t.* = .{};
-        try registry.register(t.tool());
-    }
-    {
-        const t = try allocator.create(root.vision_tools.VisionTool);
-        t.* = .{};
-        try registry.register(t.tool());
-    }
-    {
-        const t = try allocator.create(root.vision_tools.ScreenCaptureTool);
-        t.* = .{};
-        try registry.register(t.tool());
-    }
+    // Unimplemented integrations stay out of the model-facing registry:
+    // homeassistant, image_generation, send_message, transcription, tts, vision, screen_capture.
     {
         const t = try allocator.create(root.clarify_tool.ClarifyTool);
         t.* = .{};

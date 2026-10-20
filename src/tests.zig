@@ -42,4 +42,11 @@ test {
     _ = @import("tools/mcp_test.zig");
     _ = @import("tools/shell_test.zig");
     _ = @import("tools/tools_test.zig");
+    _ = @import("stub_honesty_test.zig");
+    _ = @import("agent/harness.zig");
+    _ = @import("agent/harness_propose.zig");
+    _ = @import("agent/harness_probe.zig");
+    _ = @import("agent/harness_compose.zig");
+    _ = @import("agent/harness_session.zig");
+    _ = @import("agent/harness_memory.zig");
 }

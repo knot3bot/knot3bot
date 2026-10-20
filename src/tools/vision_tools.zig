@@ -20,34 +20,17 @@ pub const VisionTool = struct {
         return .{ .ptr = @ptrCast(self), .vtable = &vtable };
     }
 
-    pub fn execute(_: *VisionTool, allocator: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
+    pub fn execute(_: *VisionTool, _: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
         const image_url = root.getString(args, "image_url");
         const image_path = root.getString(args, "image_path");
-        const prompt = root.getString(args, "prompt") orelse {
+        _ = root.getString(args, "prompt") orelse {
             return ToolResult.fail("prompt is required for vision analysis");
         };
 
         if (image_url == null and image_path == null) {
             return ToolResult.fail("Either image_url or image_path is required");
         }
-
-        // Full implementation would:
-        // 1. Fetch image if URL, or read from disk
-        // 2. Encode to base64
-        // 3. Call vision-capable LLM
-        // For now, return placeholder
-        var buf: std.ArrayList(u8) = .empty;
-        defer buf.deinit(allocator);
-
-        try buf.appendSlice(allocator, "{\"success\":true,\"analysis\":\"[Vision analysis requires a multimodal LLM API]");
-        try buf.appendSlice(allocator, "\",\"prompt\":\"");
-        try buf.appendSlice(allocator, prompt);
-        try buf.appendSlice(allocator, "\"}}");
-
-        return ToolResult{
-            .success = true,
-            .output = try buf.toOwnedSlice(allocator),
-        };
+        return ToolResult.fail("not_available");
     }
 
     pub const vtable = root.ToolVTable(@This());
@@ -63,23 +46,11 @@ pub const ScreenCaptureTool = struct {
         return .{ .ptr = @ptrCast(self), .vtable = &vtable };
     }
 
-    pub fn execute(_: *ScreenCaptureTool, allocator: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
-        const prompt = root.getString(args, "prompt") orelse {
+    pub fn execute(_: *ScreenCaptureTool, _: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
+        _ = root.getString(args, "prompt") orelse {
             return ToolResult.fail("prompt is required for screen capture analysis");
         };
-
-        var buf: std.ArrayList(u8) = .empty;
-        defer buf.deinit(allocator);
-
-        try buf.appendSlice(allocator, "{\"success\":true,\"analysis\":\"[Screen capture requires platform API]");
-        try buf.appendSlice(allocator, "\",\"prompt\":\"");
-        try buf.appendSlice(allocator, prompt);
-        try buf.appendSlice(allocator, "\"}}");
-
-        return ToolResult{
-            .success = true,
-            .output = try buf.toOwnedSlice(allocator),
-        };
+        return ToolResult.fail("not_available");
     }
 
     pub const vtable = root.ToolVTable(@This());

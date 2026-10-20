@@ -50,6 +50,18 @@ When conversation history exceeds token budget:
 3. **Summarize**: Use LLM to create summary
 4. **Replace**: Swap full results with summary
 
+### Harness RSI
+
+`AgentConfig.enable_harness_rsi` defaults to `false`. With the switch off, `runWithSteps` keeps the previous control flow, including prompt-cache reads and writes.
+
+With the switch on, k stays 1 even if `harness_rsi_k` is greater than 1. Each task pays for three probe executions (the baseline plus two candidates) and then one official run of the winner. Probe executions set `bypass_prompt_cache`, so they do not read or write the prompt cache. The official run may use the cache.
+
+A candidate replaces the baseline only when pairwise comparison of `error_count` produces a unique winner. Ties and losses leave the harness version unchanged. The winning prompt section is appended to the system prompt, and a non-empty checklist is appended under the heading `Harness checklist:`. `max_retries` retries a failed tool call only.
+
+Cross-task memory is the `harness_patterns` table. `lookup` matches `task_tag` exactly, returns at most two rows, and only rows where `wins > losses`. Callers attach that store to the session; the default agent config does not open a database by itself.
+
+Tools with no external implementation (`homeassistant`, `image_generation`, `send_message`, `tts`, `transcription`, `vision`, `screen_capture`) are not in the default registry. Calling `execute` on them returns `success = false`.
+
 ### Trajectory Recording
 
 Every agent run is logged to JSONL for:

@@ -144,8 +144,8 @@ pub const SkillRegistry = struct {
         var it = self.skills.iterator();
         while (it.next()) |entry| {
             const skill = entry.value_ptr.*;
-            if (std.ascii.indexOfIgnoreCase(skill.name, query) != null or
-                std.ascii.indexOfIgnoreCase(skill.description, query) != null)
+            if (std.ascii.findIgnoreCase(skill.name, query) != null or
+                std.ascii.findIgnoreCase(skill.description, query) != null)
             {
                 results.append(skill) catch continue;
             }
