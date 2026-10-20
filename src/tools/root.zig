@@ -152,7 +152,7 @@ pub fn ToolVTable(comptime T: type) Tool.VTable {
                 if (comptime @hasDecl(T, "deinit")) {
                     const DeinitFn = @TypeOf(T.deinit);
                     const fn_info = @typeInfo(DeinitFn).@"fn";
-                    if (fn_info.params.len == 2) {
+                    if (fn_info.param_types.len == 2) {
                         self.deinit(alloc);
                     } else {
                         self.deinit();

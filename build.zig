@@ -135,7 +135,6 @@ pub fn build(b: *std.Build) void {
         exe.root_module.addCMacro("ENABLE_ZBOX", "0");
     }
 
-
     exe.root_module.link_libc = true;
 
     // libvaxis — professional TUI library
@@ -144,7 +143,6 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
     exe.root_module.addImport("vaxis", vaxis.module("vaxis"));
-
 
     // This declares intent for the executable to be installed into the
     // install prefix when running `zig build` (i.e. when executing the default
@@ -172,11 +170,9 @@ pub fn build(b: *std.Build) void {
     // installation directory rather than directly from within the cache directory.
     run_cmd.step.dependOn(b.getInstallStep());
 
-    // This allows the user to pass arguments to the application in the build
-    // command itself, like this: `zig build run -- arg1 arg2 etc`
-    if (b.args) |args| {
-        run_cmd.addArgs(args);
-    }
+    // Arguments after `--` are forwarded at make time, without rebuilding
+    // the build script. Example: `zig build run -- arg1 arg2`
+    run_cmd.addPassthruArgs();
 
     // Test step — runs zig test directly on each source file with inline tests.
     // Uses direct command invocation (addSystemCommand) to get terminal output,

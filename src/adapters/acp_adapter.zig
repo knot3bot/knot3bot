@@ -38,8 +38,10 @@ pub const ACAdapter = struct {
     cwd: []const u8,
     session_id: ?[]const u8 = null,
     process: ?std.process.Child = null,
-    stdin_writer: ?std.fs.File.Writer = null,
-    stdout_reader: ?std.fs.File.Reader = null,
+    stdin_buf: [4096]u8 = undefined,
+    stdout_buf: [4096]u8 = undefined,
+    stdin_writer: ?std.Io.File.Writer = null,
+    stdout_reader: ?std.Io.File.Reader = null,
     next_id: usize = 0,
     agent: ?*Agent.Agent = null,
 
@@ -49,6 +51,8 @@ pub const ACAdapter = struct {
             .cwd = cwd,
             .session_id = null,
             .process = null,
+            .stdin_buf = undefined,
+            .stdout_buf = undefined,
             .stdin_writer = null,
             .stdout_reader = null,
             .next_id = 0,
@@ -61,25 +65,35 @@ pub const ACAdapter = struct {
     }
 
     pub fn deinit(self: *ACAdapter) void {
+        const io = std.Io.Threaded.global_single_threaded.io();
         if (self.process) |*proc| {
-            proc.kill() catch {};
-            proc.wait() catch {};
+            proc.kill(io);
+            _ = proc.wait(io) catch {};
         }
         self.* = undefined;
     }
 
     /// Connect to the copilot ACP server
     pub fn connect(self: *ACAdapter, command: []const u8, args: []const []const u8) !void {
-        self.process = std.process.Child.init(&[_][]const u8{command}, self.allocator);
-        self.process.?.cwd_dir = std.fs.cwd();
-        self.process.?.argv = args;
+        const io = std.Io.Threaded.global_single_threaded.io();
+        var argv_buf: [64][]const u8 = undefined;
+        if (args.len + 1 > argv_buf.len) return error.TooManyArgs;
+        argv_buf[0] = command;
+        @memcpy(argv_buf[1..][0..args.len], args);
 
-        const stdout = try self.process.?.spawn();
-        self.stdout_reader = stdout.reader();
-        self.stdin_writer = (try self.process.?.spawn()).writer();
+        self.process = try std.process.spawn(io, .{
+            .argv = argv_buf[0 .. args.len + 1],
+            .cwd = .{ .path = self.cwd },
+            .stdin = .pipe,
+            .stdout = .pipe,
+            .stderr = .inherit,
+        });
 
-        // Start the process
-        _ = try self.process.?.spawn();
+        const child = &self.process.?;
+        const stdin_file = child.stdin orelse return error.SpawnError;
+        const stdout_file = child.stdout orelse return error.SpawnError;
+        self.stdin_writer = stdin_file.writer(io, &self.stdin_buf);
+        self.stdout_reader = stdout_file.reader(io, &self.stdout_buf);
     }
 
     /// Send a JSON-RPC request and wait for response
@@ -97,14 +111,16 @@ pub const ACAdapter = struct {
         const request_str = try std.json.stringifyAlloc(self.allocator, std.json.Value{ .object = &request }, .{});
         defer self.allocator.free(request_str);
 
-        try self.stdin_writer.?.print("{s}\n", .{request_str});
+        try self.stdin_writer.?.interface.print("{s}\n", .{request_str});
         try self.stdin_writer.?.flush();
 
         // Wait for response with matching id
         const deadline = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds() + 900; // 15 min timeout
         while (std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds() < deadline) {
-            const line = try self.stdout_reader.?.readUntilDelimiterAlloc(self.allocator, '\n', 1024 * 1024);
+            const line_ref = try self.stdout_reader.?.interface.takeDelimiterExclusive('\n');
+            const line = try self.allocator.dupe(u8, line_ref);
             defer self.allocator.free(line);
+            _ = self.stdout_reader.?.interface.takeByte() catch {};
 
             var parser = std.json.Parser.init(self.allocator, .{});
             defer parser.deinit();

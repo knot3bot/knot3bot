@@ -74,8 +74,8 @@
             .hash = "wasm3-0.5.1-hrMdNS09BQAWSU0TI6mVS8KfW4hxexjFvyOQINgphwKu",
         },
         .vaxis = .{
-            .url = "git+https://github.com/rockorager/libvaxis.git#60a507c25b5335e222eb12320aa7514db684d4a4",
-            .hash = "vaxis-0.6.0-BWNV_HHwCQCy33z_jb0RHLjoinqQ8tgQVZI9z2e5Yqdd",
+            .url = "git+https://github.com/rockorager/libvaxis.git#0a1f55da77dcf99d638cf409b0c439e1542996d5",
+            .hash = "vaxis-0.6.0-BWNV_K4WDQC9AopHvrPY98uwQwG2kATn91rbbjvTX-XR",
         },
     },
     // Specifies the set of files and directories that are included in this package.
