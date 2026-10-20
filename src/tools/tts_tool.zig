@@ -20,28 +20,11 @@ pub const TtsTool = struct {
         return .{ .ptr = @ptrCast(self), .vtable = &vtable };
     }
 
-    pub fn execute(_: *TtsTool, allocator: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
-        const text = root.getString(args, "text") orelse {
+    pub fn execute(_: *TtsTool, _: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
+        _ = root.getString(args, "text") orelse {
             return ToolResult.fail("text is required for TTS");
         };
-        const voice = root.getString(args, "voice") orelse "default";
-        const model = root.getString(args, "model") orelse "elevenlabs";
-        _ = root.getString(args, "language") orelse "en"; // Recognized but requires API integration
-
-        var buf: std.ArrayList(u8) = .empty;
-        defer buf.deinit(allocator);
-
-        try buf.appendSlice(allocator, "{\"success\":true,\"audio_path\":null,\"text\":\"");
-        try buf.appendSlice(allocator, text);
-        const vm = try std.fmt.allocPrint(allocator, "\",\"voice\":\"{s}\",\"model\":\"{s}\"", .{ voice, model });
-        defer allocator.free(vm);
-        try buf.appendSlice(allocator, vm);
-        try buf.appendSlice(allocator, ",\"message\":\"TTS requires API integration.\"}");
-
-        return ToolResult{
-            .success = true,
-            .output = try buf.toOwnedSlice(allocator),
-        };
+        return ToolResult.fail("not_available");
     }
 
     pub const vtable = root.ToolVTable(@This());

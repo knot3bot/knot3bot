@@ -20,31 +20,17 @@ pub const SendMessageTool = struct {
         return .{ .ptr = @ptrCast(self), .vtable = &vtable };
     }
 
-    pub fn execute(_: *SendMessageTool, allocator: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
-        const platform = root.getString(args, "platform") orelse {
+    pub fn execute(_: *SendMessageTool, _: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
+        _ = root.getString(args, "platform") orelse {
             return ToolResult.fail("platform is required (telegram, discord, slack, email)");
         };
-        const recipient = root.getString(args, "recipient") orelse {
+        _ = root.getString(args, "recipient") orelse {
             return ToolResult.fail("recipient is required");
         };
-        const message = root.getString(args, "message") orelse {
+        _ = root.getString(args, "message") orelse {
             return ToolResult.fail("message is required");
         };
-
-        var buf: std.ArrayList(u8) = .empty;
-        defer buf.deinit(allocator);
-
-        try buf.appendSlice(allocator, "{\"success\":true,\"platform\":\"");
-        try buf.appendSlice(allocator, platform);
-        const rm = try std.fmt.allocPrint(allocator, "\",\"recipient\":\"{s}\",\"message\":\"{s}\"", .{ recipient, message });
-        defer allocator.free(rm);
-        try buf.appendSlice(allocator, rm);
-        try buf.appendSlice(allocator, ",\"message_id\":null,\"message\":\"Message sending requires API integration.\"}");
-
-        return ToolResult{
-            .success = true,
-            .output = try buf.toOwnedSlice(allocator),
-        };
+        return ToolResult.fail("not_available");
     }
 
     pub const vtable = root.ToolVTable(@This());

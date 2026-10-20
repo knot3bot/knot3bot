@@ -188,6 +188,7 @@ pub fn build(b: *std.Build) void {
         "src/validation.zig",
         "src/agent/agent_unit_test.zig",
         "src/tools/shell_test.zig",
+        "src/stub_honesty_test.zig",
         "src/architecture_test.zig",
         "src/cli.zig",
         "src/e2e_smoke_test.zig",

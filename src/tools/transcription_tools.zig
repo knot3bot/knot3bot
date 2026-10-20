@@ -20,27 +20,11 @@ pub const TranscriptionTool = struct {
         return .{ .ptr = @ptrCast(self), .vtable = &vtable };
     }
 
-    pub fn execute(_: *TranscriptionTool, allocator: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
-        const audio_path = root.getString(args, "audio_path") orelse {
+    pub fn execute(_: *TranscriptionTool, _: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
+        _ = root.getString(args, "audio_path") orelse {
             return ToolResult.fail("audio_path is required for transcription");
         };
-        const language = root.getString(args, "language") orelse "auto";
-        const model = root.getString(args, "model") orelse "whisper";
-
-        var buf: std.ArrayList(u8) = .empty;
-        defer buf.deinit(allocator);
-
-        try buf.appendSlice(allocator, "{\"success\":true,\"text\":null,\"audio_path\":\"");
-        try buf.appendSlice(allocator, audio_path);
-        const lm = try std.fmt.allocPrint(allocator, "\",\"language\":\"{s}\",\"model\":\"{s}\"", .{ language, model });
-        defer allocator.free(lm);
-        try buf.appendSlice(allocator, lm);
-        try buf.appendSlice(allocator, ",\"message\":\"Transcription requires STT API integration.\"}");
-
-        return ToolResult{
-            .success = true,
-            .output = try buf.toOwnedSlice(allocator),
-        };
+        return ToolResult.fail("not_available");
     }
 
     pub const vtable = root.ToolVTable(@This());

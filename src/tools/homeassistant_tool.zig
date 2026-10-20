@@ -20,22 +20,11 @@ pub const HomeAssistantTool = struct {
         return .{ .ptr = @ptrCast(self), .vtable = &vtable };
     }
 
-    pub fn execute(_: *HomeAssistantTool, allocator: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
-        const action = root.getString(args, "action") orelse {
+    pub fn execute(_: *HomeAssistantTool, _: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
+        _ = root.getString(args, "action") orelse {
             return ToolResult.fail("action is required (call_service, get_state, list_entities, subscribe)");
         };
-
-        var buf: std.ArrayList(u8) = .empty;
-        defer buf.deinit(allocator);
-
-        try buf.appendSlice(allocator, "{\"success\":true,\"action\":\"");
-        try buf.appendSlice(allocator, action);
-        try buf.appendSlice(allocator, "\",\"message\":\"HomeAssistant requires API integration.\"}");
-
-        return ToolResult{
-            .success = true,
-            .output = try buf.toOwnedSlice(allocator),
-        };
+        return ToolResult.fail("not_available");
     }
 
     pub const vtable = root.ToolVTable(@This());

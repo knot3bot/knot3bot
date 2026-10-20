@@ -36,13 +36,8 @@ fn addExtendedTools(registry: *ToolRegistry, allocator: std.mem.Allocator, works
     { const t = try allocator.create(root.approval.ApprovalTool); errdefer allocator.destroy(t); t.* = .{}; try registry.register(t.tool()); }
     { const t = try allocator.create(root.url_safety.UrlSafetyTool); errdefer allocator.destroy(t); t.* = .{}; try registry.register(t.tool()); }
     { const t = try allocator.create(root.session_search.SessionSearchTool); errdefer allocator.destroy(t); t.* = .{}; try registry.register(t.tool()); }
-    { const t = try allocator.create(root.homeassistant_tool.HomeAssistantTool); errdefer allocator.destroy(t); t.* = .{}; try registry.register(t.tool()); }
-    { const t = try allocator.create(root.image_generation.ImageGenerationTool); errdefer allocator.destroy(t); t.* = .{}; try registry.register(t.tool()); }
-    { const t = try allocator.create(root.send_message_tool.SendMessageTool); errdefer allocator.destroy(t); t.* = .{}; try registry.register(t.tool()); }
-    { const t = try allocator.create(root.transcription_tools.TranscriptionTool); errdefer allocator.destroy(t); t.* = .{}; try registry.register(t.tool()); }
-    { const t = try allocator.create(root.tts_tool.TtsTool); errdefer allocator.destroy(t); t.* = .{}; try registry.register(t.tool()); }
-    { const t = try allocator.create(root.vision_tools.VisionTool); errdefer allocator.destroy(t); t.* = .{}; try registry.register(t.tool()); }
-    { const t = try allocator.create(root.vision_tools.ScreenCaptureTool); errdefer allocator.destroy(t); t.* = .{}; try registry.register(t.tool()); }
+    // Unimplemented integrations stay out of the model-facing registry:
+    // homeassistant, image_generation, send_message, transcription, tts, vision, screen_capture.
     { const t = try allocator.create(root.clarify_tool.ClarifyTool); errdefer allocator.destroy(t); t.* = .{}; try registry.register(t.tool()); }
     { const t = try allocator.create(root.env_passthrough.EnvPassthroughTool); errdefer allocator.destroy(t); t.* = .{}; try registry.register(t.tool()); }
 }
