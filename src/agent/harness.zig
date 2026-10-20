@@ -17,6 +17,17 @@ pub const HarnessPatch = struct {
     checklist_append: []const u8, // ≤ 200 bytes
 };
 
+pub const TrajectorySummary = struct {
+    harness_version: u32,
+    task_tag: []const u8,
+    final_answer: []const u8,
+    tool_names: []const []const u8,
+    tool_success: []const bool,
+    error_count: u32,
+};
+
+pub const PairPreference = enum { left, right, tie };
+
 pub fn applyPatch(allocator: std.mem.Allocator, base: Harness, patch: HarnessPatch) !Harness {
     const prompt = try concatBounded(allocator, base.prompt_section, patch.prompt_append);
     errdefer allocator.free(prompt);

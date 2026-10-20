@@ -251,6 +251,8 @@ pub const Agent = struct {
     model_registry: ?*const models.ModelRegistry = null,
     enable_smart_routing: bool = false,
     prompt_cache: ?*prompt_cache.PromptCache = null,
+    /// When true, runWithSteps neither reads nor writes the prompt cache.
+    bypass_prompt_cache: bool = false,
     credential_pool: ?*credential_pool.CredentialPool = null,
     anthropic_client: ?providers.anthropic.AnthropicClient = null,
     skill_self_improve: ?*SkillSelfImprove = null,
@@ -363,8 +365,9 @@ pub const Agent = struct {
             }
         }
 
-        // Prompt cache check
-        if (self.prompt_cache) |cache| {
+        // Prompt cache check. Probe sets bypass_prompt_cache so this get is skipped.
+        if (self.prompt_cache != null and !self.bypass_prompt_cache) {
+            const cache = self.prompt_cache.?;
             if (cache.get(query)) |cached_response| {
                 const cached_result = StepResult{
                     .steps = try self.step_logs.toOwnedSlice(self.allocator),
@@ -553,7 +556,8 @@ pub const Agent = struct {
                     };
                 }
             }
-            if (self.prompt_cache) |cache| {
+            if (self.prompt_cache != null and !self.bypass_prompt_cache) {
+                const cache = self.prompt_cache.?;
                 cache.put(query, result.final_answer) catch |err| {
                     std.log.warn("Failed to cache prompt: {s}", .{@errorName(err)});
                 };
