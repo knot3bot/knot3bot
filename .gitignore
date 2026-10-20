@@ -1,6 +1,9 @@
 # Build artifacts
 zig-out/
 .zig-cache/
+
+# Local git worktrees
+.worktrees/
 *.o
 *.a
 *.so
