@@ -101,8 +101,19 @@ pub const SqliteMemorySystem = struct {
             \\END
         ;
 
+        const create_harness_patterns =
+            \\CREATE TABLE IF NOT EXISTS harness_patterns (
+            \\  task_tag TEXT NOT NULL,
+            \\  patch_json TEXT NOT NULL,
+            \\  wins INTEGER NOT NULL,
+            \\  losses INTEGER NOT NULL,
+            \\  PRIMARY KEY (task_tag, patch_json)
+            \\)
+        ;
+
         try self.exec(create_sessions);
         try self.exec(create_messages);
+        try self.exec(create_harness_patterns);
         try self.exec(create_fts);
         try self.exec(create_fts_insert);
         try self.exec(create_fts_delete);

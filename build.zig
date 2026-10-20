@@ -202,6 +202,12 @@ pub fn build(b: *std.Build) void {
         test_step.dependOn(&test_cmd.step);
     }
 
+    if (enable_sqlite) {
+        const memory_test = b.addSystemCommand(&.{ zig_exe, "test", "src/agent/harness_memory.zig", "-lsqlite3" });
+        memory_test.setCwd(cwd_path);
+        test_step.dependOn(&memory_test.step);
+    }
+
     // Benchmark executable
     const benchmark_exe = b.addExecutable(.{
         .name = "benchmark",
