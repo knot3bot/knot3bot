@@ -8,6 +8,8 @@ const context_compressor = @import("context_compressor.zig");
 const trajectory = @import("trajectory.zig");
 const models = @import("../models.zig");
 const prompt_cache = @import("prompt_cache.zig");
+const harness_mod = @import("harness.zig");
+const harness_session = @import("harness_session.zig");
 const credential_pool = @import("credential_pool.zig");
 const json_mod = @import("../shared/json.zig");
 const ToolRegistry = tools.ToolRegistry;
@@ -210,6 +212,10 @@ pub const AgentConfig = struct {
     enable_skill_self_improve: bool = false,
     skill_self_improve_interval: u32 = 15, // Tool calls between checkpoints
     skill_self_improve: ?*SkillSelfImprove = null,
+    /// Off by default. One comparison round, even when harness_rsi_k is greater than 1.
+    enable_harness_rsi: bool = false,
+    harness_task_tag: []const u8 = "general",
+    harness_rsi_k: u8 = 1,
 };
 
 pub const LLMResult = struct {
@@ -253,6 +259,9 @@ pub const Agent = struct {
     prompt_cache: ?*prompt_cache.PromptCache = null,
     /// When true, runWithSteps neither reads nor writes the prompt cache.
     bypass_prompt_cache: bool = false,
+    inside_harness_exec: bool = false,
+    harness_max_retries: u8 = 0,
+    harness_base_prompt: ?[]const u8 = null,
     credential_pool: ?*credential_pool.CredentialPool = null,
     anthropic_client: ?providers.anthropic.AnthropicClient = null,
     skill_self_improve: ?*SkillSelfImprove = null,
@@ -345,12 +354,16 @@ pub const Agent = struct {
 
         if (self.client) |*c| c.deinit();
         if (self.anthropic_client) |*ac| ac.deinit();
+        if (self.harness_base_prompt) |prompt| self.allocator.free(prompt);
         // Poison — catch use-after-free in Debug/ReleaseSafe
         self.* = undefined;
     }
 
     /// Run agent with query and return detailed step-by-step result
     pub fn runWithSteps(self: *Agent, query: []const u8) !StepResult {
+        if (self.config.enable_harness_rsi and !self.inside_harness_exec) {
+            return self.runHarnessComparison(query);
+        }
         self.step_logs.clearRetainingCapacity();
         self.usage = UsageStats{};
 
@@ -686,29 +699,132 @@ pub const Agent = struct {
         }
         return "Max iterations reached";
     }
-    /// Execute tool and return result or null on error
-    fn executeToolWithError(self: *Agent, tool_name: []const u8, arguments: []const u8) ?[]const u8 {
-        const result = self.registry.call(self.allocator, tool_name, arguments) catch |err| {
-            self.usage.errors += 1;
-            if (self.config.verbose) {
-                std.debug.print("[Tool error: {s} - {}]\n", .{ tool_name, err });
-            }
-            return null;
-        };
-
-        if (!result.success) {
-            self.usage.errors += 1;
-            if (self.config.verbose) {
-                std.debug.print("[Tool failed: {s} - {s}]\n", .{ tool_name, result.error_msg orelse "unknown" });
-            }
+    fn runHarnessComparison(self: *Agent, query: []const u8) !StepResult {
+        var failing: []const []const u8 = &.{};
+        var failing_allocator: ?std.mem.Allocator = null;
+        if (self.skill_self_improve) |si| {
+            failing = try si.history.getFailingTools(1, 0);
+            failing_allocator = si.allocator;
         }
-        // Handle empty output case
-        if (result.output.len == 0) return "";
+        defer if (failing_allocator) |a| a.free(failing);
 
-        // Allocate fresh memory and copy byte-by-byte to avoid aliasing issues
-        const copy_result = self.allocator.alloc(u8, result.output.len) catch return null;
-        for (result.output, 0..) |byte, i| copy_result[i] = byte;
-        return copy_result;
+        const baseline = harness_mod.Harness{
+            .version = 1,
+            .parent = null,
+            .prompt_section = "",
+            .tool_order = &.{},
+            .max_retries = 0,
+            .checklist = "",
+        };
+        var gate = HarnessGate{ .agent = self };
+        const out = try harness_session.runSession(
+            self.allocator,
+            .{
+                .enable_harness_rsi = true,
+                .task_tag = self.config.harness_task_tag,
+                .k = self.config.harness_rsi_k,
+            },
+            baseline,
+            query,
+            failing,
+            null,
+            harnessTaskExec,
+            harnessJudge,
+            @ptrCast(&gate),
+        );
+        harness_session.freeSession(self.allocator, out);
+        return gate.official orelse error.HarnessRunMissing;
+    }
+
+    fn installHarness(self: *Agent, h: harness_mod.Harness) !void {
+        if (self.harness_base_prompt == null) {
+            const existing = if (self.messages.items.len > 0 and self.messages.items[0].role == .system)
+                self.messages.items[0].content
+            else
+                "";
+            self.harness_base_prompt = try self.allocator.dupe(u8, existing);
+        }
+        const base = self.harness_base_prompt.?;
+        var buf: std.ArrayList(u8) = .empty;
+        errdefer buf.deinit(self.allocator);
+        try buf.appendSlice(self.allocator, base);
+        if (h.prompt_section.len > 0) {
+            if (buf.items.len > 0) try buf.append(self.allocator, '\n');
+            try buf.appendSlice(self.allocator, h.prompt_section);
+        }
+        if (h.checklist.len > 0) {
+            if (buf.items.len > 0) try buf.append(self.allocator, '\n');
+            try buf.appendSlice(self.allocator, "Harness checklist:\n");
+            try buf.appendSlice(self.allocator, h.checklist);
+        }
+        const text = try buf.toOwnedSlice(self.allocator);
+        if (self.messages.items.len > 0 and self.messages.items[0].role == .system) {
+            self.allocator.free(self.messages.items[0].content);
+            self.messages.items[0].content = text;
+            return;
+        }
+        if (text.len == 0) {
+            self.allocator.free(text);
+            return;
+        }
+        try self.messages.insert(self.allocator, 0, .{ .role = .system, .content = text });
+    }
+
+    fn truncateMessages(self: *Agent, keep: usize) void {
+        while (self.messages.items.len > keep) {
+            const msg = self.messages.items[self.messages.items.len - 1];
+            self.allocator.free(msg.content);
+            _ = self.messages.pop();
+        }
+    }
+
+    fn freeStepResult(self: *Agent, result: StepResult) void {
+        for (result.steps) |*step| {
+            self.allocator.free(step.thought);
+            if (step.action) |a| self.allocator.free(a);
+            if (step.action_input) |ai| self.allocator.free(ai);
+            if (step.observation) |o| self.allocator.free(o);
+            if (step.result) |r| self.allocator.free(r);
+            if (step.error_msg) |e| self.allocator.free(e);
+        }
+        self.allocator.free(result.steps);
+        self.allocator.free(result.final_answer);
+        if (result.error_msg) |e| self.allocator.free(e);
+    }
+
+    /// Execute tool and return result or null on error.
+    /// harness_max_retries retries a failed call only. Successful calls are not repeated.
+    fn executeToolWithError(self: *Agent, tool_name: []const u8, arguments: []const u8) ?[]const u8 {
+        var attempt: u8 = 0;
+        while (true) {
+            const result = self.registry.call(self.allocator, tool_name, arguments) catch |err| {
+                self.usage.errors += 1;
+                if (self.config.verbose) {
+                    std.debug.print("[Tool error: {s} - {}]\n", .{ tool_name, err });
+                }
+                if (attempt < self.harness_max_retries) {
+                    attempt += 1;
+                    continue;
+                }
+                return null;
+            };
+
+            if (!result.success) {
+                self.usage.errors += 1;
+                if (self.config.verbose) {
+                    std.debug.print("[Tool failed: {s} - {s}]\n", .{ tool_name, result.error_msg orelse "unknown" });
+                }
+                if (attempt < self.harness_max_retries) {
+                    attempt += 1;
+                    continue;
+                }
+            }
+            if (result.output.len == 0) return "";
+
+            const copy_result = self.allocator.alloc(u8, result.output.len) catch return null;
+            for (result.output, 0..) |byte, i| copy_result[i] = byte;
+            return copy_result;
+        }
     }
 
 
@@ -1088,6 +1204,50 @@ pub const Agent = struct {
         try self.messages.append(self.allocator, .{ .role = role, .content = content_copy });
     }
 };
+
+const HarnessGate = struct {
+    agent: *Agent,
+    calls: usize = 0,
+    official: ?StepResult = null,
+};
+
+fn harnessTaskExec(_: std.mem.Allocator, h: harness_mod.Harness, task: []const u8, ctx: *anyopaque) anyerror!harness_mod.TrajectorySummary {
+    const gate: *HarnessGate = @ptrCast(@alignCast(ctx));
+    const agent = gate.agent;
+    gate.calls += 1;
+    const official = gate.calls > 3;
+    agent.inside_harness_exec = true;
+    defer agent.inside_harness_exec = false;
+    agent.bypass_prompt_cache = !official;
+    defer agent.bypass_prompt_cache = false;
+    agent.harness_max_retries = if (official) h.max_retries else 0;
+    defer agent.harness_max_retries = 0;
+
+    try agent.installHarness(h);
+    const mark = agent.messages.items.len;
+    const step = try agent.runWithSteps(task);
+    const errors = step.usage.errors;
+    if (!official) {
+        agent.freeStepResult(step);
+        agent.truncateMessages(mark);
+    } else {
+        gate.official = step;
+    }
+    return .{
+        .harness_version = h.version,
+        .task_tag = agent.config.harness_task_tag,
+        .final_answer = "",
+        .tool_names = &.{},
+        .tool_success = &.{},
+        .error_count = errors,
+    };
+}
+
+fn harnessJudge(_: std.mem.Allocator, _: []const u8, left: harness_mod.TrajectorySummary, right: harness_mod.TrajectorySummary, _: *anyopaque) anyerror!harness_mod.PairPreference {
+    if (left.error_count < right.error_count) return .left;
+    if (right.error_count < left.error_count) return .right;
+    return .tie;
+}
 
 pub fn createDefaultSystemPrompt(allocator: std.mem.Allocator, registry: *const ToolRegistry) ![]const u8 {
     _ = registry;

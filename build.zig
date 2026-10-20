@@ -193,6 +193,7 @@ pub fn build(b: *std.Build) void {
         "src/agent/harness_propose.zig",
         "src/agent/harness_probe.zig",
         "src/agent/harness_compose.zig",
+        "src/agent/harness_session.zig",
         "src/architecture_test.zig",
         "src/cli.zig",
         "src/e2e_smoke_test.zig",
