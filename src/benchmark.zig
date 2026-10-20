@@ -1,6 +1,15 @@
 //! Performance benchmarks
 //! Run with: zig build benchmark
 const std = @import("std");
+
+var g_threaded: ?std.Io.Threaded = null;
+
+/// Monotonic nanosecond timestamp for benchmark deltas.
+fn nowNs() u64 {
+    if (g_threaded == null) g_threaded = std.Io.Threaded.init(std.heap.page_allocator, .{});
+    return @intCast(std.Io.Clock.Timestamp.now(g_threaded.?.io(), .awake).raw.toNanoseconds());
+}
+
 const Agent = @import("agent/agent.zig");
 const root = @import("tools/root.zig");
 const ToolResult = root.ToolResult;
@@ -12,7 +21,7 @@ const ToolRegistry = root.ToolRegistry;
 
 fn benchmarkTokenBudget() !void {
     var budget = Agent.TokenBudget.init(128000);
-    var timer = try std.time.Timer.start();
+    const start_ns = nowNs();
 
     var i: usize = 0;
     while (i < 10000) : (i += 1) {
@@ -20,7 +29,7 @@ fn benchmarkTokenBudget() !void {
         _ = budget.hasRemaining();
     }
 
-    const elapsed = timer.read();
+    const elapsed = nowNs() - start_ns;
     std.debug.print("TokenBudget: 10000 iterations in {d}ns ({d}ns/op)\n", .{
         elapsed,
         elapsed / 10000,
@@ -28,7 +37,7 @@ fn benchmarkTokenBudget() !void {
 }
 
 fn benchmarkIterationBudget() !void {
-    var timer = try std.time.Timer.start();
+    const start_ns = nowNs();
     var total: u64 = 0;
 
     // Use nested loops to avoid integer overflow
@@ -44,7 +53,7 @@ fn benchmarkIterationBudget() !void {
         }
     }
 
-    const elapsed = timer.read();
+    const elapsed = nowNs() - start_ns;
     std.debug.print("IterationBudget: 1000000 ops in {d}ms ({d}ns/op)\n", .{
         elapsed / std.time.ns_per_ms,
         elapsed / total,
@@ -53,7 +62,7 @@ fn benchmarkIterationBudget() !void {
 
 fn benchmarkUsageStats() !void {
     var stats = Agent.UsageStats{};
-    var timer = try std.time.Timer.start();
+    const start_ns = nowNs();
 
     var i: usize = 0;
     while (i < 10000) : (i += 1) {
@@ -61,7 +70,7 @@ fn benchmarkUsageStats() !void {
         _ = stats.total_tokens;
     }
 
-    const elapsed = timer.read();
+    const elapsed = nowNs() - start_ns;
     std.debug.print("UsageStats: 10000 updates in {d}ns ({d}ns/op)\n", .{
         elapsed,
         elapsed / 10000,
@@ -69,7 +78,7 @@ fn benchmarkUsageStats() !void {
 }
 
 fn benchmarkReActStepJSON() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
@@ -83,7 +92,7 @@ fn benchmarkReActStepJSON() !void {
         .duration_ms = 100,
     };
 
-    var timer = try std.time.Timer.start();
+    const start_ns = nowNs();
 
     var i: usize = 0;
     while (i < 1000) : (i += 1) {
@@ -91,7 +100,7 @@ fn benchmarkReActStepJSON() !void {
         allocator.free(json);
     }
 
-    const elapsed = timer.read();
+    const elapsed = nowNs() - start_ns;
     std.debug.print("ReActStep.toJSON: 1000 serializations in {d}ms ({d}us/op)\n", .{
         elapsed / std.time.ns_per_ms,
         elapsed / 1000 / std.time.ns_per_us,
@@ -103,7 +112,7 @@ fn benchmarkReActStepJSON() !void {
 // ============================================================================
 
 fn benchmarkToolResultOK() !void {
-    var timer = try std.time.Timer.start();
+    const start_ns = nowNs();
 
     var i: usize = 0;
     while (i < 100000) : (i += 1) {
@@ -111,7 +120,7 @@ fn benchmarkToolResultOK() !void {
         std.debug.assert(result.success);
     }
 
-    const elapsed = timer.read();
+    const elapsed = nowNs() - start_ns;
     std.debug.print("ToolResult.ok: 100000 calls in {d}ms ({d}ns/op)\n", .{
         elapsed / std.time.ns_per_ms,
         elapsed / 100000,
@@ -119,7 +128,7 @@ fn benchmarkToolResultOK() !void {
 }
 
 fn benchmarkToolResultFail() !void {
-    var timer = try std.time.Timer.start();
+    const start_ns = nowNs();
 
     var i: usize = 0;
     while (i < 100000) : (i += 1) {
@@ -127,7 +136,7 @@ fn benchmarkToolResultFail() !void {
         std.debug.assert(!result.success);
     }
 
-    const elapsed = timer.read();
+    const elapsed = nowNs() - start_ns;
     std.debug.print("ToolResult.fail: 100000 calls in {d}ms ({d}ns/op)\n", .{
         elapsed / std.time.ns_per_ms,
         elapsed / 100000,
@@ -135,12 +144,12 @@ fn benchmarkToolResultFail() !void {
 }
 
 fn benchmarkJSONParsing() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     const json_str = "{\"name\":\"test\",\"value\":42,\"enabled\":true}";
-    var timer = try std.time.Timer.start();
+    const start_ns = nowNs();
 
     var i: usize = 0;
     while (i < 10000) : (i += 1) {
@@ -148,7 +157,7 @@ fn benchmarkJSONParsing() !void {
         parsed.deinit();
     }
 
-    const elapsed = timer.read();
+    const elapsed = nowNs() - start_ns;
     std.debug.print("JSON parsing: 10000 parses in {d}ms ({d}us/op)\n", .{
         elapsed / std.time.ns_per_ms,
         elapsed / 10000 / std.time.ns_per_us,
@@ -156,19 +165,19 @@ fn benchmarkJSONParsing() !void {
 }
 
 fn benchmarkToolRegistryInit() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var timer = try std.time.Timer.start();
+    const start_ns = nowNs();
 
     var i: usize = 0;
     while (i < 1000) : (i += 1) {
-        var registry = ToolRegistry.init(allocator);
+        var registry = try ToolRegistry.init(allocator);
         registry.deinit();
     }
 
-    const elapsed = timer.read();
+    const elapsed = nowNs() - start_ns;
     std.debug.print("ToolRegistry init: 1000 allocations in {d}ms ({d}us/op)\n", .{
         elapsed / std.time.ns_per_ms,
         elapsed / 1000 / std.time.ns_per_us,
@@ -180,12 +189,12 @@ fn benchmarkToolRegistryInit() !void {
 // ============================================================================
 
 fn benchmarkStringDuplication() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
     const source = "This is a test string for benchmarking purposes";
-    var timer = try std.time.Timer.start();
+    const start_ns = nowNs();
 
     var i: usize = 0;
     while (i < 10000) : (i += 1) {
@@ -193,7 +202,7 @@ fn benchmarkStringDuplication() !void {
         allocator.free(dup);
     }
 
-    const elapsed = timer.read();
+    const elapsed = nowNs() - start_ns;
     std.debug.print("String duplication: 10000 in {d}ms ({d}us/op)\n", .{
         elapsed / std.time.ns_per_ms,
         elapsed / 10000 / std.time.ns_per_us,
@@ -201,11 +210,11 @@ fn benchmarkStringDuplication() !void {
 }
 
 fn benchmarkArenaAllocation() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    var gpa = std.heap.DebugAllocator(.{}){};
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    var timer = try std.time.Timer.start();
+    const start_ns = nowNs();
 
     var i: usize = 0;
     while (i < 10000) : (i += 1) {
@@ -219,7 +228,7 @@ fn benchmarkArenaAllocation() !void {
         arena.deinit();
     }
 
-    const elapsed = timer.read();
+    const elapsed = nowNs() - start_ns;
     std.debug.print("Arena allocation: 10000 in {d}ms ({d}us/op)\n", .{
         elapsed / std.time.ns_per_ms,
         elapsed / 10000 / std.time.ns_per_us,

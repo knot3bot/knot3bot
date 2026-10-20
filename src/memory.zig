@@ -47,14 +47,15 @@ pub const MemorySystem = struct {
 
     /// Create a new session
     pub fn createSession(self: *MemorySystem, session_id: []const u8) !void {
+        if (self.sessions.contains(session_id)) return;
         const id_copy = try self.allocator.dupe(u8, session_id);
         errdefer self.allocator.free(id_copy);
 
         const session = Session{
             .id = id_copy,
             .messages = .empty,
-            .created_at = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds(),
-            .updated_at = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds(),
+            .created_at = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toMilliseconds(),
+            .updated_at = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toMilliseconds(),
         };
 
         try self.sessions.put(id_copy, session);
@@ -78,10 +79,10 @@ pub const MemorySystem = struct {
         try session.messages.append(self.allocator, .{
             .role = role_copy,
             .content = content_copy,
-            .timestamp = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds(),
+            .timestamp = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toMilliseconds(),
         });
 
-        session.updated_at = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds();
+        session.updated_at = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toMilliseconds();
     }
 
     /// Get session history as JSON
@@ -195,7 +196,7 @@ pub const MemorySystem = struct {
 
             if (match_count > 0) {
                 const id_copy = try allocator.dupe(u8, session.id);
-                const last_copy = if (last_msg) |lm| try allocator.dupe(u8, lm) else "".*;
+                const last_copy: []const u8 = if (last_msg) |lm| try allocator.dupe(u8, lm) else "";
                 const score = @as(f32, @floatFromInt(match_count)) / @as(f32, @floatFromInt(session.messages.items.len));
                 try results.append(allocator, .{
                     .session_id = id_copy,
@@ -207,7 +208,7 @@ pub const MemorySystem = struct {
         }
 
         // Sort by relevance score descending
-        std.sort.sort(SearchResult, results.items, {}, struct {
+        std.mem.sort(SearchResult, results.items, {}, struct {
             fn lessThan(_: void, a: SearchResult, b: SearchResult) bool {
                 return a.relevance_score > b.relevance_score;
             }
@@ -243,7 +244,7 @@ pub const MemorySystem = struct {
         }
 
         // Sort by updated_at descending
-        std.sort.sort(struct { id: []const u8, updated: i64, last_msg: []const u8 }, sessions_list.items, {}, struct {
+        std.mem.sort(@TypeOf(sessions_list.items[0]), sessions_list.items, {}, struct {
             fn lessThan(_: void, a: @TypeOf(sessions_list.items[0]), b: @TypeOf(sessions_list.items[0])) bool {
                 return a.updated > b.updated;
             }
@@ -288,18 +289,24 @@ pub const MemorySystem = struct {
         try output.appendSlice(allocator, "{\"results\":[");
         for (results, 0..) |r, i| {
             if (i > 0) try output.appendSlice(allocator, ",");
+            const score_str = try std.fmt.allocPrint(allocator, "{d}", .{r.relevance_score});
+            defer allocator.free(score_str);
+            const match_str = try std.fmt.allocPrint(allocator, "{}", .{r.match_count});
+            defer allocator.free(match_str);
             try output.appendSlice(allocator, "{\"session_id\":\"");
             try output.appendSlice(allocator, r.session_id);
             try output.appendSlice(allocator, "\",\"relevance_score\":");
-            try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{d}", .{r.relevance_score}));
+            try output.appendSlice(allocator, score_str);
             try output.appendSlice(allocator, ",\"match_count\":");
-            try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{}", .{r.match_count}));
+            try output.appendSlice(allocator, match_str);
             try output.appendSlice(allocator, ",\"last_message\":\"");
             try output.appendSlice(allocator, r.last_message);
             try output.appendSlice(allocator, "\"}");
         }
+        const count_str = try std.fmt.allocPrint(allocator, "{}", .{results.len});
+        defer allocator.free(count_str);
         try output.appendSlice(allocator, "],\"count\":");
-        try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{}", .{results.len}));
+        try output.appendSlice(allocator, count_str);
         try output.appendSlice(allocator, "}");
 
         return try output.toOwnedSlice(allocator);
@@ -376,8 +383,16 @@ pub const MemoryBackend = struct {
 
     pub fn deinit(self: *MemoryBackend) void {
         switch (self.data) {
-            .in_memory => |ms| ms.deinit(),
-            .sqlite => |sqlite| sqlite.deinit(),
+            .in_memory => |ms| {
+                const allocator = ms.allocator;
+                ms.deinit();
+                allocator.destroy(ms);
+            },
+            .sqlite => |sqlite| {
+                const allocator = sqlite.allocator;
+                sqlite.deinit();
+                allocator.destroy(sqlite);
+            },
             .openviking => {},
         }
     }
@@ -414,6 +429,13 @@ pub const MemoryBackend = struct {
                 return result;
             },
             .openviking => return error.NotImplemented,
+        }
+    }
+
+    pub fn search(self: *MemoryBackend, allocator: std.mem.Allocator, query: []const u8) ![]MemorySystem.SearchResult {
+        switch (self.data) {
+            .in_memory => |ms| return ms.search(allocator, query),
+            else => return error.NotSupported,
         }
     }
 

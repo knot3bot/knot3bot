@@ -10,7 +10,7 @@ RUN apk add --no-cache ca-certificates curl tzdata
 # Create non-root user
 RUN addgroup -S knot3bot && adduser -S knot3bot -G knot3bot
 
-COPY zig-out/bin/knot3bot /usr/local/bin/knot3bot
+COPY docker/knot3bot /usr/local/bin/knot3bot
 COPY ui/ /app/ui/
 
 # Ensure the app directory is owned by the non-root user

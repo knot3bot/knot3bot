@@ -60,8 +60,8 @@ pub fn build(b: *std.Build) void {
         vt,
     };
     var examples: std.EnumMap(Example, *std.Build.Module) = .init(.{});
-    inline for (std.meta.fields(Example)) |field| {
-        const example: Example = @enumFromInt(field.value);
+    inline for (@typeInfo(Example).@"enum".field_names) |field_name| {
+        const example: Example = @field(Example, field_name);
         examples.put(
             example,
             b.createModule(.{
@@ -104,9 +104,6 @@ pub fn build(b: *std.Build) void {
         }),
     });
     const bench_run = b.addRunArtifact(bench);
-    if (b.args) |args| {
-        bench_run.addArgs(args);
-    }
     bench_step.dependOn(&bench_run.step);
 
     // Tests

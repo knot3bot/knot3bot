@@ -3,9 +3,9 @@ const shared = @import("../shared/root.zig");
 
 /// Chat message structure
 pub const ChatMessage = struct {
-role: []const u8,
-content: []const u8,
-name: ?[]const u8 = null,
+    role: []const u8,
+    content: []const u8,
+    name: ?[]const u8 = null,
     tool_call_id: ?[]const u8 = null,
     tool_calls_json: ?[]const u8 = null,
 };
@@ -26,19 +26,20 @@ pub const ToolDef = struct {
 /// OpenAI-compatible Chat Completion Request
 pub const ChatRequest = struct {
     model: []const u8,
-    messages: []ChatMessage,
+    messages: []const ChatMessage,
     temperature: ?f32 = null,
     max_tokens: ?u32 = null,
     top_p: ?f32 = null,
     stream: bool = false,
     stop: ?[]const u8 = null,
-    tools: ?[]ToolDef = null,
+    tools: ?[]const ToolDef = null,
     tool_choice: ?[]const u8 = null,
 
     pub fn toJson(self: *const ChatRequest, allocator: std.mem.Allocator) ![]u8 {
         var json: std.ArrayList(u8) = .empty;
         defer json.deinit(allocator);
-        const writer = json.writer(allocator);
+        var allocating = std.Io.Writer.Allocating.fromArrayList(allocator, &json);
+        const writer = &allocating.writer;
 
         try writer.print("{{\"model\":\"{s}\",\"messages\":[", .{self.model});
 
@@ -101,6 +102,7 @@ pub const ChatRequest = struct {
         }
 
         try writer.writeAll("}");
+        json = allocating.toArrayList();
         return try json.toOwnedSlice(allocator);
     }
 };
@@ -111,20 +113,20 @@ pub const ChatResponse = struct {
     object: []const u8,
     created: u64,
     model: []const u8,
-    choices: []Choice,
+    choices: []const Choice,
     usage: ?Usage = null,
 
     pub const Choice = struct {
         index: u32,
-        message: ?ChatMessage,
-        delta: ?Delta,
-        finish_reason: ?[]const u8,
-        tool_calls: ?[]ToolCall = null,
+        message: ?ChatMessage = null,
+        delta: ?Delta = null,
+        finish_reason: ?[]const u8 = null,
+        tool_calls: ?[]const ToolCall = null,
 
         pub const Delta = struct {
             role: ?[]const u8 = null,
             content: ?[]const u8 = null,
-            tool_calls: ?[]ToolCall = null,
+            tool_calls: ?[]const ToolCall = null,
         };
     };
 
@@ -149,10 +151,12 @@ pub const ChatResponse = struct {
     pub fn getContent(self: *const ChatResponse) ?[]const u8 {
         if (self.choices.len > 0) {
             if (self.choices[0].message) |msg| {
-                return msg.content;
+                if (msg.content.len > 0) return msg.content;
             }
             if (self.choices[0].delta) |delta| {
-                return delta.content;
+                if (delta.content) |content| {
+                    if (content.len > 0) return content;
+                }
             }
         }
         return null;
@@ -223,7 +227,6 @@ pub const Provider = enum {
             .tencent, .tencent_plan => "hunyuan-lite",
         };
     }
-
 
     pub fn name(self: Provider) []const u8 {
         return switch (self) {
@@ -342,10 +345,27 @@ pub const LLMClient = struct {
             .allocator = allocator,
             .provider = provider,
             .api_key = api_key,
-            .base_url = provider.baseUrl(),
+            .base_url = resolveBaseUrl(provider),
             .model = actual_model,
             .timeout_seconds = 120,
         };
+    }
+
+    /// Provider base URL, overridable via `{PROVIDER}_BASE_URL` (e.g.
+    /// `OPENAI_BASE_URL`) — the standard OpenAI SDK convention, also used to
+    /// point the stack at a local mock for end-to-end testing. The override
+    /// references the process-lifetime environ map, so no ownership is taken.
+    pub fn resolveBaseUrl(provider: Provider) []const u8 {
+        var name_buf: [64]u8 = undefined;
+        var upper_buf: [32]u8 = undefined;
+        const iname = provider.internalName();
+        if (iname.len + "_BASE_URL".len > name_buf.len or iname.len > upper_buf.len) return provider.baseUrl();
+        for (upper_buf[0..iname.len], 0..) |*b, i| b.* = std.ascii.toUpper(iname[i]);
+        const env_key = std.fmt.bufPrint(&name_buf, "{s}_BASE_URL", .{upper_buf[0..iname.len]}) catch return provider.baseUrl();
+        if (shared.context.getenv(env_key)) |override| {
+            if (override.len > 0) return override;
+        }
+        return provider.baseUrl();
     }
 
     pub fn deinit(self: *LLMClient) void {
@@ -392,10 +412,10 @@ pub const LLMClient = struct {
         return body.toOwnedSlice(self.allocator);
     }
 
-    fn extractContent(self: *LLMClient, response_body: []const u8) ![]const u8 {
+    pub fn extractContent(self: *LLMClient, response_body: []const u8) ![]const u8 {
         // Try JSON parse
         var parsed = std.json.parseFromSlice(std.json.Value, self.allocator, response_body, .{}) catch |err| {
-            std.log.err("LLM JSON parse failed: {s}, body head: {s}", .{ @errorName(err), if (response_body.len > 200) response_body[0..200] else response_body });
+            std.log.warn("LLM JSON parse failed: {s}, body head: {s}", .{ @errorName(err), if (response_body.len > 200) response_body[0..200] else response_body });
             return try self.allocator.dupe(u8, "服务暂时不可用，请稍后再试");
         };
         defer parsed.deinit();
@@ -403,7 +423,7 @@ pub const LLMClient = struct {
         // Check for error field
         if (parsed.value.object.get("error")) |err_val| {
             const msg = if (err_val.object.get("message")) |m| m.string else "unknown error";
-            std.log.err("LLM API error: {s}", .{msg});
+            std.log.warn("LLM API error: {s}", .{msg});
             return try self.allocator.dupe(u8, "服务暂时不可用，请稍后再试");
         }
 
@@ -660,8 +680,10 @@ pub const LLMClient = struct {
 
         const result = std.process.run(self.allocator, shared.context.io(), .{
             .argv = argv,
+            .stdout_limit = .limited(16 * 1024 * 1024),
+            .stderr_limit = .limited(64 * 1024),
         }) catch {
-                    return error.CurlSpawnError;
+            return error.CurlSpawnError;
         };
         defer self.allocator.free(result.stdout);
         defer self.allocator.free(result.stderr);
@@ -783,8 +805,10 @@ pub const LLMClient = struct {
 
         const result = std.process.run(self.allocator, shared.context.io(), .{
             .argv = argv,
+            .stdout_limit = .limited(16 * 1024 * 1024),
+            .stderr_limit = .limited(64 * 1024),
         }) catch {
-                    return error.CurlSpawnError;
+            return error.CurlSpawnError;
         };
         defer self.allocator.free(result.stdout);
         defer self.allocator.free(result.stderr);
@@ -970,7 +994,7 @@ fn cleanupAuthFile(allocator: std.mem.Allocator, path: []const u8) void {
 
 test "Provider base URL" {
     try std.testing.expectEqualStrings("https://api.kimi.com/coding/v1", Provider.kimi.baseUrl());
-    try std.testing.expectEqualStrings("https://api.minimax.chat/v1", Provider.minimax.baseUrl());
+    try std.testing.expectEqualStrings("https://api.minimaxi.com/v1", Provider.minimax.baseUrl());
     try std.testing.expectEqualStrings("https://api.zplus.ai/v1", Provider.zai.baseUrl());
     try std.testing.expectEqualStrings("https://dashscope.aliyuncs.com/compatible-mode/v1", Provider.bailian.baseUrl());
     try std.testing.expectEqualStrings("https://ark.cn-beijing.volces.com/api/v3", Provider.volcano.baseUrl());
@@ -979,7 +1003,7 @@ test "Provider base URL" {
 test "Provider from string" {
     try std.testing.expectEqual(Provider.kimi, Provider.fromStr("kimi").?);
     try std.testing.expectEqual(Provider.minimax, Provider.fromStr("minimax").?);
-    try std.testing.expectEqual(Provider.bailian, Provider.fromStr("qwen-plus").?);
+    try std.testing.expectEqual(Provider.bailian, Provider.fromStr("qwen").?);
     try std.testing.expectEqual(Provider.volcano, Provider.fromStr("doubao").?);
 }
 
@@ -993,12 +1017,12 @@ test "LLMClient initialization" {
 
 test "ChatRequest toJson" {
     const allocator = std.testing.allocator;
-    const messages = &[_]ChatMessage{
+    var messages = [_]ChatMessage{
         .{ .role = "user", .content = "Hello" },
     };
     const req = ChatRequest{
         .model = "gpt-4",
-        .messages = messages,
+        .messages = &messages,
         .temperature = 0.7,
     };
     const json = try req.toJson(allocator);

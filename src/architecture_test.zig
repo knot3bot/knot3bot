@@ -11,8 +11,13 @@ const JsonBuilder = struct {
     pub fn init(allocator: std.mem.Allocator) !@This() {
         return .{ .allocator = allocator, .buf = try std.ArrayList(u8).initCapacity(allocator, 128) };
     }
-    pub fn deinit(self: *@This()) void { self.buf.deinit(self.allocator); }
-    pub fn begin(self: *@This()) !void { try self.buf.appendSlice(self.allocator, "{"); self.need_comma = false; }
+    pub fn deinit(self: *@This()) void {
+        self.buf.deinit(self.allocator);
+    }
+    pub fn begin(self: *@This()) !void {
+        try self.buf.appendSlice(self.allocator, "{");
+        self.need_comma = false;
+    }
     pub fn field(self: *@This(), key: []const u8, value: []const u8) !void {
         if (self.need_comma) try self.buf.appendSlice(self.allocator, ",");
         try self.buf.appendSlice(self.allocator, "\"");
@@ -202,6 +207,10 @@ const ToolRegistry = struct {
     fn init(allocator: std.mem.Allocator) !@This() {
         return .{ .allocator = allocator, .entries = try std.ArrayList([]const u8).initCapacity(allocator, 0) };
     }
-    fn deinit(self: *@This()) void { self.entries.deinit(self.allocator); }
-    fn count(self: *const @This()) usize { return self.entries.items.len; }
+    fn deinit(self: *@This()) void {
+        self.entries.deinit(self.allocator);
+    }
+    fn count(self: *const @This()) usize {
+        return self.entries.items.len;
+    }
 };

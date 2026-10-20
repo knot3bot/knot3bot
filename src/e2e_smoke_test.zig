@@ -26,9 +26,9 @@ test "ChatCompletionRequest validates correctly" {
 
 test "Tool registry contains all expected tools" {
     const expected = [_][]const u8{
-        "shell", "read_file", "write_file", "list_directory", "grep", "glob",
-        "calculator", "git", "cron", "web_search", "web_fetch",
-        "memory", "skills_list", "skill_view", "skill_manager", "skill_run",
+        "shell",       "read_file",  "write_file",    "list_directory", "grep",      "glob",
+        "calculator",  "git",        "cron",          "web_search",     "web_fetch", "memory",
+        "skills_list", "skill_view", "skill_manager", "skill_run",
     };
     // Verify no duplicates in expected list
     for (expected, 0..) |a, i| {

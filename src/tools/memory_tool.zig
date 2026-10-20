@@ -152,9 +152,7 @@ pub const MemoryStore = struct {
         const limit = self.getCharLimit(target);
         const pct = @min(100, (current * 100) / @max(1, limit));
 
-        return std.fmt.allocPrint(self.allocator,
-            "{{\"success\":true,\"target\":\"{s}\",\"usage\":\"{}% — {}/{}\",\"entry_count\":{}}}",
-            .{ target, pct, current, limit, entries.items.len }) catch "{}";
+        return std.fmt.allocPrint(self.allocator, "{{\"success\":true,\"target\":\"{s}\",\"usage\":\"{}% — {}/{}\",\"entry_count\":{}}}", .{ target, pct, current, limit, entries.items.len }) catch "{}";
     }
 
     pub fn add(self: *MemoryStore, target: []const u8, content: []const u8) !ToolResult {

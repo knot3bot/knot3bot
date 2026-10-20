@@ -116,9 +116,9 @@ pub fn parseCommand(allocator: std.mem.Allocator, input: []const u8) CliAction {
 /// Get available slash commands for discovery
 pub fn getCommands() []const []const u8 {
     return &.{
-        "/setup", "/model", "/config", "/tools", "/skills",
-        "/skills view <name>", "/skills use <name>", "/skills clear",
-        "/new", "/help", "/quit",
+        "/setup",              "/model",             "/config",       "/tools", "/skills",
+        "/skills view <name>", "/skills use <name>", "/skills clear", "/new",   "/help",
+        "/quit",
     };
 }
 
@@ -166,8 +166,8 @@ pub fn printHelp() void {
 
 fn printCmd(cmd: []const u8, desc: []const u8) void {
     std.debug.print("  {s}{s}{s}  {s}{s}{s}\n", .{
-        display.Colors.cyan, cmd, display.Colors.reset,
-        display.Colors.dim,   desc, display.Colors.reset,
+        display.Colors.cyan, cmd,  display.Colors.reset,
+        display.Colors.dim,  desc, display.Colors.reset,
     });
 }
 
@@ -254,8 +254,8 @@ fn enableRawMode() !std.posix.termios {
     raw.lflag.ICANON = false;
     raw.lflag.ISIG = false;
     // Minimum characters for non-canonical read: return after 1 char, no timeout
-    raw.cc[@intFromEnum(std.posix.V.MIN)] = 1;
-    raw.cc[@intFromEnum(std.posix.V.TIME)] = 0;
+    raw.cc[@backingInt(std.posix.V.MIN)] = 1;
+    raw.cc[@backingInt(std.posix.V.TIME)] = 0;
     try std.posix.tcsetattr(std.c.STDIN_FILENO, .FLUSH, raw);
     return original;
 }
@@ -290,8 +290,12 @@ pub fn interactiveMenu(
             '\x1b' => {
                 if (n >= 3 and buf[1] == '[') {
                     switch (buf[2]) {
-                        'A' => { if (selected > 0) selected -= 1; },
-                        'B' => { if (selected < items.len - 1) selected += 1; },
+                        'A' => {
+                            if (selected > 0) selected -= 1;
+                        },
+                        'B' => {
+                            if (selected < items.len - 1) selected += 1;
+                        },
                         else => {},
                     }
                 }
@@ -314,8 +318,8 @@ fn renderMenu(stdout: std.Io.File, title: []const u8, items: []const []const u8,
     offset += prefix.len;
 
     const header = try std.fmt.bufPrint(buf[offset..], "{s}{s}{s}\n\n{s}Up/Down: nav  Enter: pick  q/Esc: back{s}\n\n", .{
-        display.Colors.bold, title, display.Colors.reset,
-        display.Colors.dim, display.Colors.reset,
+        display.Colors.bold, title,                display.Colors.reset,
+        display.Colors.dim,  display.Colors.reset,
     });
     offset += header.len;
 

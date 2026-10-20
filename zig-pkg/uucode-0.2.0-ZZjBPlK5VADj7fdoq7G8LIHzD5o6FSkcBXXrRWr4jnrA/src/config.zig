@@ -1,4 +1,24 @@
 const std = @import("std");
+
+const FieldInfo = struct { name: [:0]const u8, type: type };
+
+/// Comptime-only compat shim: newer Zig 0.17 dev snapshots removed
+/// `std.meta.fields` and the `StructField` array in favor of flattened
+/// `field_names` / `field_types` / `field_attrs`. This rebuilds a
+/// name/type pair array for the sites that only need those two.
+fn FieldsOf(comptime T: type) type {
+    return [@typeInfo(T).@"struct".field_names.len]FieldInfo;
+}
+
+fn structFields(comptime T: type) FieldsOf(T) {
+    const info = @typeInfo(T).@"struct";
+    var tmp: [info.field_names.len]FieldInfo = undefined;
+    for (info.field_names, info.field_types, 0..) |n, t, i| {
+        tmp[i] = .{ .name = n, .type = t };
+    }
+    return tmp;
+}
+
 const storage = @import("storage.zig");
 const multi_slice = @import("multi_slice.zig");
 pub const quirks = @import("quirks.zig");
@@ -84,7 +104,7 @@ pub const Field = struct {
                 .max_value = self.max_value,
             };
 
-            inline for (@typeInfo(@TypeOf(overrides)).@"struct".fields) |f| {
+            inline for (structFields(@TypeOf(overrides))) |f| {
                 @field(result, f.name) = @field(overrides, f.name);
             }
 
@@ -219,8 +239,8 @@ pub const Field = struct {
             .@"union" => {
                 if (self.cp_packing == .shift) {
                     const info = @typeInfo(self.type).@"union";
-                    const has_u21 = for (info.fields) |f| {
-                        if (f.type == u21) break true;
+                    const has_u21 = for (info.field_types) |ft| {
+                        if (ft == u21) break true;
                     } else false;
                     if (!has_u21) {
                         @compileError("Union field '" ++ self.name ++ "' with shift packing must have at least one u21 member");
@@ -270,8 +290,8 @@ pub const Field = struct {
                 return isPackable(optional.child);
             },
             .@"union" => |info| {
-                return for (info.fields) |f| {
-                    if (f.type != void and !isPackable(f.type)) {
+                return for (info.field_types) |ft| {
+                    if (ft != void and !isPackable(ft)) {
                         break false;
                     }
                 } else true;
@@ -303,7 +323,7 @@ pub const Field = struct {
     pub fn override(self: Field, overrides: anytype) Field {
         var result = self;
 
-        inline for (@typeInfo(@TypeOf(overrides)).@"struct".fields) |f| {
+        inline for (structFields(@TypeOf(overrides))) |f| {
             if (!is_updating_ucd and (std.mem.eql(u8, f.name, "name") or
                 std.mem.eql(u8, f.name, "type") or
                 std.mem.eql(u8, f.name, "shift_low") or

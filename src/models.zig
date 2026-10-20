@@ -973,7 +973,6 @@ pub fn createDefaultModelRegistry(allocator: std.mem.Allocator) !ModelRegistry {
         .reasoning_quality = 90,
     });
 
-
     // OpenRouter / Other providers
     try registry.register(.{
         .name = "deepseek-chat",

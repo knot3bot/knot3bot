@@ -56,7 +56,6 @@ pub const Message = struct {
     tool_calls_json: ?[]const u8 = null,
 };
 
-
 pub const ToolCall = struct {
     id: []const u8,
     name: []const u8,
@@ -79,7 +78,7 @@ pub const ReActStep = struct {
         errdefer output.deinit(allocator);
 
         // Track temporary allocations to free them later
-        var temp_allocs = std.ArrayList([]u8).init(allocator);
+        var temp_allocs: std.ArrayList([]u8) = .empty;
         defer {
             for (temp_allocs.items) |slice| allocator.free(slice);
             temp_allocs.deinit(allocator);
@@ -256,13 +255,8 @@ pub const Agent = struct {
     skill_self_improve: ?*SkillSelfImprove = null,
     pub fn init(allocator: std.mem.Allocator, config: AgentConfig, registry: *const ToolRegistry) !Agent {
         var messages: ArrayList(Message) = .empty;
-        errdefer {
-            for (messages.items) |msg| allocator.free(msg.content);
-            messages.deinit(allocator);
-        }
         if (config.system_prompt) |prompt| {
-            const prompt_copy = try allocator.dupe(u8, prompt);
-            try messages.append(allocator, .{ .role = .system, .content = prompt_copy });
+            try messages.append(allocator, .{ .role = .system, .content = try allocator.dupe(u8, prompt) });
         }
         var client: ?LLMClient = null;
         var anthropic_client: ?providers.anthropic.AnthropicClient = null;
@@ -273,12 +267,11 @@ pub const Agent = struct {
                     resolved_model = config.model;
                 } else {
                     if (mr.routeForProvider(config.provider.internalName(), .{ .needs_function_calling = true, .needs_streaming = true })) |decision| {
-                        resolved_model = try allocator.dupe(u8, decision.model.name);
+                        resolved_model = allocator.dupe(u8, decision.model.name) catch config.model;
                     }
                 }
             }
         }
-        errdefer if (!std.mem.eql(u8, resolved_model, config.model)) allocator.free(resolved_model);
         const effective_key = if (config.credential_pool) |pool| pool.nextKey() else (config.api_key orelse "");
         if (effective_key.len > 0) {
             if (config.provider == .anthropic) {
@@ -343,8 +336,6 @@ pub const Agent = struct {
 
         if (self.client) |*c| c.deinit();
         if (self.anthropic_client) |*ac| ac.deinit();
-        // Poison — catch use-after-free in Debug/ReleaseSafe
-        self.* = undefined;
     }
 
     /// Run agent with query and return detailed step-by-step result
@@ -352,15 +343,9 @@ pub const Agent = struct {
         self.step_logs.clearRetainingCapacity();
         self.usage = UsageStats{};
 
-        const query_copy = try self.allocator.dupe(u8, query);
-        try self.messages.append(self.allocator, .{ .role = .user, .content = query_copy });
-        // Only free the message we just added on error — previous messages
-        // belong to the Agent's lifetime and will be freed by deinit().
+        try self.messages.append(self.allocator, .{ .role = .user, .content = try self.allocator.dupe(u8, query) });
         errdefer {
-            if (self.messages.items.len > 0) {
-                self.allocator.free(self.messages.items[self.messages.items.len - 1].content);
-                self.messages.items.len -= 1;
-            }
+            for (self.messages.items) |msg| self.allocator.free(msg.content);
         }
 
         // Prompt cache check
@@ -473,8 +458,7 @@ pub const Agent = struct {
 
                     // Transfer ownership: tool_result is already an allocated copy
                     // For null result, use a dup'd error string so deinit can free uniformly
-                    const result_str: []const u8 = if (tool_result) |tr| tr else
-                        try self.allocator.dupe(u8, "Tool execution failed");
+                    const result_str: []const u8 = if (tool_result) |tr| tr else try self.allocator.dupe(u8, "Tool execution failed");
 
                     if (self.config.verbose) {
                         std.debug.print("[Tool {s} took {}ms]\n", .{ tc.function.name, tool_duration });
@@ -524,8 +508,7 @@ pub const Agent = struct {
                             if (cr.should_checkpoint and self.config.verbose) {
                                 std.debug.print("[Skill Self-Improve] Checkpoint triggered: {d} suggestions\n", .{cr.suggestions.len});
                                 for (cr.suggestions) |s| {
-                                    std.debug.print("  - {s}: {s} (confidence: {d:.2})\n", .{
-                                        @tagName(s.action), s.reason, s.confidence});
+                                    std.debug.print("  - {s}: {s} (confidence: {d:.2})\n", .{ @tagName(s.action), s.reason, s.confidence });
                                 }
                             }
                         }
@@ -601,8 +584,7 @@ pub const Agent = struct {
     pub fn runStreaming(self: *Agent, query: []const u8, callback: StreamCallback, user_data: ?*anyopaque) ![]const u8 {
         self.step_logs.clearRetainingCapacity();
         self.usage = UsageStats{};
-        const query_copy_stream = try self.allocator.dupe(u8, query);
-        try self.messages.append(self.allocator, .{ .role = .user, .content = query_copy_stream });
+        try self.messages.append(self.allocator, .{ .role = .user, .content = try self.allocator.dupe(u8, query) });
         if (!self.has_api_key or self.client == null) {
             const no_key_msg = "Final Answer: API key not configured.";
             callback(no_key_msg, user_data);
@@ -706,7 +688,6 @@ pub const Agent = struct {
         for (result.output, 0..) |byte, i| copy_result[i] = byte;
         return copy_result;
     }
-
 
     fn callLLMWithTools(self: *Agent) !LLMResult {
         if (!self.has_api_key or (self.client == null and self.anthropic_client == null)) {
@@ -891,7 +872,10 @@ pub const Agent = struct {
 
         const raw = try self.client.?.chatWithTools(msgs.items, tool_defs);
 
-        // Parse response ONCE — extract usage, content, tool_calls all in one pass
+        // Try to parse usage from response
+        var usage: ?LLMUsage = null;
+
+        // Parse the response
         var parsed = std.json.parseFromSlice(std.json.Value, self.allocator, raw, .{}) catch {
             return .{ .content = try self.allocator.dupe(u8, raw), .tool_calls = null, .usage = null };
         };
@@ -900,12 +884,10 @@ pub const Agent = struct {
         var content: ?[]const u8 = null;
         var tool_calls: ?[]ToolCallResult = null;
         var tool_calls_json: ?[]const u8 = null;
-        var usage: ?LLMUsage = null;
 
+        // Try to extract usage if present
         if (parsed.value == .object) {
             const obj = parsed.value.object;
-
-            // Extract usage
             if (obj.get("usage")) |u| {
                 if (u == .object) {
                     var prompt_tokens: u32 = 0;
@@ -921,8 +903,16 @@ pub const Agent = struct {
                     }
                 }
             }
+        }
 
-            // Extract choices → message → content + tool_calls
+        // Re-parse since we may have consumed it
+        parsed = std.json.parseFromSlice(std.json.Value, self.allocator, raw, .{}) catch {
+            return .{ .content = try self.allocator.dupe(u8, raw), .tool_calls = null, .usage = usage };
+        };
+        defer parsed.deinit();
+
+        if (parsed.value == .object) {
+            const obj = parsed.value.object;
             if (obj.get("choices")) |choices| {
                 if (choices == .array and choices.array.items.len > 0) {
                     const choice = choices.array.items[0];
@@ -934,7 +924,7 @@ pub const Agent = struct {
                                 }
                                 if (msg.object.get("tool_calls")) |tcs| {
                                     if (tcs == .array and tcs.array.items.len > 0) {
-                                        var parsed_tcs = std.ArrayList(ToolCallResult).empty;
+                                        var parsed_tcs = ArrayList(ToolCallResult).empty;
                                         defer parsed_tcs.deinit(self.allocator);
                                         for (tcs.array.items) |tc| {
                                             if (tc == .object) {
@@ -960,7 +950,12 @@ pub const Agent = struct {
                                                         .name = try self.allocator.dupe(u8, fn_n),
                                                         .arguments = try self.allocator.dupe(u8, fn_a),
                                                     },
-                                                }) catch continue;
+                                                }) catch {
+                                                    // Allocation failure mid-parse — skip this tool call
+                                                    // rather than panicking. The agent will continue with
+                                                    // whatever tool calls were successfully parsed.
+                                                    continue;
+                                                };
                                             }
                                         }
                                         if (parsed_tcs.items.len > 0) {
@@ -999,7 +994,6 @@ pub const Agent = struct {
             .usage = usage,
         };
     }
-
 
     fn escapeJsonStringToBuffer(buf: *std.ArrayList(u8), allocator: std.mem.Allocator, str: []const u8) !void {
         return json_mod.appendJsonEscaped(buf, allocator, str);
@@ -1041,7 +1035,7 @@ pub const Agent = struct {
         const prompt = registry.loadSkillPrompt(skill_name, self.allocator) catch return false;
         if (prompt) |p| {
             const skill_msg = try std.fmt.allocPrint(self.allocator, "[SKILL: {s}]\n{s}", .{ skill_name, p });
-            errdefer self.allocator.free(skill_msg);
+            defer self.allocator.free(skill_msg);
             try self.messages.append(self.allocator, .{ .role = .system, .content = skill_msg });
             try self.active_skills.append(self.allocator, try self.allocator.dupe(u8, skill_name));
             return true;

@@ -29,7 +29,9 @@ pub const JsonBuilder = struct {
         return .{ .allocator = allocator, .buf = try std.ArrayList(u8).initCapacity(allocator, 256) };
     }
 
-    pub fn deinit(self: *JsonBuilder) void { self.buf.deinit(self.allocator); }
+    pub fn deinit(self: *JsonBuilder) void {
+        self.buf.deinit(self.allocator);
+    }
 
     pub fn begin(self: *JsonBuilder) !void {
         try self.buf.appendSlice(self.allocator, "{");
@@ -76,11 +78,21 @@ pub const JsonBuilder = struct {
 
 /// Simple JSON success response.
 pub fn jsonOk(allocator: std.mem.Allocator, message: []const u8) ![]const u8 {
-    return std.fmt.allocPrint(allocator, "{{\"success\":true,\"message\":\"{s}\"}}", .{message});
+    var list: std.ArrayList(u8) = .empty;
+    errdefer list.deinit(allocator);
+    try list.appendSlice(allocator, "{\"success\":true,\"message\":\"");
+    try appendJsonEscaped(&list, allocator, message);
+    try list.appendSlice(allocator, "\"}");
+    return list.toOwnedSlice(allocator);
 }
 
 pub fn jsonError(allocator: std.mem.Allocator, message: []const u8) ![]const u8 {
-    return std.fmt.allocPrint(allocator, "{{\"error\":{{\"message\":\"{s}\"}}}}", .{message});
+    var list: std.ArrayList(u8) = .empty;
+    errdefer list.deinit(allocator);
+    try list.appendSlice(allocator, "{\"error\":{\"message\":\"");
+    try appendJsonEscaped(&list, allocator, message);
+    try list.appendSlice(allocator, "\"}}");
+    return list.toOwnedSlice(allocator);
 }
 
 /// Append JSON-escaped text to an ArrayList. Shared by server and agent.

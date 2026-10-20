@@ -13,7 +13,9 @@ pub const DelegateTool = struct {
     pub const tool_name = "delegate";
     pub const tool_description = "Delegate a task to a subagent for parallel execution";
     pub const tool_params = "{\"type\":\"object\",\"properties\":{\"task_id\":{\"type\":\"string\",\"description\":\"Unique task identifier\"},\"prompt\":{\"type\":\"string\",\"description\":\"Task description for subagent\"},\"skills\":{\"type\":\"array\",\"items\":{\"type\":\"string\"},\"description\":\"Skills to activate\"},\"timeout\":{\"type\":\"number\",\"description\":\"Timeout in seconds (default 60)\"}},\"required\":[\"prompt\"]}";
-    pub fn tool(self: *DelegateTool) Tool { return .{ .ptr = @ptrCast(self), .vtable = &vtable }; }
+    pub fn tool(self: *DelegateTool) Tool {
+        return .{ .ptr = @ptrCast(self), .vtable = &vtable };
+    }
 
     pub fn execute(self: *DelegateTool, allocator: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
         const task_id = getString(args, "task_id") orelse "default";
@@ -27,15 +29,11 @@ pub const DelegateTool = struct {
         const task_file = try std.fmt.allocPrint(allocator, "{s}/.delegate/{s}.json", .{ self.workspace_dir, task_id });
         defer allocator.free(task_file);
 
-        const task_record = try std.fmt.allocPrint(allocator,
-            "{{\"task_id\":\"{s}\",\"prompt\":\"{s}\",\"status\":\"pending\",\"timeout\":{d}}}",
-            .{ task_id, prompt, timeout_secs });
+        const task_record = try std.fmt.allocPrint(allocator, "{{\"task_id\":\"{s}\",\"prompt\":\"{s}\",\"status\":\"pending\",\"timeout\":{d}}}", .{ task_id, prompt, timeout_secs });
         defer allocator.free(task_record);
         shared.cwdWriteFile(task_file, task_record) catch return ToolResult.fail("Failed to create delegation record");
 
-        const resp = try std.fmt.allocPrint(allocator,
-            "{{\"success\":true,\"task_id\":\"{s}\",\"timeout\":{d},\"message\":\"Task delegated\",\"note\":\"Subagent execution requires async runtime\"}}",
-            .{ task_id, timeout_secs });
+        const resp = try std.fmt.allocPrint(allocator, "{{\"success\":true,\"task_id\":\"{s}\",\"timeout\":{d},\"message\":\"Task delegated\",\"note\":\"Subagent execution requires async runtime\"}}", .{ task_id, timeout_secs });
         return ToolResult.ok(resp);
     }
     pub const vtable = root.ToolVTable(@This());
@@ -46,7 +44,9 @@ pub const DelegateResultTool = struct {
     pub const tool_name = "delegate_result";
     pub const tool_description = "Get results from a delegated subagent task";
     pub const tool_params = "{\"type\":\"object\",\"properties\":{\"task_id\":{\"type\":\"string\",\"description\":\"Task ID returned by delegate()\"}},\"required\":[\"task_id\"]}";
-    pub fn tool(self: *DelegateResultTool) Tool { return .{ .ptr = @ptrCast(self), .vtable = &vtable }; }
+    pub fn tool(self: *DelegateResultTool) Tool {
+        return .{ .ptr = @ptrCast(self), .vtable = &vtable };
+    }
 
     pub fn execute(self: *DelegateResultTool, allocator: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
         const task_id = getString(args, "task_id") orelse return ToolResult.fail("task_id is required");

@@ -81,9 +81,7 @@ pub const DiffTool = struct {
         const full_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ workspace, file_path });
         defer allocator.free(full_path);
 
-        const response = try std.fmt.allocPrint(allocator,
-            "{{\"applied\":false,\"reason\":\"patch parsing not yet implemented\",\"file\":\"{s}\"}}",
-            .{full_path});
+        const response = try std.fmt.allocPrint(allocator, "{{\"applied\":false,\"reason\":\"patch parsing not yet implemented\",\"file\":\"{s}\"}}", .{full_path});
         return ToolResult.ok(response);
     }
 

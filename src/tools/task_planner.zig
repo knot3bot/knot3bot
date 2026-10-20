@@ -103,15 +103,16 @@ pub const TaskPlannerTool = struct {
                 }
             }
             const progress = if (task_count > 0) @as(f32, @floatFromInt(completed)) / @as(f32, @floatFromInt(task_count)) * 100.0 else 0.0;
-            const resp = try std.fmt.allocPrint(allocator,
-                "{{\"total\":{d},\"pending\":{d},\"in_progress\":{d},\"completed\":{d},\"blocked\":{d},\"progress_pct\":{d:.1}}}",
-                .{ task_count, pending, in_progress, completed, blocked, progress });
+            const resp = try std.fmt.allocPrint(allocator, "{{\"total\":{d},\"pending\":{d},\"in_progress\":{d},\"completed\":{d},\"blocked\":{d},\"progress_pct\":{d:.1}}}", .{ task_count, pending, in_progress, completed, blocked, progress });
             return ToolResult.ok(resp);
         } else {
             const task_id = if (root.getInt(args, "task_id")) |id| @as(u32, @intCast(id)) else return ToolResult.fail("task_id required");
             var found: ?*PlannedTask = null;
             for (tasks[0..task_count]) |*t| {
-                if (t.id == task_id) { found = t; break; }
+                if (t.id == task_id) {
+                    found = t;
+                    break;
+                }
             }
             const t = found orelse return ToolResult.fail("task not found");
 

@@ -752,10 +752,10 @@ fn conversionId(source_format: PixelFormat, destination_format: PixelFormat) u64
 }
 
 fn getFieldNameFromPixelFormat(comptime source_format: PixelFormat) []const u8 {
-    const enum_fields = std.meta.fields(PixelFormat);
-    inline for (enum_fields) |field| {
-        if (field.value == @intFromEnum(source_format)) {
-            return field.name;
+    const enum_info = @typeInfo(PixelFormat).@"enum";
+    inline for (enum_info.field_names, enum_info.field_values) |fname, fvalue| {
+        if (fvalue == @intFromEnum(source_format)) {
+            return fname;
         }
     }
 

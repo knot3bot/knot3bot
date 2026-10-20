@@ -126,12 +126,15 @@ Update `.minimum_zig_version` in all `build.zig.zon` files:
 
 ```bash
 # Build
-zig build                          # 8/8 steps succeed
+zig build                          # succeeds
 
 # Tests
-zig build test                     # All 96 tests pass across 8 suites:
-                                   #   validation (22), shell_test (24),
-                                   #   architecture_test (11), agent_unit_test (16),
-                                   #   rate_limiter (5), circuit_breaker (9),
-                                   #   e2e_smoke_test (9), cli (18)
+zig build test                     # All 356 tests pass via the unified root
+                                   # (src/tests.zig); use --summary all for
+                                   # the per-suite breakdown
 ```
+
+Note: later 0.17.0-dev snapshots (e.g. dev.2131) additionally required
+porting the vendored packages to the flattened `@typeInfo` API and
+replacing `Build.args` — see commit history ("adapt build system to Zig
+0.17.0-dev.2131 toolchain").

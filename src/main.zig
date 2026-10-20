@@ -10,6 +10,7 @@ const cli = @import("cli.zig");
 const Server = @import("root.zig").Server;
 const ServerConfig = @import("root.zig").ServerConfig;
 const AuthConfig = @import("root.zig").AuthConfig;
+const acp = @import("adapters/acp_adapter.zig");
 const models = @import("root.zig").models;
 const context_compressor = @import("root.zig").context_compressor;
 const trajectory = @import("root.zig").trajectory;
@@ -63,6 +64,7 @@ const CliConfig = struct {
     max_iterations: usize,
     provider: providers.Provider,
     server_mode: bool,
+    acp_mode: bool,
     port: u16,
     config_mode: bool,
     enable_skill_self_improve: bool,
@@ -89,9 +91,9 @@ fn validateApiKeyFormat(key: []const u8, provider: providers.Provider) void {
 
 fn getApiKeyFromEnv(environ: *const std.process.Environ.Map) ?[]const u8 {
     const env_vars = &[_][]const u8{
-        "BAILIAN_API_KEY", "OPENAI_API_KEY", "DEEPSEEK_API_KEY",
-        "KIMI_API_KEY", "MINIMAX_API_KEY", "ZAI_API_KEY",
-        "VOLCANO_API_KEY", "OPENROUTER_API_KEY", "TENCENT_API_KEY",
+        "BAILIAN_API_KEY",   "OPENAI_API_KEY",     "DEEPSEEK_API_KEY",
+        "KIMI_API_KEY",      "MINIMAX_API_KEY",    "ZAI_API_KEY",
+        "VOLCANO_API_KEY",   "OPENROUTER_API_KEY", "TENCENT_API_KEY",
         "ANTHROPIC_API_KEY",
     };
 
@@ -148,7 +150,7 @@ fn setupBuiltinSkills(allocator: std.mem.Allocator, workspace_dir: []const u8) !
         // Check if source directory exists
         shared.context.cwdAccess(src_dir) catch continue;
 
-        var dir = shared.context.cwdOpenDir(src_dir, .{}) catch continue;
+        var dir = shared.context.cwdOpenDir(src_dir, .{ .iterate = true }) catch continue;
         defer dir.close(shared.context.io());
 
         var iter = dir.iterate();
@@ -190,6 +192,7 @@ fn parseArgs(args: std.process.Args, environ: *const std.process.Environ.Map) !C
         .max_iterations = 10,
         .provider = .openai,
         .server_mode = false,
+        .acp_mode = false,
         .port = 38789,
         .config_mode = false,
         .enable_skill_self_improve = false,
@@ -197,7 +200,6 @@ fn parseArgs(args: std.process.Args, environ: *const std.process.Environ.Map) !C
 
     // Override with environment variables
     config.api_key = getApiKeyFromEnv(environ);
-
 
     // Override with environment variables
     if (config.api_key == null) {
@@ -236,6 +238,8 @@ fn parseArgs(args: std.process.Args, environ: *const std.process.Environ.Map) !C
             }
         } else if (std.mem.eql(u8, arg, "--server")) {
             config.server_mode = true;
+        } else if (std.mem.eql(u8, arg, "--acp")) {
+            config.acp_mode = true;
         } else if (std.mem.eql(u8, arg, "--port")) {
             const port_str = args_iter.next() orelse return error.MissingPort;
             config.port = try std.fmt.parseInt(u16, port_str, 10);
@@ -266,6 +270,7 @@ fn printHelp() !void {
         \\  --provider <name>       LLM provider: openai, deepseek, kimi, minimax, zai, bailian, volcano, openrouter, tencent (+ -plan variants)
         \\  --max-iterations <n>    Max ReAct iterations (default: 10)
         \\  --server                Run in HTTP server mode
+        \\  --acp                   Serve ACP (Agent Client Protocol) over stdio
         \\  --port <port>           Server port (default: 8080)
         \\  --enable-skill-self-improve  Enable skill self-improvement (default: off)
         \\
@@ -388,27 +393,40 @@ fn runCliMode(config: *CliConfig, registry: *ToolRegistry) !void {
 
                     // Slash commands
                     if (trimmed.len > 0 and trimmed[0] == '/') {
-                        if (std.mem.eql(u8, trimmed, "/help") or std.mem.eql(u8, trimmed, "/h")) { vx_tui.show_help = true; }
-                        else if (std.mem.eql(u8, trimmed, "/quit") or std.mem.eql(u8, trimmed, "/q")) { vx_tui.quit(); }
-                        else if (std.mem.eql(u8, trimmed, "/new")) { try vx_tui.addMessage(.system, "New session."); }
-                        else if (std.mem.eql(u8, trimmed, "/config")) { vx_tui.show_config = true; }
-                        else if (std.mem.eql(u8, trimmed, "/model")) {
+                        if (std.mem.eql(u8, trimmed, "/help") or std.mem.eql(u8, trimmed, "/h")) {
+                            vx_tui.show_help = true;
+                        } else if (std.mem.eql(u8, trimmed, "/quit") or std.mem.eql(u8, trimmed, "/q")) {
+                            vx_tui.quit();
+                        } else if (std.mem.eql(u8, trimmed, "/new")) {
+                            try vx_tui.addMessage(.system, "New session.");
+                        } else if (std.mem.eql(u8, trimmed, "/config")) {
+                            vx_tui.show_config = true;
+                        } else if (std.mem.eql(u8, trimmed, "/model")) {
                             vx_tui.menu_items.clearRetainingCapacity();
                             for (config.provider.models()) |m| try vx_tui.menu_items.append(m);
-                            vx_tui.menu_title = "Select Model"; vx_tui.menu_selected = 0; vx_tui.show_models = true;
+                            vx_tui.menu_title = "Select Model";
+                            vx_tui.menu_selected = 0;
+                            vx_tui.show_models = true;
                         } else if (std.mem.eql(u8, trimmed, "/tools")) {
                             vx_tui.menu_items.clearRetainingCapacity();
                             for (registry.list()) |e| try vx_tui.menu_items.append(e.spec.name);
-                            vx_tui.menu_title = "Tools"; vx_tui.menu_selected = 0; vx_tui.show_tools = true;
+                            vx_tui.menu_title = "Tools";
+                            vx_tui.menu_selected = 0;
+                            vx_tui.show_tools = true;
                         } else if (std.mem.eql(u8, trimmed, "/skills")) {
                             vx_tui.menu_items.clearRetainingCapacity();
                             try vx_tui.menu_items.append("(no skills)");
-                            vx_tui.menu_title = "Skills"; vx_tui.menu_selected = 0; vx_tui.show_skills = true;
+                            vx_tui.menu_title = "Skills";
+                            vx_tui.menu_selected = 0;
+                            vx_tui.show_skills = true;
                         } else if (std.mem.startsWith(u8, trimmed, "/model ")) {
                             const name = try allocator.dupe(u8, trimmed["/model ".len..]);
-                            config.model = name; vx_tui.model_name = name;
+                            config.model = name;
+                            vx_tui.model_name = name;
                             try vx_tui.addMessage(.system, try std.fmt.allocPrint(allocator, "Model: {s}", .{name}));
-                        } else { try vx_tui.addMessage(.err, try std.fmt.allocPrint(allocator, "Unknown: {s}", .{trimmed})); }
+                        } else {
+                            try vx_tui.addMessage(.err, try std.fmt.allocPrint(allocator, "Unknown: {s}", .{trimmed}));
+                        }
                         try vx_tui.renderFrame();
                         continue;
                     }
@@ -432,11 +450,16 @@ fn runCliMode(config: *CliConfig, registry: *ToolRegistry) !void {
                         cp = credential_pool.CredentialPool.init(allocator, collectKeysForProvider(allocator, shared.context.environ(), config.provider));
                         const agent_config = Agent.AgentConfig{
                             .max_iterations = @intCast(config.max_iterations),
-                            .model = config.model, .api_key = config.api_key, .provider = config.provider,
+                            .model = config.model,
+                            .api_key = config.api_key,
+                            .provider = config.provider,
                             .system_prompt = try createDefaultSystemPrompt(allocator, registry),
-                            .context_compressor = compressor, .enable_trajectory_recording = true,
-                            .trajectory_recorder = &recorder, .model_registry = &model_registry,
-                            .enable_smart_routing = true, .enable_skill_self_improve = config.enable_skill_self_improve,
+                            .context_compressor = compressor,
+                            .enable_trajectory_recording = true,
+                            .trajectory_recorder = &recorder,
+                            .model_registry = &model_registry,
+                            .enable_smart_routing = true,
+                            .enable_skill_self_improve = config.enable_skill_self_improve,
                             .skill_self_improve = if (si_engine) |*si| si else null,
                             .credential_pool = if (cp.keys.len > 0) &cp else null,
                         };
@@ -572,7 +595,6 @@ fn runSetupWizard(config: *CliConfig) !void {
     std.debug.print("\n{s}Setup complete!{s} Type /help for commands.\n\n", .{ display.Colors.green, display.Colors.reset });
 }
 
-
 pub fn main(init: std.process.Init) !u8 {
     try setupSignalHandlers();
     shared.context.init(init.io, init.environ_map, init.gpa);
@@ -622,7 +644,7 @@ pub fn main(init: std.process.Init) !u8 {
     const io = init.io;
     var log_buf: [4096]u8 = undefined;
     json_logger.init(std.Io.File.stderr().writer(io, &log_buf).interface);
-    std.log.info("knot3bot v0.0.1 starting...", .{});
+    std.log.info("knot3bot v{s} starting...", .{@import("config").release_version});
     std.log.info("Provider: {s} | Model: {s} | Memory: {s} | Tools: {d}", .{
         config.provider.name(),
         config.model,
@@ -641,6 +663,29 @@ pub fn main(init: std.process.Init) !u8 {
         if (!config.config_mode) {
             std.log.warn("No API key configured. Set *_API_KEY env var or use --config wizard.", .{});
         }
+    }
+
+    if (config.acp_mode) {
+        std.log.info("ACP mode: serving JSON-RPC over stdio", .{});
+        const agent_config = Agent.AgentConfig{
+            .max_iterations = @intCast(config.max_iterations),
+            .model = config.model,
+            .api_key = config.api_key,
+            .provider = config.provider,
+        };
+        // Per-process arena like the server's request handling: agent and
+        // parse lifetimes are bounded by the process, and several agent code
+        // paths assume arena-backed allocations.
+        var arena = std.heap.ArenaAllocator.init(allocator);
+        defer arena.deinit();
+
+        var agent = try Agent.Agent.init(arena.allocator(), agent_config, &registry);
+        defer agent.deinit();
+        try agent.appendMessage(.system, "You are knot3bot, an AI coding agent. Be concise and helpful.");
+
+        var acp_server = acp.AcpServer.init(allocator, &agent);
+        try acp_server.serveStdio(io);
+        return 0;
     }
 
     if (config.server_mode) {

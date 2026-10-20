@@ -85,8 +85,17 @@ fn extractHostname(url: []const u8) ?[]const u8 {
     const host_start = proto_end + 3;
 
     var host_end = url.len;
+    var in_brackets = false;
     for (url[host_start..], 0..) |c, i| {
-        if (c == ':' or c == '/' or c == '?' or c == '#') {
+        if (c == '[') {
+            in_brackets = true;
+            continue;
+        }
+        if (c == ']') {
+            in_brackets = false;
+            continue;
+        }
+        if (!in_brackets and (c == ':' or c == '/' or c == '?' or c == '#')) {
             host_end = host_start + i;
             break;
         }
@@ -193,7 +202,17 @@ pub fn validateUrl(url: []const u8) ValidationError!void {
     // Check if hostname is a private IPv4 address
     if (std.Io.net.IpAddress.parseIp4(hostname, 0)) |_| {
         if (isPrivateIpv4(hostname)) return error.BlockedHost;
-    } else |_| {}
+    } else |_| {
+        // Looks like an IPv4 literal but doesn't parse — fail closed.
+        var looks_like_ip = hostname.len > 0;
+        for (hostname) |c| {
+            if (c != '.' and (c < '0' or c > '9')) {
+                looks_like_ip = false;
+                break;
+            }
+        }
+        if (looks_like_ip) return error.BlockedHost;
+    }
 
     // Check if hostname is an IPv6 loopback
     if (std.mem.eql(u8, lower, "::1")) return error.BlockedHost;

@@ -59,7 +59,7 @@ pub const ProcessRegistry = struct {
 
     /// Spawn a new background process (placeholder)
     pub fn spawn(self: *ProcessRegistry, command: []const u8) ![]const u8 {
-        if (self.processes.size() >= MAX_PROCESSES) {
+        if (self.processes.count() >= MAX_PROCESSES) {
             return error.TooManyProcesses;
         }
 
@@ -77,7 +77,7 @@ pub const ProcessRegistry = struct {
 
     /// Poll for process status
     pub fn poll(self: *ProcessRegistry, id: []const u8) ?*TrackedProcess {
-        return self.processes.get(id);
+        return self.processes.getPtr(id);
     }
 
     /// Get process output
@@ -90,7 +90,7 @@ pub const ProcessRegistry = struct {
 
     /// Kill a process
     pub fn kill(self: *ProcessRegistry, id: []const u8) bool {
-        if (self.processes.get(id)) |*proc| {
+        if (self.processes.getPtr(id)) |proc| {
             proc.state = .killed;
             return true;
         }
@@ -122,7 +122,7 @@ pub const ProcessRegistryTool = struct {
 
     pub fn deinit(self: *ProcessRegistryTool) void {
         self.registry.deinit();
-        root.allocator.destroy(self.registry);
+        self.registry.allocator.destroy(self.registry);
     }
 
     pub fn tool(self: *ProcessRegistryTool) Tool {
@@ -144,9 +144,7 @@ pub const ProcessRegistryTool = struct {
             while (it.next()) |entry| {
                 if (!first) try buf.appendSlice(",");
                 first = false;
-                const line = try std.fmt.allocPrint(allocator,
-                    "{{\"id\":\"{s}\",\"command\":\"{s}\",\"state\":\"{s}\"}}",
-                    .{ entry.key_ptr.*, entry.value_ptr.command, @tagName(entry.value_ptr.state) });
+                const line = try std.fmt.allocPrint(allocator, "{{\"id\":\"{s}\",\"command\":\"{s}\",\"state\":\"{s}\"}}", .{ entry.key_ptr.*, entry.value_ptr.command, @tagName(entry.value_ptr.state) });
                 defer allocator.free(line);
                 try buf.appendSlice(line);
             }
@@ -166,9 +164,7 @@ pub const ProcessRegistryTool = struct {
                 const exit_str = if (proc.exit_code) |c| try std.fmt.allocPrint(allocator, "{}", .{c}) else try allocator.dupe(u8, "-1");
                 defer if (proc.exit_code != null) allocator.free(exit_str);
 
-                const resp = try std.fmt.allocPrint(allocator,
-                    "{{\"id\":\"{s}\",\"command\":\"{s}\",\"state\":\"{s}\",\"pid\":{s},\"exit_code\":{s}}}",
-                    .{ proc.id, proc.command, @tagName(proc.state), pid_str, exit_str });
+                const resp = try std.fmt.allocPrint(allocator, "{{\"id\":\"{s}\",\"command\":\"{s}\",\"state\":\"{s}\",\"pid\":{s},\"exit_code\":{s}}}", .{ proc.id, proc.command, @tagName(proc.state), pid_str, exit_str });
                 return ToolResult{ .success = true, .output = resp };
             }
             return ToolResult.fail("Process not found");
@@ -186,7 +182,7 @@ pub const ProcessRegistryTool = struct {
 
         if (std.mem.eql(u8, action, "kill")) {
             if (self.registry.kill(id)) {
-                return ToolResult.success("Process killed");
+                return ToolResult.ok("Process killed");
             }
             return ToolResult.fail("Process not found");
         }

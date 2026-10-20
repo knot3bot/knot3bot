@@ -6,10 +6,13 @@ const inlineAssert = @import("config.zig").quirks.inlineAssert;
 /// issues with large structs.
 pub fn MultiSlice(comptime T: type) type {
     @setEvalBranchQuota(50_000);
-    const fields = std.meta.fields(T);
+    const struct_info = @typeInfo(T).@"struct";
+    const field_names = struct_info.field_names;
+    const field_types = struct_info.field_types;
+    const field_attrs = struct_info.field_attrs;
 
     return struct {
-        ptrs: [fields.len][*]u8,
+        ptrs: [field_names.len][*]u8,
         len: usize,
         capacity: usize,
 
@@ -36,26 +39,26 @@ pub fn MultiSlice(comptime T: type) type {
         }
 
         pub fn set(self: Self, index: usize, elem: T) void {
-            inline for (fields, 0..) |field_info, i| {
-                self.items(@as(Field, @enumFromInt(i)))[index] = @field(elem, field_info.name);
+            inline for (field_names, 0..) |field_name, i| {
+                self.items(@as(Field, @enumFromInt(i)))[index] = @field(elem, field_name);
             }
         }
 
         pub fn get(self: Self, index: usize) T {
             var result: T = undefined;
-            inline for (fields, 0..) |field_info, i| {
-                @field(result, field_info.name) = self.items(@as(Field, @enumFromInt(i)))[index];
+            inline for (field_names, 0..) |field_name, i| {
+                @field(result, field_name) = self.items(@as(Field, @enumFromInt(i)))[index];
             }
             return result;
         }
 
         pub fn subset(self: Self, comptime Subset: type) MultiSlice(Subset) {
-            const subset_fields = std.meta.fields(Subset);
+            const subset_field_names = @typeInfo(Subset).@"struct".field_names;
             var result: MultiSlice(Subset) = undefined;
-            inline for (subset_fields, 0..) |sf, dst_idx| {
-                const src_idx = comptime for (fields, 0..) |f, i| {
-                    if (std.mem.eql(u8, f.name, sf.name)) break i;
-                } else @compileError("subset field '" ++ sf.name ++ "' not found in source");
+            inline for (subset_field_names, 0..) |sf_name, dst_idx| {
+                const src_idx = comptime for (field_names, 0..) |fname, i| {
+                    if (std.mem.eql(u8, fname, sf_name)) break i;
+                } else @compileError("subset field '" ++ sf_name ++ "' not found in source");
                 result.ptrs[dst_idx] = self.ptrs[src_idx];
             }
             result.len = self.len;
@@ -64,10 +67,10 @@ pub fn MultiSlice(comptime T: type) type {
         }
 
         pub fn memset(self: Self, elem: T) void {
-            inline for (fields, 0..) |field_info, i| {
+            inline for (field_names, 0..) |field_name, i| {
                 const field: Field = @enumFromInt(i);
-                const value = @field(elem, field_info.name);
-                const F = field_info.type;
+                const value = @field(elem, field_name);
+                const F = field_types[i];
                 const slice = self.items(field);
                 if (@sizeOf(F) == 0) {
                     // Zero-size types have nothing to set.
@@ -100,7 +103,7 @@ pub fn MultiSlice(comptime T: type) type {
         }
 
         pub fn initCapacity(allocator: std.mem.Allocator, capacity: usize) std.mem.Allocator.Error!Self {
-            if (fields.len == 0 or capacity == 0) {
+            if (field_names.len == 0 or capacity == 0) {
                 return .{ .ptrs = undefined, .len = 0, .capacity = capacity };
             }
             const byte_count = capacityInBytes(capacity);
@@ -116,41 +119,41 @@ pub fn MultiSlice(comptime T: type) type {
 
         const alignment: std.mem.Alignment = blk: {
             var max_align: usize = 1;
-            for (fields) |field_info| {
-                const a: usize = if (@sizeOf(field_info.type) == 0)
+            for (field_types, field_attrs) |ft, fa| {
+                const a: usize = if (@sizeOf(ft) == 0)
                     1
                 else
-                    field_info.alignment orelse @alignOf(field_info.type);
+                    fa.@"align" orelse @alignOf(ft);
                 if (a > max_align) max_align = a;
             }
             break :blk @enumFromInt(std.math.log2(max_align));
         };
 
-        const sorted_sizes: [fields.len]usize = blk: {
-            var sizes: [fields.len]usize = undefined;
+        const sorted_sizes: [field_names.len]usize = blk: {
+            var sizes: [field_names.len]usize = undefined;
             for (sortOrder(), 0..) |si, i| {
-                sizes[i] = @sizeOf(fields[si].type);
+                sizes[i] = @sizeOf(field_types[si]);
             }
             break :blk sizes;
         };
 
-        const sorted_fields: [fields.len]usize = sortOrder();
+        const sorted_fields: [field_names.len]usize = sortOrder();
 
-        fn sortOrder() [fields.len]usize {
-            @setEvalBranchQuota(fields.len * fields.len + 100);
-            var order: [fields.len]usize = undefined;
-            for (0..fields.len) |i| order[i] = i;
-            for (0..fields.len) |i| {
+        fn sortOrder() [field_names.len]usize {
+            @setEvalBranchQuota(field_names.len * field_names.len + 100);
+            var order: [field_names.len]usize = undefined;
+            for (0..field_names.len) |i| order[i] = i;
+            for (0..field_names.len) |i| {
                 var best = i;
-                for (i + 1..fields.len) |j| {
-                    const best_align = if (@sizeOf(fields[order[best]].type) == 0)
+                for (i + 1..field_names.len) |j| {
+                    const best_align = if (@sizeOf(field_types[order[best]]) == 0)
                         1
                     else
-                        fields[order[best]].alignment orelse @alignOf(fields[order[best]].type);
-                    const j_align = if (@sizeOf(fields[order[j]].type) == 0)
+                        field_attrs[order[best]].@"align" orelse @alignOf(field_types[order[best]]);
+                    const j_align = if (@sizeOf(field_types[order[j]]) == 0)
                         1
                     else
-                        fields[order[j]].alignment orelse @alignOf(fields[order[j]].type);
+                        field_attrs[order[j]].@"align" orelse @alignOf(field_types[order[j]]);
                     if (j_align > best_align) best = j;
                 }
                 const tmp = order[i];

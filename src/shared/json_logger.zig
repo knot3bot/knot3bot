@@ -31,9 +31,7 @@ pub fn log(
     const scope_str = @tagName(scope);
     const level_str = level.asText();
 
-    const line = std.fmt.bufPrint(&json_buf,
-        "{{\"ts\":{},\"level\":\"{s}\",\"scope\":\"{s}\",\"msg\":\"",
-        .{ now, level_str, scope_str }) catch return;
+    const line = std.fmt.bufPrint(&json_buf, "{{\"ts\":{},\"level\":\"{s}\",\"scope\":\"{s}\",\"msg\":\"", .{ now, level_str, scope_str }) catch return;
     _ = writer.write(line) catch return;
     // Escape message for JSON
     for (msg) |c| {

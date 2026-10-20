@@ -91,7 +91,7 @@ pub const CronTool = struct {
         const cron_dir_path = try std.fmt.allocPrint(allocator, "{s}/.knot3bot/cron", .{self.workspace_dir});
         defer allocator.free(cron_dir_path);
 
-        var dir = shared.context.cwdOpenDir(cron_dir_path, .{}) catch |err| {
+        var dir = shared.context.cwdOpenDir(cron_dir_path, .{ .iterate = true }) catch |err| {
             if (err == error.FileNotFound) {
                 return ToolResult.ok("No cron jobs scheduled");
             }

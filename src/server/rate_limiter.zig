@@ -267,6 +267,10 @@ test "RateLimiter multiple keys independent" {
     var limiter = RateLimiter.init(std.testing.allocator, .{ .max_requests = 5, .window_ms = 1000 });
     defer limiter.deinit();
     // Each key has its own bucket
-    for (0..5) |_| { try std.testing.expect(limiter.check("key-a")); }
-    for (0..5) |_| { try std.testing.expect(limiter.check("key-b")); }
+    for (0..5) |_| {
+        try std.testing.expect(limiter.check("key-a"));
+    }
+    for (0..5) |_| {
+        try std.testing.expect(limiter.check("key-b"));
+    }
 }
