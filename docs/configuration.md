@@ -65,7 +65,7 @@ Create `~/.knot3bot/config.json` or `./knot3bot.json`:
   "api": {
     "key": "sk-...",
     "base": "https://api.openai.com/v1",
-    "model": "gpt-4"
+    "model": "gpt-5.5"
   },
   "memory": {
     "backend": "sqlite",
@@ -73,7 +73,7 @@ Create `~/.knot3bot/config.json` or `./knot3bot.json`:
   },
   "server": {
     "port": 8080,
-    "host": "0.0.0.0"
+    "host": "127.0.0.1"
   },
   "logging": {
     "level": "info",
@@ -86,6 +86,8 @@ Create `~/.knot3bot/config.json` or `./knot3bot.json`:
 }
 ```
 
+`src/config.zig` parses this file. `loadDefault` checks `KNOT3BOT_CONFIG`, then `~/.knot3bot/config.json`, then `./knot3bot.json`. The CLI and the HTTP server read the flags and environment variables below. The `mcp` tool reads those same paths for an `mcp_servers` array.
+
 ## CLI Flags
 
 ```bash
@@ -96,53 +98,35 @@ Options:
   --db-path <path>        SQLite database path (default: in-memory)
   --session <id>          Session ID (default: default)
   --model <name>          LLM model name
-  --provider <name>       LLM provider: openai, anthropic, kimi, minimax, zai, bailian, volcano
+  --provider <name>       LLM provider: openai, deepseek, kimi, minimax, zai, bailian, volcano, openrouter, tencent (+ -plan variants)
   --max-iterations <n>    Max ReAct iterations (default: 10)
   --server                Run in HTTP server mode
+  --acp                   Serve ACP over stdio
   --port <port>           Server port (default: 8080)
+  --config, configure     Run the configuration wizard
+  --enable-skill-self-improve  Enable skill self-improvement (default: off)
   --enable-harness-rsi    Enable harness RSI (default: off)
   --harness-tag <tag>     Harness task tag (default: general)
+  --harness-call-budget <n>  Max harness executor calls (default: 5)
 ```
 
 ## Provider Configuration
 
-### OpenAI
+`--provider` selects one of the providers below. The default model is used when `--model` is omitted. The interactive `/model` menu lists every name in the third column.
 
-```bash
-export OPENAI_API_KEY=sk-...
-```
-
-| Model | Description |
-|-------|-------------|
-| `gpt-4o` | Latest GPT-4 Omni (default) |
-| `gpt-4-turbo` | GPT-4 Turbo |
-| `gpt-4` | GPT-4 |
-| `gpt-3.5-turbo` | GPT-3.5 Turbo |
-
-### Anthropic
-
-```bash
-export ANTHROPIC_API_KEY=sk-ant-...
-```
-
-| Model | Description |
-|-------|-------------|
-| `claude-3-5-sonnet-20241022` | Claude 3.5 Sonnet (default) |
-| `claude-3-opus-20240229` | Claude 3 Opus |
-| `claude-3-sonnet-20240229` | Claude 3 Sonnet |
-| `claude-3-haiku-20240307` | Claude 3 Haiku |
-
-### Bailian (Qwen)
-
-```bash
-export BAILIAN_API_KEY=...
-```
-
-| Model | Description |
-|-------|-------------|
-| `qwen-plus` | Qwen Plus (default) |
-| `qwen-turbo` | Qwen Turbo |
-| `qwen-max` | Qwen Max |
+| Provider | Environment variable | Default model | Menu |
+|----------|----------------------|---------------|------|
+| `openai` | `OPENAI_API_KEY` | `gpt-5.5` | `gpt-5.5`, `gpt-5.5-mini`, `gpt-5.1`, `o5-mini`, `o4-mini`, `gpt-4o` |
+| `anthropic` | `ANTHROPIC_API_KEY` | `claude-sonnet-4-6` | `claude-opus-4-7`, `claude-sonnet-4-6`, `claude-haiku-4-5`, `claude-3-5-sonnet-20241022` |
+| `deepseek` | `DEEPSEEK_API_KEY` | `deepseek-v4-pro` | `deepseek-v4-pro`, `deepseek-v4-flash`, `deepseek-chat`, `deepseek-reasoner`, `deepseek-coder` |
+| `kimi`, `kimi-plan` | `KIMI_API_KEY` | `kimi-k2.5` | `kimi-k2.5`, `kimi-k2-thinking`, `kimi-k2-turbo-preview`, `moonshot-v1-auto`, `moonshot-v1-128k` |
+| `minimax`, `minimax-plan` | `MINIMAX_API_KEY` | `MiniMax-M2.7` | `MiniMax-M2.7`, `MiniMax-M2.5`, `MiniMax-M2.1`, `MiniMax-M2`, `abab7-chat` |
+| `zai` | `ZAI_API_KEY` | `glm-4.7` | `glm-4.7`, `glm-4.7-flash`, `glm-4.6`, `glm-4-plus`, `glm-4-flash-x` |
+| `bailian`, `bailian-plan` | `BAILIAN_API_KEY` | `qwen3.6-plus` | `qwen3.6-plus`, `qwen3.6-flash`, `qwen3.6-coder-plus`, `qwen3-max-plus`, `qwen-vl-max` |
+| `volcano` | `VOLCANO_API_KEY` | `doubao-seed-1-8-251228` | `doubao-seed-1-8-251228`, `doubao-pro-32k`, `doubao-pro-128k`, `doubao-lite-32k`, `doubao-seed-1-6-250615` |
+| `volcano-plan` | `VOLCANO_API_KEY` | `ark-code-latest` | `ark-code-latest`, `doubao-seed-code`, `glm-4.7`, `kimi-k2-thinking`, `doubao-seed-code-preview-251028` |
+| `openrouter` | `OPENROUTER_API_KEY` | `openai/gpt-4o` | `openai/gpt-5.1`, `anthropic/claude-opus-4.7`, `anthropic/claude-sonnet-4.6`, `google/gemini-2.5-pro`, `meta-llama/llama-4-maverick`, `deepseek/deepseek-v3-0324` |
+| `tencent`, `tencent-plan` | `TENCENT_API_KEY` | `hunyuan-lite` | `hunyuan-turbo-latest`, `hunyuan-t1-latest`, `hunyuan-standard`, `hunyuan-lite`, `hunyuan-vision` |
 
 ## Memory Configuration
 
@@ -179,7 +163,7 @@ Off unless `--enable-harness-rsi` is passed (or `AgentConfig.enable_harness_rsi`
 
 An enabled task does three probe executions, then one official execution of the winner, unless `--harness-call-budget` is below 4. In that case the baseline runs once and is the answer. A patch that would push the prompt or checklist past 512 bytes is discarded and does not fail the task. The official run also skips the prompt cache when the harness changes the prompt, checklist, tool list, or retries. Candidate A can hide the first failing tool when other tools remain and the remaining list is at most 16 names. Fewer errors win a comparison. Equal errors are broken by fewer failed tools. If that still ties, the harness version does not change. If the official run loses that comparison to the baseline probe, the harness rolls back to its parent, including an older version stored in `harness_history`, that patch takes one loss, and the parent is run once more when the call budget still has room. That later run is the answer returned. The kept harness stays in memory for the next task in the same process. Every tool call in a step is recorded, not only the first.
 
-Saved patches live in `harness_patterns` inside `--db-path` and are reused only when `task_tag` matches exactly and `wins > losses`. A patch already present in the loaded harness is not appended again. The kept harness itself is stored in `harness_snapshots` for the same tag, so a new process starts from that harness. Failed tool names from the kept run are stored in `harness_failures` and feed the next proposal when skill self-improve is off. Without `--db-path`, all of this stays in the current process only.
+Saved patches live in `harness_patterns` inside `--db-path` and are reused only when `task_tag` matches exactly and `wins > losses`. Lookup returns at most two rows; only the first prior can replace a candidate. A patch already present in the loaded harness is not appended again. The kept harness itself is stored in `harness_snapshots` for the same tag, and `harness_history` keeps the newest 8 versions so a later rollback can see an older parent. A new process starts from the latest snapshot. Failed tool names from every tool call in the kept run are stored in `harness_failures` and feed the next proposal when skill self-improve is off. Without `--db-path`, all of this stays in the current process only. One request rolls back at most one parent hop.
 
 ## Logging
 

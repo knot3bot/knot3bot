@@ -14,6 +14,7 @@ knot3bot is built in layers:
 │  ┌─────────────────────────────────┐   │
 │  │     ReAct Loop                   │   │
 │  │     Context Compression          │   │
+│  │     Harness RSI (default off)    │   │
 │  │     Trajectory Recording         │   │
 │  └─────────────────────────────────┘   │
 ├─────────────────────────────────────────┤
@@ -58,7 +59,7 @@ With the switch on, k stays 1 even if `harness_rsi_k` is greater than 1. Each ta
 
 A candidate replaces the baseline only when pairwise comparison produces a unique winner. Fewer `error_count` wins. Equal error counts are broken by fewer failed tools. A remaining tie leaves the harness version unchanged. Probe runs use the candidate's `max_retries` and `tool_order`. An empty `tool_order` leaves every registry tool visible. When a failing tool is known and at least one other registry tool would remain, and that remainder is at most 16 names, candidate A replaces `tool_order` with the registry minus that failing tool. The winning prompt section is appended to the system prompt, and a non-empty checklist is appended under the heading `Harness checklist:`. `max_retries` retries a failed tool call only; a failure counts once, after retries are exhausted.
 
-The same process keeps the winning harness and uses it as the next baseline. If the official run is worse than the baseline probe on that same comparison, the session rolls back to the parent harness, searching `harness_history` as well as the in-memory baseline. It runs that parent once more when the call budget still allows it, and returns that run. `--harness-call-budget` defaults to 5. A value below 4 skips the comparison and runs the baseline once. A patch that exceeds 512 bytes is discarded instead of failing the task. A saved patch is not applied again when its text is already in the baseline. With `harness_db_path` set, the kept harness is stored in `harness_snapshots`, older versions stay in `harness_history` (at most 8), and failed tool names from every tool call in the kept run are stored in `harness_failures`. Cross-task patch memory is the `harness_patterns` table. `lookup` matches `task_tag` exactly, returns at most two rows, and only rows where `wins > losses`.
+The same process keeps the winning harness and uses it as the next baseline. If the official run is worse than the baseline probe on that same comparison, the session rolls back to the parent harness, searching `harness_history` as well as the in-memory baseline. It runs that parent once more when the call budget still allows it, and returns that run. `--harness-call-budget` defaults to 5. A value below 4 skips the comparison and runs the baseline once. A patch that exceeds 512 bytes is discarded instead of failing the task. A saved patch is not applied again when its text is already in the baseline. With `harness_db_path` set, the kept harness is stored in `harness_snapshots`, older versions stay in `harness_history` (at most 8), and failed tool names from every tool call in the kept run are stored in `harness_failures`. Cross-task patch memory is the `harness_patterns` table. `lookup` matches `task_tag` exactly, returns at most two rows, and only rows where `wins > losses`. Only the first of those rows can replace a propose slot. One request rolls back at most one parent hop; older bytes in `harness_history` are available on a later task. Propose and the judge stay deterministic: there is no model call that writes the patch or picks the winner, and `harness_rsi_k` above 1 still runs a single round.
 
 Tools with no external implementation (`homeassistant`, `image_generation`, `send_message`, `tts`, `transcription`, `vision`, `screen_capture`) are not in the default registry. Calling `execute` on them returns `success = false`.
 
@@ -101,15 +102,12 @@ When a tool is called:
 
 | Category | Examples |
 |----------|----------|
-| File Operations | read_file, write_file, edit_file, search_files |
-| Shell | shell, process_list, process_kill |
-| Git | git_status, git_log, git_diff, git_branch |
-| Web | web_search, web_fetch |
-| Code | code_execution, code_review |
-| System | cron_list, cron_add, cron_remove |
-| Memory | memory_search, memory_save, memory_recall |
-| MCP | mcp_list, mcp_call |
-| Utility | browser, approve, interrupt, clarify |
+| Workspace | shell, read_file, write_file, list_directory, grep, glob, diff |
+| Web | http_request, web_fetch, web_search, web_extract, browser |
+| Git and process | git, cron, spawn |
+| Agent control | todo, interrupt, clarify, approval, task_planner, delegate, delegate_result |
+| Memory and skills | memory, session_search, skills_list, skill_view, skill_manager, skill_run, skill_self_improve |
+| Other | calculator, checkpoint, credential_files, env_passthrough, url_safety, mcp, mcp_list_servers, code_execution |
 
 ## Provider System
 

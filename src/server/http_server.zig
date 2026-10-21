@@ -261,8 +261,12 @@ pub const Server = struct {
         errdefer allocator.destroy(server.in_memory);
 
         server.in_memory.* = MemorySystem.init(allocator);
-        server.backends[0] = .{ .memory = server.in_memory };
-        if (server.sqlite_memory) |*s| server.backends[1] = .{ .sqlite = s };
+        if (server.sqlite_memory) |*s| {
+            server.backends[0] = .{ .sqlite = s };
+            server.backends[1] = .{ .memory = server.in_memory };
+        } else {
+            server.backends[0] = .{ .memory = server.in_memory };
+        }
         server.memory_manager = MemoryManager.init(allocator, server.backends);
 
         return server;
@@ -576,6 +580,11 @@ pub const Server = struct {
             return;
         }
 
+        const request_model = self.resolveRequestModel(parsed.value.model) catch {
+            try self.sendJson(conn, 400, "{\"error\":{\"message\":\"Model is not on this provider menu\",\"type\":\"invalid_request\"}}", request_id);
+            return;
+        };
+
         const user_message = messages[messages.len - 1].content;
         const stream_requested = parsed.value.stream orelse false;
 
@@ -592,7 +601,7 @@ pub const Server = struct {
         const agent_config = AgentConfig{
             .max_iterations = self.agent_config.max_iterations,
             .system_prompt = system_prompt,
-            .model = self.agent_config.model,
+            .model = request_model,
             .api_key = self.agent_config.api_key,
             .provider = self.agent_config.provider,
             .context_compressor = if (self.context_compressor) |cc| cc else null,
@@ -664,7 +673,7 @@ pub const Server = struct {
             try streamWriteAll(conn, "\r\n\r\n");
 
             // Stream response as SSE chunks
-            const model_name = self.agent_config.model;
+            const model_name = request_model;
             var pos: usize = 0;
             while (pos < response.len) {
                 const end = @min(pos + 40, response.len);
@@ -753,7 +762,7 @@ pub const Server = struct {
                 json_buf = allocating.toArrayList();
             }
             try json_buf.appendSlice(self.allocator, ",\"model\":\"");
-            try json_buf.appendSlice(self.allocator, self.agent_config.model);
+            try json_buf.appendSlice(self.allocator, request_model);
             try json_buf.appendSlice(self.allocator, "\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"");
             try appendJsonEscaped(&json_buf, self.allocator, response);
             try json_buf.appendSlice(self.allocator, "\"}}],\"usage\":{\"prompt_tokens\":");
@@ -812,6 +821,11 @@ pub const Server = struct {
             return;
         }
 
+        const request_model = self.resolveRequestModel(parsed.value.model) catch {
+            try self.sendJson(conn, 400, "{\"error\":{\"message\":\"Model is not on this provider menu\",\"type\":\"invalid_request\"}}", request_id);
+            return;
+        };
+
         const user_message = messages[messages.len - 1].content;
 
         const system_prompt = createDefaultSystemPrompt(allocator, self.registry) catch {
@@ -822,7 +836,7 @@ pub const Server = struct {
         const agent_config = AgentConfig{
             .max_iterations = self.agent_config.max_iterations,
             .system_prompt = system_prompt,
-            .model = self.agent_config.model,
+            .model = request_model,
             .api_key = self.agent_config.api_key,
             .provider = self.agent_config.provider,
             .context_compressor = if (self.context_compressor) |cc| cc else null,
@@ -907,7 +921,7 @@ pub const Server = struct {
             json_buf = allocating.toArrayList();
         }
         try json_buf.appendSlice(self.allocator, ",\"model\":\"");
-        try json_buf.appendSlice(self.allocator, self.agent_config.model);
+        try json_buf.appendSlice(self.allocator, request_model);
         try json_buf.appendSlice(self.allocator, "\",\"choices\":[{\"index\":0,\"message\":{\"role\":\"assistant\",\"content\":\"");
         try appendJsonEscaped(&json_buf, self.allocator, response);
         try json_buf.appendSlice(self.allocator, "\"},\"finish_reason\":\"stop\"}],\"usage\":{\"prompt_tokens\":");
@@ -1332,6 +1346,14 @@ pub const Server = struct {
         const resp = try self.allocator.print("{{\"status\":\"ok\",\"provider\":\"{s}\",\"model\":\"{s}\",\"tools\":{d},\"uptime\":{d},\"total_requests\":{d},\"errors\":{d},\"streaming\":{d},\"circuit_state\":\"{s}\",\"version\":\"{s}\"}}", .{ provider, model, tool_count, uptime, self.metrics.total_requests, self.metrics.error_count, self.metrics.streaming_requests, @tagName(self.circuit_brk.getState()), @import("config").release_version });
         defer self.allocator.free(resp);
         try self.sendJson(conn, 200, resp, request_id);
+    }
+
+    fn resolveRequestModel(self: *const Server, requested: ?[]const u8) error{UnknownModel}![]const u8 {
+        if (requested) |name| {
+            if (!Agent.Agent.modelOnMenu(self.agent_config.provider, name)) return error.UnknownModel;
+            return name;
+        }
+        return self.agent_config.model;
     }
 };
 

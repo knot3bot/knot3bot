@@ -54,70 +54,19 @@ Persistent storage with full SQL querying.
 knot3bot --db-path ./memory.db
 ```
 
-### Multi-Backend
+The CLI and the HTTP server always keep an in-memory backend. With `--db-path` they also open SQLite, write each message to both, and read SQLite first. An empty `--db-path` leaves the process on memory only. `INSERT OR IGNORE` makes a second start with the same session id succeed.
 
-Can use multiple backends simultaneously for caching:
+## Sessions
 
-```bash
-# In-memory cache + SQLite persistence
-# (implemented via MemoryManager)
-```
+`--session <id>` names the conversation stored in the selected backend. The TUI starts a fresh conversation with `/new`. It does not list sessions from the prompt; `GET /api/sessions` does that when the server is running.
 
-## Session Management
+## Memory tool
 
-### Sessions
+The `memory` tool edits `MEMORY.md` or `USER.md`. `target` is `memory` or `user`. `action` is `add`, `replace`, or `remove`. `add` and `replace` take `content`. `replace` and `remove` take `old_text`.
 
-Each conversation is a "session":
+## Harness rows
 
-```bash
-# New session
-knot3bot --session project-x
-
-# Continue session
-knot3bot --session project-x
-
-# List sessions
-knot3bot --session sessions
-```
-
-### Session Structure
-
-```json
-{
-  "id": "project-x",
-  "created_at": 1704067200,
-  "updated_at": 1704070800,
-  "messages": [
-    {"role": "user", "content": "Hello"},
-    {"role": "assistant", "content": "Hi!"}
-  ]
-}
-```
-
-## API
-
-### CLI Commands
-
-```
-> sessions
-Sessions: 3
-  - default
-  - project-x
-  - debug-session
-
-> clear
-Session cleared.
-```
-
-### Tool Interface
-
-Agents can use memory tools:
-
-```
-memory_save(key="important", value="User prefers dark mode")
-memory_recall(key="important")
-memory_search(query="dark mode")
-```
+With `--enable-harness-rsi` and `--db-path`, the same SQLite file also stores `harness_patterns`, `harness_snapshots`, `harness_failures`, and `harness_history`. History keeps the newest eight versions of a task tag. See [architecture.md](architecture.md).
 
 ## Context Compression
 
@@ -132,54 +81,15 @@ When context grows large, the agent can compress old messages:
 
 ### Compression Trigger
 
-Compression is triggered when:
-- Token count exceeds 80% of model limit
-- Agent detects redundant information
-- Manual trigger via `compress` command
+Before an LLM call, the agent estimates tokens in the current transcript. The compressor uses a context length of 128000 unless one was configured, and it compresses when the estimate reaches half of that length. It prunes old tool results, then summarizes a middle span while keeping a protected head and a token-bounded tail. Compression runs inside that loop.
 
-## Performance
-
-### Benchmarks
-
-| Backend | Read | Write | Query |
-|---------|------|-------|-------|
-| In-Memory | < 1ms | < 1ms | < 1ms |
-| SQLite | < 5ms | < 10ms | < 20ms |
-
-### Memory Usage
-
-- In-Memory: ~1KB per message
-- SQLite: ~2KB per message (on-disk)
-
-## Configuration
-
-### Database Location
+## Database path
 
 ```bash
-# Current directory
 knot3bot --db-path ./knot3bot.db
-
-# Home directory
-knot3bot --db-path ~/.knot3bot/memory.db
-
-# Custom path
-knot3bot --db-path /var/lib/knot3bot/memory.db
 ```
 
-### Automatic Cleanup
-
-Old sessions can be auto-cleaned:
-
-```json
-{
-  "memory": {
-    "backend": "sqlite",
-    "db_path": "./memory.db",
-    "ttl_days": 30,
-    "max_sessions": 100
-  }
-}
-```
+Rows stay until something deletes them.
 
 ## Next Steps
 

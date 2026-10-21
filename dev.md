@@ -62,11 +62,11 @@ curl → tcp accept → handleConnection
 
 ## 关键设计决策
 
-- **内存管理**：请求级 ArenaAllocator，长生命周期 GeneralPurposeAllocator/SafeAllocator。工具结果的内存所有权归调用方——`ToolRegistry.call` 会把工具返回值按字节拷出（工具可能返回指向已解析 JSON 参数的借用切片）。
+- **内存管理**：请求级 ArenaAllocator，长生命周期用 `std.heap.SafeAllocator`（page allocator，`deinit` 返回泄漏计数）。工具结果的内存所有权归调用方——`ToolRegistry.call` 会把工具返回值按字节拷出（工具可能返回指向已解析 JSON 参数的借用切片）。
 - **FFI**：Zig 0.17 移除了 `@cImport`，SQLite 头通过 `b.addTranslateC` 生成 `sqlite3_c` 模块；`enable-sqlite` 编译选项在真实现（`sqlite_impl.zig`）与桩（`sqlite_stub.zig`）之间编译期切换。
 - **工具注册**：`factory.zig` 显式构造 + `toolVTable(T)` comptime 生成 vtable（静态分发，无运行时注册开销）。
 - **依赖**：`build.zig.zon` 声明 vaxis（git 依赖）与 sqlite3（路径依赖 vendor/sqlite3）；vaxis 的传递依赖 uucode/zigimg 拉取进 `zig-pkg/` 并为当前工具链打了补丁。websocket/wasm3 已移除（从未接线）。
-- **工具链**：Zig 0.17.0-dev 快照（Homebrew）。依赖包内对扁平化 `@typeInfo` API 的兼容层见 `zig-pkg/uucode-*/src/config.zig` 的 `structFields/enumFields` shim。
+- **工具链**：Zig 0.17.0。依赖包内对扁平化 `@typeInfo` API 的兼容层见 `zig-pkg/uucode-*/src/config.zig` 的 `structFields/enumFields` shim。
 
 ## 测试
 
@@ -77,7 +77,7 @@ curl → tcp accept → handleConnection
 ## 已知边界（诚实清单）
 
 - `mcp` / `mcp_list_servers` 工具是占位（返回说明文案，需要异步基础设施）
-- `process_registry` 的 spawn、`session_search`、`vision`/`screen_capture` 部分逻辑为占位
+- `homeassistant`、`image_generation`、`send_message`、`tts`、`transcription`、`vision`、`screen_capture` 未注册，直接 `execute` 返回 `not_available`
 - `memory.openviking` 后端枚举值未实现（返回 `error.NotImplemented`）
 - gateway 仅实现 cli/http 两个平台
 - ACP 适配器实现的是最小子集（无 session/update 流式通知、无 fs/tool 桥接）

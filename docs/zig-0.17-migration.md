@@ -157,7 +157,7 @@ Update `.minimum_zig_version` in all `build.zig.zon` files:
 zig build                          # succeeds
 
 # Tests
-zig build test                     # All 356 tests pass via the unified root
+zig build test                     # All tests pass via the unified root
                                    # (src/tests.zig); use --summary all for
                                    # the per-suite breakdown
 ```

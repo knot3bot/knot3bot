@@ -25,7 +25,8 @@ DEEPSEEK_API_KEY=sk-xxx ./zig-out/bin/knot3bot --server --port 8080
 - **Context compression** — automatic token budget management via LLM summarization
 - **Smart model routing** — automatic provider/model selection
 - **Trajectory recording** — JSONL audit logs for every agent run
-- **Skill system** — 5 default skills (plan/debug/research/review/shell-safety) with safety levels
+- **Skill system** — built-in skills under `src/skills/`, plus `skills_list`, `skill_view`, `skill_manager`, and `skill_run`
+- **Harness RSI** — off by default. One comparison round can adjust the prompt, checklist, retries, and visible tools, then keep the winner. See [Configuration](docs/configuration.md#harness-rsi)
 - **Credential pool** — multi-key rotation (`*_API_KEY`, `*_API_KEY_2`...`_5`)
 - **Memory** — in-memory + SQLite (FTS5 full-text search), conversation history persistence
 
@@ -44,14 +45,15 @@ DEEPSEEK_API_KEY=sk-xxx ./zig-out/bin/knot3bot --server --port 8080
 - **Metrics panel** — requests, latency, tokens, errors with 5s auto-refresh
 - **Session management** — per-session message history
 
-### Tools (44)
-`shell`, `read_file`, `write_file`, `list_directory`, `grep`, `glob`, `todo`, `calculator`,
+### Tools (37 in the default registry)
+`shell`, `read_file`, `write_file`, `list_directory`, `grep`, `glob`, `calculator`,
 `git`, `cron`, `http_request`, `web_fetch`, `web_search`, `web_extract`, `browser`, `spawn`,
-`task_planner`, `diff`, `approval`, `url_safety`, `session_search`, `homeassistant`,
-`image_generation`, `send_message`, `transcription`, `tts`, `vision`, `screen_capture`,
-`clarify`, `env_passthrough`, `interrupt`, `mcp`, `mcp_list_servers`, `checkpoint`,
+`task_planner`, `diff`, `approval`, `url_safety`, `session_search`, `clarify`,
+`env_passthrough`, `interrupt`, `todo`, `mcp`, `mcp_list_servers`, `checkpoint`,
 `delegate`, `delegate_result`, `skill_self_improve`, `credential_files`, `code_execution`,
-`memory`, `skills_list`, `skill_view`, `skill_manage`, `skill_run`
+`memory`, `skills_list`, `skill_view`, `skill_manager`, `skill_run`
+
+`code_execution` is registered and reports that the sandbox is not available in this build. `homeassistant`, `image_generation`, `send_message`, `tts`, `transcription`, `vision`, and `screen_capture` are not registered; calling them returns `not_available`.
 
 ### Providers (10)
 | Provider | Models | Env Variable |
@@ -63,9 +65,9 @@ DEEPSEEK_API_KEY=sk-xxx ./zig-out/bin/knot3bot --server --port 8080
 | Kimi | kimi-k2.5, kimi-k2-thinking | `KIMI_API_KEY` |
 | MiniMax | MiniMax-M2.7, MiniMax-M2.5 | `MINIMAX_API_KEY` |
 | Z.ai | glm-4.7, glm-4.7-flash | `ZAI_API_KEY` |
-| OpenRouter | gpt-5.5, claude-opus-4-7, gemini-2.5-pro | `OPENROUTER_API_KEY` |
-| Volcano | doubao-seed, doubao-pro | `VOLCANO_API_KEY` |
-| Tencent | hunyuan-turbo, hunyuan-t1 | `TENCENT_API_KEY` |
+| OpenRouter | openai/gpt-4o (default), openai/gpt-5.1, google/gemini-2.5-pro | `OPENROUTER_API_KEY` |
+| Volcano | doubao-seed-1-8-251228, doubao-pro-32k | `VOLCANO_API_KEY` |
+| Tencent | hunyuan-lite (default), hunyuan-turbo-latest, hunyuan-t1-latest | `TENCENT_API_KEY` |
 
 ### Security
 - Constant-time API key comparison (timing attack prevention)
@@ -90,33 +92,32 @@ DEEPSEEK_API_KEY=sk-xxx ./zig-out/bin/knot3bot --server --port 8080
 
 ```
 src/
-├── llm/             # Provider adapters (OpenAI-compatible, Anthropic)
-├── interface/       # CLI, Gateway, ACP IDE adapter
-├── intelligence/    # Skills, memory, cron scheduler
-├── security/        # Validation, URL safety, approval
-├── agent/           # ReAct loop, context compression, trajectory
+├── agent/           # ReAct loop, context compression, trajectory, harness RSI
 ├── memory/          # In-memory + SQLite (FTS5) backends
-├── providers/       # LLM client implementations
-├── server/          # HTTP API server + rate limiter + circuit breaker
-├── tools/           # 44 tool implementations
-├── gateway/         # Message routing (cli + http adapters)
-├── adapters/        # ACP IDE adapter (--acp, minimal JSON-RPC subset)
-└── shared/          # JSON utilities, logger, context
+├── providers/       # OpenAI-compatible and Anthropic clients
+├── server/          # HTTP API, rate limiter, circuit breaker
+├── tools/           # Default tool registry
+├── gateway/         # CLI and HTTP platform adapters
+├── adapters/        # ACP over stdio (--acp)
+├── tui/             # Interactive UI (libvaxis)
+└── shared/          # JSON utilities, logger, process context
 ```
 
 ## CLI Commands
 
 | Command | Description |
 |---------|------------|
-| `/setup` | Interactive configuration wizard (provider → key → model) |
-| `/model [name]` | Switch model or show interactive selector |
-| `/provider` | Switch AI provider |
+| `--config` | Configuration wizard (provider, key, model) |
+| `/model` | Open the model menu |
+| `/model <name>` | Switch model |
 | `/config` | Show current configuration |
-| `/tools` | Show tool state, enable/disable tools |
-| `/skills` | Show and activate skills |
-| `/new` | Start new conversation |
-| `/help` | Show all commands |
-| `/quit` | Exit |
+| `/tools` | List registered tools |
+| `/skills` | Open the skills menu |
+| `/new` | Start a new session |
+| `/help`, `/h` | Show commands |
+| `/quit`, `/q` | Exit |
+
+`--provider` selects the provider before startup. Names: `openai`, `deepseek`, `kimi`, `minimax`, `zai`, `bailian`, `volcano`, `openrouter`, `tencent`, plus `-plan` variants where the provider defines them.
 
 ## HTTP API
 
@@ -137,9 +138,12 @@ curl http://localhost:8080/health
 
 ## Development
 
+Requires Zig 0.17.0.
+
 ```bash
-zig build              # Build (default: ReleaseSafe)
-zig build test         # Run tests (356 tests via unified root src/tests.zig)
+zig build              # Build
+zig build -Doptimize=safe
+zig build test         # Tests imported by src/tests.zig
 zig build benchmark    # Performance benchmarks
 zig fmt src/           # Format code
 ```

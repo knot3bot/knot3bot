@@ -1,227 +1,39 @@
 # Provider System
 
-knot3bot supports multiple LLM providers through a unified interface.
+knot3bot talks to one provider per process. The model menu and default model for that provider are the lists in [configuration.md](configuration.md).
 
-## Overview
+## Transports
 
-```
-┌─────────────────────────────────────┐
-│            Agent Core               │
-└───────────────┬─────────────────────┘
-                │ chat() / chatWithTools()
-                ▼
-┌─────────────────────────────────────┐
-│          Provider Interface          │
-│  (unified API for all providers)    │
-└───────────────┬─────────────────────┘
-                │
-    ┌───────────┼───────────┐
-    ▼           ▼           ▼
-┌────────┐ ┌────────┐ ┌────────┐
-│ OpenAI │ │Anthropic│ │ Kimi   │
-└────────┘ └────────┘ └────────┘
-```
+| Transport | Providers | Client |
+|-----------|-----------|--------|
+| OpenAI-compatible HTTP | openai, deepseek, kimi, kimi-plan, minimax, minimax-plan, zai, bailian, bailian-plan, volcano, volcano-plan, openrouter, tencent, tencent-plan | `src/providers/openai_compatible.zig` |
+| Anthropic Messages API | anthropic | `src/providers/anthropic.zig` |
 
-## Supported Providers
+Anthropic tool calls are converted to and from the tool shape the agent uses for every other provider.
 
-| Provider | Models | Tool Support | API Style |
-|----------|--------|--------------|----------|
-| OpenAI | GPT-4, GPT-3.5 | Native | OpenAI |
-| Anthropic | Claude 3 | Native | Anthropic |
-| Kimi | moonshot-v1 | Via adapter | OpenAI-compatible |
-| MiniMax | abab6-chat | Via adapter | OpenAI-compatible |
-| ZAI | glm-4 | Via adapter | OpenAI-compatible |
-| Bailian | qwen-plus | Via adapter | OpenAI-compatible |
-| Volcano | doubao-pro | Via adapter | OpenAI-compatible |
+Each provider exposes `models()`, `defaultModel()`, and `name()`. `name()` is the display string (`OpenAI`, `Anthropic`, `DeepSeek`, …) and is what `/health` and `/ready` return.
 
-## Provider Interface
-
-All providers implement:
-
-```zig
-pub const Provider = interface {
-    /// Send chat request
-    fn chat(messages: []Message) !ChatResponse;
-
-    /// Send chat with tools
-    fn chatWithTools(messages: []Message, tools: []Tool) !ChatResponse;
-
-    /// List available models
-    fn models() []const []const u8;
-
-    /// Get default model
-    fn defaultModel() []const u8;
-
-    /// Get provider name
-    fn name() []const u8;
-};
-```
-
-## OpenAI Provider
-
-### Configuration
+## Choosing a provider
 
 ```bash
 export OPENAI_API_KEY=sk-...
-knot3bot --provider openai --model gpt-4
-```
+knot3bot --provider openai
 
-### Available Models
-
-| Model | Context | Tool Support |
-|-------|---------|--------------|
-| gpt-4o | 128K | Yes |
-| gpt-4-turbo | 128K | Yes |
-| gpt-4 | 8K / 32K | Yes |
-| gpt-3.5-turbo | 16K | Yes |
-
-## Anthropic Provider
-
-### Configuration
-
-```bash
 export ANTHROPIC_API_KEY=sk-ant-...
-knot3bot --provider anthropic --model claude-3-5-sonnet-20241022
+knot3bot --provider anthropic --model claude-sonnet-4-6
+
+export DEEPSEEK_API_KEY=...
+knot3bot --provider deepseek
 ```
 
-### Available Models
+`--model` must be a name from that provider's menu. An unknown name is rejected at startup.
 
-| Model | Context | Tool Support |
-|-------|---------|--------------|
-| claude-3-5-sonnet | 200K | Yes |
-| claude-3-opus | 200K | Yes |
-| claude-3-sonnet | 200K | Yes |
-| claude-3-haiku | 200K | Yes |
+## Credential pool
 
-### Tool Calling
+The interactive TUI and the HTTP server collect extra keys from the environment. For the selected provider they read `NAME` and then `NAME_2` through `NAME_5`, and they stop at the first missing suffix. `OPENAI_API_KEY` plus `OPENAI_API_KEY_2` is a pool of two. `OPENAI_API_KEY` plus `OPENAI_API_KEY_3` with no `_2` is a pool of one.
 
-Anthropic uses a different tool format. knot3bot automatically:
-- Converts OpenAI-style tools to Anthropic format
-- Converts Anthropic tool results back to OpenAI format
-- Maintains compatibility across providers
+The pool rotates the key used to build the HTTP client. It does not change the provider.
 
-## OpenAI-Compatible Providers
+## Model selection
 
-Kimi, MiniMax, ZAI, Bailian, and Volcano use the OpenAI-compatible API.
-
-### Configuration
-
-```bash
-# Kimi
-export KIMI_API_KEY=...
-knot3bot --provider kimi
-
-# Bailian (Qwen)
-export BAILIAN_API_KEY=...
-knot3bot --provider bailian --model qwen-plus
-
-# Custom base URL (if needed)
-# Via config file
-```
-
-## Smart Routing
-
-The agent can automatically select the best provider/model:
-
-### Routing Strategy
-
-1. **Task Analysis**: Analyze request complexity
-2. **Context Check**: Match to available context lengths
-3. **Cost Optimization**: Prefer cheaper models for simple tasks
-4. **Availability**: Fallback on failures
-
-### Enabling Smart Routing
-
-```bash
-knot3bot --smart-routing
-```
-
-Or via config:
-
-```json
-{
-  "behavior": {
-    "smart_routing": true
-  }
-}
-```
-
-## Credential Pooling
-
-For high-volume usage, rotate across multiple API keys:
-
-```bash
-export OPENAI_API_KEY_1=sk-...
-export OPENAI_API_KEY_2=sk-...
-export OPENAI_API_KEY_3=sk-...
-```
-
-The agent will distribute requests across keys automatically.
-
-## Error Handling
-
-### Provider Errors
-
-| Error | Action |
-|-------|--------|
-| 401 Unauthorized | Check API key |
-| 429 Rate Limited | Retry with backoff |
-| 500 Server Error | Retry |
-| Circuit Open | Fast fail |
-
-### Fallback Chains
-
-Configure fallback providers:
-
-```json
-{
-  "providers": {
-    "primary": "openai",
-    "fallback": ["anthropic", "bailian"]
-  }
-}
-```
-
-## Custom Providers
-
-### Adding a New Provider
-
-1. Create provider file: `src/providers/myprovider.zig`
-2. Implement `Provider` interface
-3. Add to enum in `src/providers/root.zig`
-
-```zig
-pub const Provider = enum {
-    openai,
-    anthropic,
-    kimi,
-    minimax,
-    zai,
-    bailian,
-    volcano,
-    myprovider,  // Add here
-};
-```
-
-4. Register in agent config
-
-## Performance
-
-### Latency Comparison
-
-| Provider | Avg Latency | Notes |
-|----------|-------------|-------|
-| OpenAI | ~500ms | May vary by region |
-| Anthropic | ~600ms | Generally consistent |
-| Bailian | ~300ms | Fast in China |
-
-### Cost Optimization
-
-- Simple tasks → use smaller/cheaper models
-- Tool use → prefer providers with native support
-- Long contexts → use providers with large context
-
-## Next Steps
-
-- [Architecture Overview](architecture.md) — System architecture
-- [Configuration](configuration.md) — Provider configuration
+Interactive mode and the HTTP server turn on model selection when a model registry is loaded. Selection stays on the current provider's menu. A name from `provider.models()` is sent as-is. Routing runs when the configured name is on neither that menu nor the metadata registry.

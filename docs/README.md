@@ -22,8 +22,9 @@ Welcome to the knot3bot documentation!
 
 ## Development
 
-- [Contributing](../CONTRIBUTING.md) — How to contribute to knot3bot
 - [Building from Source](building.md) — Build instructions for all platforms
+- [Zig 0.17 migration](zig-0.17-migration.md) — Language and standard-library changes already applied in this tree
+- [Contributing](CONTRIBUTING.md) — How to contribute to knot3bot
 
 ---
 

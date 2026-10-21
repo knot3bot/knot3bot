@@ -18,20 +18,30 @@ The server will start on `http://localhost:8080`.
 GET /health
 ```
 
-Returns server status:
+`version` is the package version compiled into the binary (`0.4.2`). `tools` is the number of tools in that process's registry.
+
+`GET /healthz` is the same check as `/health`.
+
+Pass `--enable-harness-rsi`, `--harness-tag`, and `--harness-call-budget` on the server command to turn the comparison on for each request. HTTP builds a new agent per request, so the in-memory harness does not carry across requests; `--db-path` does.
 
 ```json
 {
   "status": "ok",
   "service": "knot3bot",
-  "version": "0.1.0",
+  "version": "0.4.2",
+  "commit": "abc1234",
   "uptime_seconds": 3600,
-  "provider": "openai",
-  "model": "gpt-4",
-  "tools": 30,
-  "request_id": "abc123"
+  "provider": "OpenAI",
+  "model": "gpt-5.5",
+  "tools": 37,
+  "skill_self_improve": "disabled",
+  "request_id": "abc123",
+  "memory_rss_bytes": 0,
+  "total_requests": 1
 }
 ```
+
+`provider` is the display name from the provider enum (`OpenAI`, not `openai`). `memory_rss_bytes` is `0` except on Linux, where it reads `/proc/self/statm`. `commit` is the short git revision captured at build time, or `dev`.
 
 ### Readiness Check
 
@@ -55,14 +65,14 @@ Returns deep health including database connectivity:
 POST /v1/chat/completions
 ```
 
-Compatible with OpenAI API:
+Compatible with OpenAI API. `model` must be on the provider menu this server was started with. Leave it out to use the process model. A name off that menu returns 400.
 
 ```bash
 curl -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -d '{
-    "model": "gpt-4",
+    "model": "gpt-5.5",
     "messages": [
       {"role": "system", "content": "You are a helpful assistant."},
       {"role": "user", "content": "Hello!"}
@@ -78,7 +88,7 @@ Response:
   "id": "chatcmpl-123",
   "object": "chat.completion",
   "created": 1704067200,
-  "model": "gpt-4",
+  "model": "gpt-5.5",
   "choices": [{
     "index": 0,
     "message": {
@@ -108,7 +118,7 @@ curl -X POST http://localhost:8080/v1/responses \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -d '{
-    "model": "gpt-4",
+    "model": "gpt-5.5",
     "input": "Hello!"
   }'
 ```
@@ -119,14 +129,13 @@ curl -X POST http://localhost:8080/v1/responses \
 GET /v1/models
 ```
 
-Returns available models:
+Returns `provider.models()` for the provider this server was started with. `owned_by` is `Provider.name()` (`OpenAI`, not `openai`). `created` is the server clock at request time.
 
 ```json
 {
   "object": "list",
   "data": [
-    {"id": "gpt-4", "object": "model", "created": 1704067200, "owned_by": "openai"},
-    {"id": "gpt-3.5-turbo", "object": "model", "created": 1704067200, "owned_by": "openai"}
+    {"id": "gpt-5.5", "object": "model", "created": 1704067200, "owned_by": "OpenAI"}
   ]
 }
 ```

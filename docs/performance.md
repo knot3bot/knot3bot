@@ -107,16 +107,8 @@ defer arena.deinit();
 const allocator = arena.allocator();
 ```
 
-### 4. Streaming Responses
-Enable streaming to reduce perceived latency:
-```bash
-./knot3bot --stream
-```
-
-### 5. Model Selection
-Choose smaller models for simple tasks:
-- Simple queries: `gpt-3.5-turbo` or `glm-4`
-- Complex reasoning: `gpt-4o` or `claude-3-5-sonnet`
+### 4. Streaming and model choice
+Chat completions and the dashboard stream tokens as the provider returns them. The TUI shows the same stream. Model choice is `--model`; defaults and menus are in [Configuration](configuration.md#provider-configuration).
 
 ## Profiling
 
@@ -130,7 +122,8 @@ perf report
 ### Memory Profiling
 Run with debug allocator:
 ```zig
-var gpa = std.heap.GeneralPurposeAllocator(.{ .verbose_log = true }){};
+var safe_allocator: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
+defer if (safe_allocator.deinit() != 0) @panic("memory leak");
 ```
 
 ## Known Performance Characteristics
@@ -162,6 +155,6 @@ regression reference.
 | ReActStep.toJSON | 483µs/op |
 | ToolResult.ok / .fail | 3–4ns/op |
 | JSON parsing (tool args) | 183µs/op |
-| ToolRegistry init (44 tools) | 48µs/op |
+| ToolRegistry init (37 tools) | 48µs/op |
 | String duplication (10k) | 43µs/op |
 | Arena allocation (10k) | 88µs/op |

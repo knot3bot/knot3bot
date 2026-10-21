@@ -43,11 +43,11 @@ knot3bot/
 | `zig build run` | Build and run |
 | `zig build test` | Run tests |
 | `zig fmt src/` | Format all source files |
-| `zig build --release=fast` | Optimized release build |
+| `zig build -Doptimize=fast` | Optimized release build |
 
 ## Architecture Decisions
 
-- **Memory Management**: ArenaAllocator for request-scoped allocations, GeneralPurposeAllocator for long-lived state
+- **Memory Management**: ArenaAllocator for request-scoped allocations, `std.heap.SafeAllocator` (page allocator) for long-lived debug checks
 - **Concurrency**: std.Thread thread pools
 - **Tool Registry**: comptime tool registration and static dispatch
 - **FFI Strategy**: `addTranslateC` translates `vendor/sqlite3/sqlite3.h` (0.17 removed `@cImport`); system libsqlite3 is linked; pure Zig for JSON/HTTP
@@ -62,7 +62,7 @@ knot3bot/
 ## Testing
 
 ```bash
-# Run all tests (356 tests across one unified binary, src/tests.zig)
+# Run all tests (one unified binary, src/tests.zig)
 zig build test
 
 # Per-suite breakdown

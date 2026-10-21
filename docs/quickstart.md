@@ -22,38 +22,7 @@ See [Configuration](configuration.md) for all supported providers.
 ./zig-out/bin/knot3bot --provider openai
 ```
 
-You'll see:
-
-```
-knot3bot v0.0.1
-
-Session: default | Memory: in-memory | Provider: openai | Model: gpt-4
-Commands: exit/quit, clear, sessions
-
-> _
-```
-
-Type your question and press Enter:
-
-```
-> Hello, what can you do?
-
-[Agent running...]
-
-Final Answer:
-Hello! I'm knot3bot, an AI coding agent built in Zig. I can help you with:
-
-• Writing and editing code
-• Reading and analyzing files
-• Running shell commands
-• Git operations
-• Web searches and fetches
-• And much more!
-
-Just describe what you need, and I'll help you accomplish it.
-
-Iterations: 1 | Tool calls: 0 | API calls: 1
-```
+Interactive mode uses the libvaxis TUI. The prompt is `> `. `/help` lists `/model`, `/config`, `/tools`, `/skills`, `/new`, and `/quit`. Harness comparison stays off unless you pass `--enable-harness-rsi`.
 
 ## 3. Try a Task
 
@@ -80,20 +49,14 @@ curl -X POST http://localhost:8080/v1/chat/completions \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer $OPENAI_API_KEY" \
   -d '{
-    "model": "gpt-4",
+    "model": "gpt-5.5",
     "messages": [{"role": "user", "content": "Hello!"}]
   }'
 ```
 
 ## 5. Interactive Commands
 
-In CLI mode:
-
-| Command | Description |
-|--------|-------------|
-| `exit`, `quit` | Exit the program |
-| `clear` | Clear current session |
-| `sessions` | List all sessions |
+`/help` lists them. The set is `/help`, `/quit`, `/new`, `/config`, `/model`, `/tools`, and `/skills`.
 
 ## Example Tasks
 

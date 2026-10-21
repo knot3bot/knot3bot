@@ -224,7 +224,8 @@ fn parseArgs(args: std.process.Args, environ: *const std.process.Environ.Map) !C
         } else if (std.mem.eql(u8, arg, "--config") or std.mem.eql(u8, arg, "configure")) {
             config.config_mode = true;
         } else if (std.mem.eql(u8, arg, "--db-path")) {
-            config.db_path = args_iter.next() orelse return error.MissingDbPath;
+            const path = args_iter.next() orelse return error.MissingDbPath;
+            config.db_path = if (path.len == 0) null else path;
         } else if (std.mem.eql(u8, arg, "--session")) {
             config.session_id = args_iter.next() orelse return error.MissingSession;
         } else if (std.mem.eql(u8, arg, "--model")) {
@@ -309,9 +310,11 @@ fn sessionPrompt(config: *const CliConfig) []const u8 {
     return "> ";
 }
 
-fn printSessionInfo(config: *const CliConfig, memory_path: []const u8) void {
+fn printSessionInfo(config: *const CliConfig, memory_path: []const u8, tool_count: usize) void {
     var disp = display.Display.init(std.heap.page_allocator);
-    disp.printHeader("knot3bot v0.1.0");
+    var header_buf: [64]u8 = undefined;
+    const header = std.fmt.bufPrint(&header_buf, "knot3bot v{s}", .{@import("config").release_version}) catch "knot3bot";
+    disp.printHeader(header);
     const model_display: []const u8 = if (config.model.len > 0) config.model else "(not set)";
     std.debug.print("\n", .{});
     std.debug.print("  {s}Provider:{s} {s}    {s}Model:{s} {s}    {s}Session:{s} {s}\n", .{
@@ -319,9 +322,9 @@ fn printSessionInfo(config: *const CliConfig, memory_path: []const u8) void {
         display.Colors.dim, display.Colors.reset, model_display,
         display.Colors.dim, display.Colors.reset, config.session_id,
     });
-    std.debug.print("  {s}Memory:{s}  {s}    {s}Tools:{s} 16 loaded\n", .{
+    std.debug.print("  {s}Memory:{s}  {s}    {s}Tools:{s} {d} loaded\n", .{
         display.Colors.dim, display.Colors.reset, memory_path,
-        display.Colors.dim, display.Colors.reset,
+        display.Colors.dim, display.Colors.reset, tool_count,
     });
     if (config.api_key == null) {
         std.debug.print("\n  {s}Warning:{s} No API key configured.\n", .{ display.Colors.yellow, display.Colors.reset });
@@ -334,7 +337,96 @@ const ManagerMemoryBackend = @import("memory/root.zig").ManagerMemoryBackend;
 const MemorySystem = @import("memory/root.zig").MemorySystem;
 const SqliteMemorySystem = @import("memory/root.zig").SqliteMemorySystem;
 
-fn runCliMode(config: *CliConfig, registry: *ToolRegistry) !void {
+fn applySelectedModel(config: *CliConfig, vx_tui: *tui.App, arena: std.mem.Allocator, name: []const u8, agent: ?*Agent.Agent) !void {
+    if (!Agent.Agent.modelOnMenu(config.provider, name)) {
+        try vx_tui.addMessage(.err, "Model is not on this provider menu.");
+        return;
+    }
+    const owned = try arena.dupe(u8, name);
+    config.model = owned;
+    vx_tui.model_name = owned;
+    if (agent) |a| a.setModel(owned);
+    try vx_tui.addMessage(.system, try arena.print("Model: {s}", .{owned}));
+}
+
+fn beginNewSession(manager: *MemoryManager, session_id: []const u8, vx_tui: *tui.App, agent: ?*Agent.Agent) !void {
+    manager.deleteSession(session_id);
+    manager.createSession(session_id) catch {};
+    if (agent) |a| a.resetConversation();
+    vx_tui.clearMessages();
+    try vx_tui.addMessage(.system, "New session.");
+}
+
+fn fillSkillMenu(vx_tui: *tui.App, arena: std.mem.Allocator, workspace_dir: []const u8) !void {
+    vx_tui.menu_items.clearRetainingCapacity();
+    const skill_path = try arena.print("{s}/skills", .{workspace_dir});
+    var dir = shared.context.cwdOpenDir(skill_path, .{ .iterate = true }) catch {
+        try vx_tui.menu_items.append(vx_tui.allocator, "(no skills)");
+        return;
+    };
+    defer dir.close(shared.context.io());
+
+    var count: usize = 0;
+    var iter = dir.iterate();
+    while (iter.next(shared.context.io()) catch null) |entry| {
+        if (entry.kind != .directory) continue;
+        const name = try arena.dupe(u8, entry.name);
+        try vx_tui.menu_items.append(vx_tui.allocator, name);
+        count += 1;
+    }
+    if (count == 0) try vx_tui.menu_items.append(vx_tui.allocator, "(no skills)");
+}
+
+const ReplyJob = struct {
+    agent: *Agent.Agent,
+    query: []u8,
+    tui: *tui.App,
+    thread: std.Thread = undefined,
+    done: std.atomic.Value(bool) = .init(false),
+    ok: bool = false,
+    text: []const u8 = "",
+    err_name: []const u8 = "",
+
+    /// One model call per message. `runStreaming` issues a streamed call and
+    /// then a second blocking call for the same turn, which doubles the cost
+    /// and can show text that differs from the final answer.
+    fn run(self: *ReplyJob) void {
+        const result = self.agent.run(self.query) catch |err| {
+            self.err_name = @errorName(err);
+            self.done.store(true, .release);
+            self.tui.wake();
+            return;
+        };
+        self.text = result;
+        self.ok = true;
+        self.done.store(true, .release);
+        self.tui.wake();
+    }
+};
+
+fn settleReply(gpa: std.mem.Allocator, slot: *?*ReplyJob, vx_tui: *tui.App, manager: *MemoryManager, session_id: []const u8) void {
+    const job = slot.* orelse return;
+    if (!job.done.load(.acquire)) return;
+    job.thread.join();
+    vx_tui.endBusy();
+    if (job.ok) {
+        const shown = cleanResponse(gpa, job.text) catch job.text;
+        vx_tui.addMessage(.assistant, shown) catch {};
+        if (shown.ptr != job.text.ptr) gpa.free(shown);
+        vx_tui.token_prompt = job.agent.usage.prompt_tokens;
+        vx_tui.token_completion = job.agent.usage.completion_tokens;
+        manager.addMessage(session_id, "user", job.query) catch {};
+        manager.addMessage(session_id, "assistant", job.text) catch {};
+    } else {
+        const name = if (job.err_name.len > 0) job.err_name else "reply failed";
+        vx_tui.addMessage(.err, name) catch {};
+    }
+    gpa.free(job.query);
+    gpa.destroy(job);
+    slot.* = null;
+}
+
+fn runCliMode(config: *CliConfig, registry: *ToolRegistry, workspace_dir: []const u8) !void {
     const gpa = shared.context.gpa();
     var arena = std.heap.ArenaAllocator.init(gpa);
     defer arena.deinit();
@@ -349,8 +441,12 @@ fn runCliMode(config: *CliConfig, registry: *ToolRegistry) !void {
     }
 
     const backends = try allocator.alloc(ManagerMemoryBackend, if (sqlite != null) 2 else 1);
-    backends[0] = .{ .memory = &in_memory };
-    if (sqlite) |s| backends[1] = .{ .sqlite = s };
+    if (sqlite) |s| {
+        backends[0] = .{ .sqlite = s };
+        backends[1] = .{ .memory = &in_memory };
+    } else {
+        backends[0] = .{ .memory = &in_memory };
+    }
 
     var manager = MemoryManager.init(allocator, backends);
     defer manager.deinit();
@@ -363,7 +459,7 @@ fn runCliMode(config: *CliConfig, registry: *ToolRegistry) !void {
     try manager.createSession(config.session_id);
 
     const memory_path = if (config.db_path) |p| p else "in-memory";
-    printSessionInfo(config, memory_path);
+    printSessionInfo(config, memory_path, registry.count());
 
     // Init vaxis TUI
     const env_map: *std.process.Environ.Map = @constCast(shared.context.environ());
@@ -373,7 +469,9 @@ fn runCliMode(config: *CliConfig, registry: *ToolRegistry) !void {
     vx_tui.model_name = config.model;
     vx_tui.session_id = config.session_id;
     vx_tui.tools_count = registry.count();
-    try vx_tui.addMessage(.system, "knot3bot v0.2.0 — /help for commands, /quit to exit.");
+    var hello_buf: [96]u8 = undefined;
+    const hello = std.fmt.bufPrint(&hello_buf, "knot3bot v{s} — /help for commands, /quit to exit.", .{@import("config").release_version}) catch "knot3bot — /help for commands, /quit to exit.";
+    try vx_tui.addMessage(.system, hello);
     try vx_tui.start();
     defer vx_tui.stop();
 
@@ -390,139 +488,194 @@ fn runCliMode(config: *CliConfig, registry: *ToolRegistry) !void {
     defer if (si_engine) |*si| si.deinit();
     var cp: credential_pool.CredentialPool = undefined;
 
+    var reply_job: ?*ReplyJob = null;
+    defer if (reply_job != null) {
+        // The worker owns the agent and can sit in a network call for up to
+        // two minutes. Waiting for it would freeze the quit, so put the
+        // terminal back and leave the process instead.
+        vx_tui.endBusy();
+        vx_tui.stop();
+        std.process.exit(0);
+    };
+
+    var queued_msg: ?[]u8 = null;
+    defer if (queued_msg) |q| gpa.free(q);
+
     try vx_tui.renderFrame();
 
     while (!vx_tui.should_quit and !g_shutdown_flag.load(.monotonic)) {
-        // Process pending TUI actions
-        if (vx_tui.takeAction()) |action| {
-            switch (action) {
-                .quit => vx_tui.quit(),
-                .new_session => {
-                    manager.deleteSession(config.session_id);
-                    manager.createSession(config.session_id) catch {};
-                    try vx_tui.addMessage(.system, "New session started.");
-                },
-                .send_message => |msg| {
-                    defer gpa.free(msg);
-                    const trimmed = std.mem.trim(u8, msg, " \t\n\r");
-                    if (trimmed.len == 0) continue;
-
-                    // Slash commands
-                    if (trimmed.len > 0 and trimmed[0] == '/') {
-                        if (std.mem.eql(u8, trimmed, "/help") or std.mem.eql(u8, trimmed, "/h")) {
-                            vx_tui.show_help = true;
-                        } else if (std.mem.eql(u8, trimmed, "/quit") or std.mem.eql(u8, trimmed, "/q")) {
-                            vx_tui.quit();
-                        } else if (std.mem.eql(u8, trimmed, "/new")) {
-                            try vx_tui.addMessage(.system, "New session.");
-                        } else if (std.mem.eql(u8, trimmed, "/config")) {
-                            vx_tui.show_config = true;
-                        } else if (std.mem.eql(u8, trimmed, "/model")) {
-                            vx_tui.menu_items.clearRetainingCapacity();
-                            for (config.provider.models()) |m| try vx_tui.menu_items.append(m);
-                            vx_tui.menu_title = "Select Model";
-                            vx_tui.menu_selected = 0;
-                            vx_tui.show_models = true;
-                        } else if (std.mem.eql(u8, trimmed, "/tools")) {
-                            vx_tui.menu_items.clearRetainingCapacity();
-                            for (registry.list()) |e| try vx_tui.menu_items.append(e.spec.name);
-                            vx_tui.menu_title = "Tools";
-                            vx_tui.menu_selected = 0;
-                            vx_tui.show_tools = true;
-                        } else if (std.mem.eql(u8, trimmed, "/skills")) {
-                            vx_tui.menu_items.clearRetainingCapacity();
-                            try vx_tui.menu_items.append("(no skills)");
-                            vx_tui.menu_title = "Skills";
-                            vx_tui.menu_selected = 0;
-                            vx_tui.show_skills = true;
-                        } else if (std.mem.startsWith(u8, trimmed, "/model ")) {
-                            const name = try allocator.dupe(u8, trimmed["/model ".len..]);
-                            config.model = name;
-                            vx_tui.model_name = name;
-                            try vx_tui.addMessage(.system, try allocator.print("Model: {s}", .{name}));
-                        } else {
-                            try vx_tui.addMessage(.err, try allocator.print("Unknown: {s}", .{trimmed}));
-                        }
-                        try vx_tui.renderFrame();
-                        continue;
-                    }
-
-                    // Normal message
-                    try vx_tui.addMessage(.user, trimmed);
-                    try vx_tui.renderFrame();
-
-                    if (config.api_key == null) {
-                        try vx_tui.addMessage(.err, "No API key configured.");
-                        try vx_tui.renderFrame();
-                        continue;
-                    }
-
-                    // Lazy-init agent
-                    if (!agent_ready) {
-                        model_registry = try models.createDefaultModelRegistry(allocator);
-                        recorder = trajectory.TrajectoryRecorder.init(allocator);
-                        compressor = context_compressor.ContextCompressor.init(allocator, config.model, config.provider, config.api_key.?, null);
-                        if (config.enable_skill_self_improve) si_engine = SkillSelfImprove.init(allocator);
-                        cp = credential_pool.CredentialPool.init(allocator, collectKeysForProvider(allocator, shared.context.environ(), config.provider));
-                        const agent_config = Agent.AgentConfig{
-                            .max_iterations = @intCast(config.max_iterations),
-                            .model = config.model,
-                            .api_key = config.api_key,
-                            .provider = config.provider,
-                            .system_prompt = try createDefaultSystemPrompt(allocator, registry),
-                            .context_compressor = compressor,
-                            .enable_trajectory_recording = true,
-                            .trajectory_recorder = &recorder,
-                            .model_registry = &model_registry,
-                            .enable_smart_routing = true,
-                            .enable_skill_self_improve = config.enable_skill_self_improve,
-                            .skill_self_improve = if (si_engine) |*si| si else null,
-                            .enable_harness_rsi = config.enable_harness_rsi,
-                            .harness_task_tag = config.harness_task_tag,
-                            .harness_call_budget = config.harness_call_budget,
-                            .harness_db_path = config.db_path,
-                            .credential_pool = if (cp.keys.len > 0) &cp else null,
-                        };
-                        agent_instance = try Agent.Agent.init(allocator, agent_config, registry);
-                        agent_ready = true;
-                        if (manager.getHistoryJSON(allocator, config.session_id)) |h| {
-                            if (h) |hist| agent_instance.loadHistoryFromJSON(hist) catch {};
-                        } else |_| {}
-                    }
-
-                    // Run agent
-                    vx_tui.streaming = true;
-                    try vx_tui.renderFrame();
-                    const response = agent_instance.run(trimmed) catch |err| {
-                        try vx_tui.addMessage(.err, try gpa.print("Error: {}", .{err}));
-                        vx_tui.streaming = false;
-                        try vx_tui.renderFrame();
-                        continue;
-                    };
-                    vx_tui.streaming = false;
-                    try vx_tui.addMessage(.assistant, try cleanResponse(gpa, response));
-                    vx_tui.token_prompt = agent_instance.usage.prompt_tokens;
-                    vx_tui.token_completion = agent_instance.usage.completion_tokens;
-                    manager.addMessage(config.session_id, "user", trimmed) catch {};
-                    manager.addMessage(config.session_id, "assistant", response) catch {};
-                    try vx_tui.renderFrame();
-                },
+        settleReply(gpa, &reply_job, &vx_tui, &manager, config.session_id);
+        if (reply_job == null and vx_tui.pending_action == null) {
+            if (queued_msg) |q| {
+                vx_tui.pending_action = .{ .send_message = q };
+                queued_msg = null;
             }
         }
-
-        // Drain all pending events, then block for next
+        // Keys queued during a reply are applied before we wait again.
+        // Enter has to be handled on this iteration; waiting for another key
+        // first made send look dead.
         while (vx_tui.loop.tryEvent() catch null) |event| {
-            switch (event) {
-                .key_press => |key| vx_tui.handleKey(key),
-                .winsize => {},
-                else => {},
-            }
+            vx_tui.handleEvent(event) catch {};
         }
-        const event = vx_tui.loop.nextEvent() catch continue;
-        switch (event) {
-            .key_press => |key| vx_tui.handleKey(key),
-            .winsize => {},
-            else => {},
+        if (vx_tui.pending_action == null) {
+            try vx_tui.renderFrame();
+            const event = vx_tui.loop.nextEvent() catch continue;
+            vx_tui.handleEvent(event) catch {};
+            continue;
+        }
+
+        try vx_tui.renderFrame();
+        const action = vx_tui.takeAction() orelse continue;
+        switch (action) {
+            .quit => vx_tui.quit(),
+            .set_model => |name| {
+                defer gpa.free(name);
+                if (reply_job != null) {
+                    try vx_tui.addMessage(.system, "Wait for the reply to finish.");
+                } else {
+                    const agent_ptr: ?*Agent.Agent = if (agent_ready) &agent_instance else null;
+                    try applySelectedModel(config, &vx_tui, allocator, name, agent_ptr);
+                }
+                try vx_tui.renderFrame();
+            },
+            .new_session => {
+                if (reply_job != null) {
+                    try vx_tui.addMessage(.system, "Wait for the reply to finish.");
+                } else {
+                    const agent_ptr: ?*Agent.Agent = if (agent_ready) &agent_instance else null;
+                    try beginNewSession(&manager, config.session_id, &vx_tui, agent_ptr);
+                }
+            },
+            .send_message => |msg| {
+                defer gpa.free(msg);
+                const trimmed = std.mem.trim(u8, msg, " \t\n\r");
+                if (trimmed.len == 0) continue;
+
+                // Slash commands
+                if (trimmed.len > 0 and trimmed[0] == '/') {
+                    if (std.mem.eql(u8, trimmed, "/help") or std.mem.eql(u8, trimmed, "/h")) {
+                        vx_tui.help_selected = 0;
+                        vx_tui.show_help = true;
+                    } else if (std.mem.eql(u8, trimmed, "/quit") or std.mem.eql(u8, trimmed, "/q")) {
+                        vx_tui.quit();
+                    } else if (std.mem.eql(u8, trimmed, "/new")) {
+                        if (reply_job != null) {
+                            try vx_tui.addMessage(.system, "Wait for the reply to finish.");
+                        } else {
+                            const agent_ptr: ?*Agent.Agent = if (agent_ready) &agent_instance else null;
+                            try beginNewSession(&manager, config.session_id, &vx_tui, agent_ptr);
+                        }
+                    } else if (std.mem.eql(u8, trimmed, "/config")) {
+                        vx_tui.show_config = true;
+                    } else if (std.mem.eql(u8, trimmed, "/model")) {
+                        vx_tui.menu_items.clearRetainingCapacity();
+                        for (config.provider.models()) |m| try vx_tui.menu_items.append(vx_tui.allocator, m);
+                        vx_tui.menu_title = "Select Model";
+                        vx_tui.menu_selected = 0;
+                        vx_tui.show_models = true;
+                    } else if (std.mem.eql(u8, trimmed, "/tools")) {
+                        vx_tui.menu_items.clearRetainingCapacity();
+                        for (registry.list()) |e| try vx_tui.menu_items.append(vx_tui.allocator, e.spec.name);
+                        vx_tui.menu_title = "Tools";
+                        vx_tui.menu_selected = 0;
+                        vx_tui.show_tools = true;
+                    } else if (std.mem.eql(u8, trimmed, "/skills")) {
+                        try fillSkillMenu(&vx_tui, allocator, workspace_dir);
+                        vx_tui.menu_title = "Skills";
+                        vx_tui.menu_selected = 0;
+                        vx_tui.show_skills = true;
+                    } else if (std.mem.startsWith(u8, trimmed, "/model ")) {
+                        if (reply_job != null) {
+                            try vx_tui.addMessage(.system, "Wait for the reply to finish.");
+                        } else {
+                            const raw = std.mem.trim(u8, trimmed["/model ".len..], " \t");
+                            const agent_ptr: ?*Agent.Agent = if (agent_ready) &agent_instance else null;
+                            try applySelectedModel(config, &vx_tui, allocator, raw, agent_ptr);
+                        }
+                    } else {
+                        try vx_tui.addMessage(.err, try allocator.print("Unknown: {s}", .{trimmed}));
+                    }
+                    try vx_tui.renderFrame();
+                    continue;
+                }
+
+                // Normal message
+                if (reply_job != null) {
+                    // One slot: the message goes out as soon as the current
+                    // reply lands.
+                    const replaced = queued_msg != null;
+                    if (queued_msg) |old| gpa.free(old);
+                    queued_msg = gpa.dupe(u8, trimmed) catch null;
+                    try vx_tui.addMessage(.system, if (replaced) "queued, replacing the earlier one" else "queued, sends when the reply arrives");
+                    continue;
+                }
+                try vx_tui.addMessage(.user, trimmed);
+                try vx_tui.renderFrame();
+
+                if (config.api_key == null) {
+                    try vx_tui.addMessage(.err, "No API key configured.");
+                    try vx_tui.renderFrame();
+                    continue;
+                }
+
+                // Lazy-init agent
+                if (!agent_ready) {
+                    model_registry = try models.createDefaultModelRegistry(allocator);
+                    recorder = trajectory.TrajectoryRecorder.init(allocator);
+                    compressor = context_compressor.ContextCompressor.init(allocator, config.model, config.provider, config.api_key.?, null);
+                    if (config.enable_skill_self_improve) si_engine = SkillSelfImprove.init(allocator);
+                    cp = credential_pool.CredentialPool.init(allocator, collectKeysForProvider(allocator, shared.context.environ(), config.provider));
+                    const agent_config = Agent.AgentConfig{
+                        .max_iterations = @intCast(config.max_iterations),
+                        .model = config.model,
+                        .api_key = config.api_key,
+                        .provider = config.provider,
+                        .system_prompt = try createDefaultSystemPrompt(allocator, registry),
+                        .context_compressor = compressor,
+                        .enable_trajectory_recording = true,
+                        .trajectory_recorder = &recorder,
+                        .model_registry = &model_registry,
+                        .enable_smart_routing = true,
+                        .enable_skill_self_improve = config.enable_skill_self_improve,
+                        .skill_self_improve = if (si_engine) |*si| si else null,
+                        .enable_harness_rsi = config.enable_harness_rsi,
+                        .harness_task_tag = config.harness_task_tag,
+                        .harness_call_budget = config.harness_call_budget,
+                        .harness_db_path = config.db_path,
+                        .credential_pool = if (cp.keys.len > 0) &cp else null,
+                    };
+                    agent_instance = try Agent.Agent.init(allocator, agent_config, registry);
+                    agent_ready = true;
+                    if (manager.getHistoryJSON(allocator, config.session_id)) |h| {
+                        if (h) |hist| agent_instance.loadHistoryFromJSON(hist) catch {};
+                    } else |_| {}
+                }
+
+                // Reply on a side thread so the composer keeps taking keys
+                // and tokens can paint as they arrive.
+                const job = gpa.create(ReplyJob) catch {
+                    try vx_tui.addMessage(.err, "Could not start the reply.");
+                    continue;
+                };
+                job.* = .{
+                    .agent = &agent_instance,
+                    .query = gpa.dupe(u8, trimmed) catch {
+                        gpa.destroy(job);
+                        try vx_tui.addMessage(.err, "Could not start the reply.");
+                        continue;
+                    },
+                    .tui = &vx_tui,
+                };
+                job.thread = std.Thread.spawn(.{}, ReplyJob.run, .{job}) catch {
+                    gpa.free(job.query);
+                    gpa.destroy(job);
+                    try vx_tui.addMessage(.err, "Could not start the reply.");
+                    continue;
+                };
+                reply_job = job;
+                vx_tui.beginBusy();
+                try vx_tui.renderFrame();
+            },
         }
         try vx_tui.renderFrame();
     }
@@ -624,6 +777,9 @@ pub fn main(init: std.process.Init) !u8 {
         if (err == error.HelpPrinted) return 0;
         return err;
     };
+    if (config.model.len == 0) {
+        config.model = config.provider.defaultModel();
+    }
 
     // Run config mode if requested
     if (config.config_mode) {
@@ -775,7 +931,7 @@ pub fn main(init: std.process.Init) !u8 {
             model_registry.deinit();
         }
     } else {
-        try runCliMode(&config, &registry);
+        try runCliMode(&config, &registry, workspace_dir);
     }
 
     return 0;

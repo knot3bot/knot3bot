@@ -11,7 +11,7 @@ Instructions for building knot3bot on different platforms.
 ## Quick Build
 
 ```bash
-git clone https://github.com/your-org/knot3bot.git
+git clone https://github.com/knot3bot/knot3bot.git
 cd knot3bot
 zig build
 ```
@@ -35,6 +35,8 @@ zig build -Doptimize=ReleaseFast
 # ReleaseSmall (smallest binary, good performance)
 zig build -Doptimize=ReleaseSmall
 ```
+
+Zig 0.17 also accepts `-Doptimize=debug`, `safe`, `fast`, and `small`. The `Release*` names above still build.
 
 ### SQLite Support
 

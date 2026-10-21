@@ -257,7 +257,7 @@ pub const SqliteMemorySystem = struct {
     }
 
     pub fn createSession(self: *SqliteMemorySystem, session_id: []const u8) SqlError!void {
-        const sql = "INSERT INTO sessions (id, created_at, updated_at) VALUES (?, ?, ?)";
+        const sql = "INSERT OR IGNORE INTO sessions (id, created_at, updated_at) VALUES (?, ?, ?)";
         var stmt: ?*c.sqlite3_stmt = null;
 
         const rc = c.sqlite3_prepare_v2(self.db, sql, -1, &stmt, null);

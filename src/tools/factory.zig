@@ -130,7 +130,7 @@ fn addExtendedTools(registry: *ToolRegistry, allocator: std.mem.Allocator, works
     }
 }
 
-/// Create default tool registry (40 tools)
+/// Create the default tool registry.
 pub fn createDefaultRegistry(allocator: std.mem.Allocator, workspace_dir: []const u8) !ToolRegistry {
     var registry = try ToolRegistry.init(allocator);
     errdefer registry.deinit();
@@ -219,7 +219,7 @@ pub fn createDefaultRegistry(allocator: std.mem.Allocator, workspace_dir: []cons
     return registry;
 }
 
-/// Create full tool registry (48 tools, including process registry)
+/// Default registry plus the process registry.
 pub fn createFullRegistry(allocator: std.mem.Allocator, workspace_dir: []const u8) !ToolRegistry {
     var registry = try createDefaultRegistry(allocator, workspace_dir);
     errdefer registry.deinit();

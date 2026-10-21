@@ -4,6 +4,7 @@ const Agent = @import("agent.zig");
 const ToolRegistry = @import("../tools/root.zig").ToolRegistry;
 const ToolResult = @import("../tools/root.zig").ToolResult;
 const Tool = @import("../tools/root.zig").Tool;
+const models = @import("../models.zig");
 
 // ============================================================================
 // TokenBudget Tests
@@ -262,6 +263,37 @@ test "AgentConfig - has sensible defaults" {
     try std.testing.expectEqual(false, config.verbose);
     try std.testing.expectEqual(false, config.enable_trajectory_recording);
     try std.testing.expectEqual(false, config.enable_smart_routing);
+}
+
+test "smart routing keeps a provider-menu model" {
+    const allocator = std.testing.allocator;
+    var arena = std.heap.ArenaAllocator.init(allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+    var registry = try ToolRegistry.init(a);
+    defer registry.deinit();
+    var model_registry = try models.createDefaultModelRegistry(a);
+    defer model_registry.deinit();
+
+    const kept = Agent.AgentConfig{
+        .model = "gpt-5.5",
+        .provider = .openai,
+        .enable_smart_routing = true,
+        .model_registry = &model_registry,
+    };
+    var kept_agent = try Agent.Agent.init(a, kept, &registry);
+    defer kept_agent.deinit();
+    try std.testing.expectEqualStrings("gpt-5.5", kept_agent.resolved_model);
+
+    const unknown = Agent.AgentConfig{
+        .model = "not-a-real-model",
+        .provider = .openai,
+        .enable_smart_routing = true,
+        .model_registry = &model_registry,
+    };
+    var routed = try Agent.Agent.init(a, unknown, &registry);
+    defer routed.deinit();
+    try std.testing.expect(!std.mem.eql(u8, routed.resolved_model, "not-a-real-model"));
 }
 
 // ============================================================================

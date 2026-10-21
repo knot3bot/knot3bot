@@ -8,7 +8,7 @@ pub const Config = struct {
     // API settings
     api_key: ?[]const u8 = null,
     api_base: []const u8 = "https://api.openai.com/v1",
-    model: []const u8 = "gpt-4",
+    model: []const u8 = "gpt-5.5",
     provider: providers.Provider = .openai,
     // Memory settings
     memory_backend: []const u8 = "memory",
@@ -292,7 +292,7 @@ fn fileExists(path: []const u8) bool {
 test "Config default values" {
     const config = Config{};
     try std.testing.expectEqualStrings("memory", config.memory_backend);
-    try std.testing.expectEqualStrings("gpt-4", config.model);
+    try std.testing.expectEqualStrings("gpt-5.5", config.model);
     try std.testing.expectEqual(@as(u16, 8080), config.server_port);
 }
 

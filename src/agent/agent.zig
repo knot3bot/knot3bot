@@ -278,6 +278,14 @@ pub const Agent = struct {
     credential_pool: ?*credential_pool.CredentialPool = null,
     anthropic_client: ?providers.anthropic.AnthropicClient = null,
     skill_self_improve: ?*SkillSelfImprove = null,
+    pub fn modelOnMenu(provider: Provider, model: []const u8) bool {
+        if (model.len == 0) return false;
+        for (provider.models()) |name| {
+            if (std.mem.eql(u8, name, model)) return true;
+        }
+        return false;
+    }
+
     pub fn init(allocator: std.mem.Allocator, config: AgentConfig, registry: *const ToolRegistry) !Agent {
         var messages: ArrayList(Message) = .empty;
         if (config.system_prompt) |prompt| {
@@ -288,12 +296,12 @@ pub const Agent = struct {
         var resolved_model: []const u8 = config.model;
         if (config.enable_smart_routing) {
             if (config.model_registry) |mr| {
-                if (mr.get(config.model)) |_| {
+                // The metadata registry lags the provider menu. A name on the
+                // menu is the one the client will accept, so keep it.
+                if (modelOnMenu(config.provider, config.model) or mr.get(config.model) != null) {
                     resolved_model = config.model;
-                } else {
-                    if (mr.routeForProvider(config.provider.internalName(), .{ .needs_function_calling = true, .needs_streaming = true })) |decision| {
-                        resolved_model = allocator.dupe(u8, decision.model.name) catch config.model;
-                    }
+                } else if (mr.routeForProvider(config.provider.internalName(), .{ .needs_function_calling = true, .needs_streaming = true })) |decision| {
+                    resolved_model = allocator.dupe(u8, decision.model.name) catch config.model;
                 }
             }
         }
@@ -1355,6 +1363,33 @@ pub const Agent = struct {
                 .role = role_enum,
                 .content = content_copy,
             });
+        }
+    }
+
+    /// Point the live client at a model name the caller owns for the process lifetime.
+    pub fn setModel(self: *Agent, model: []const u8) void {
+        if (self.resolved_model.len > 0 and !std.mem.eql(u8, self.resolved_model, self.config.model)) {
+            self.allocator.free(self.resolved_model);
+        }
+        self.config.model = model;
+        self.resolved_model = model;
+        if (self.client) |*c| c.model = model;
+        if (self.anthropic_client) |*c| c.model = model;
+    }
+
+    /// Drop the transcript and keep the leading system message.
+    pub fn resetConversation(self: *Agent) void {
+        const keep_system = self.messages.items.len > 0 and self.messages.items[0].role == .system;
+        for (self.messages.items, 0..) |msg, i| {
+            if (keep_system and i == 0) continue;
+            self.allocator.free(msg.content);
+        }
+        if (keep_system) {
+            const system = self.messages.items[0];
+            self.messages.clearRetainingCapacity();
+            self.messages.append(self.allocator, system) catch {};
+        } else {
+            self.messages.clearRetainingCapacity();
         }
     }
 

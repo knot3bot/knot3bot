@@ -15,7 +15,7 @@ knot3bot runs as a single binary with zero runtime dependencies.
 ### 1. Clone the Repository
 
 ```bash
-git clone https://github.com/your-org/knot3bot.git
+git clone https://github.com/knot3bot/knot3bot.git
 cd knot3bot
 ```
 
@@ -40,12 +40,11 @@ knot3bot --help
 
 ## Docker
 
-### Pre-built Image
+The repository Dockerfile copies a prebuilt `docker/knot3bot` binary into Alpine. It does not compile Zig. Build the binary, copy it to `docker/knot3bot`, then:
 
 ```bash
-docker run -it \
-  -e OPENAI_API_KEY=$OPENAI_API_KEY \
-  ghcr.io/your-org/knot3bot:latest
+docker build -t knot3bot .
+docker run -it -e OPENAI_API_KEY=$OPENAI_API_KEY -p 8080:8080 knot3bot
 ```
 
 ### With Docker Compose
