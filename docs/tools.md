@@ -1,6 +1,6 @@
 # Tools Reference
 
-`createDefaultRegistry` registers 37 tools. The model only sees this list. Argument names come from each tool's own JSON schema; in the TUI, `/tools` prints the registered names.
+`createDefaultRegistry` registers 37 tools. The model only sees this list. Argument names come from each tool's own JSON schema. In the TUI, `/tools` opens a menu of those names. Page Up, Page Down, Home, and End move through the list.
 
 `code_execution` is registered. Its execute path reports that the sandbox is not available in this build.
 

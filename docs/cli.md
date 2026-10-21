@@ -28,22 +28,55 @@ knot3bot --server [options]
 | `--harness-tag <tag>` | Task tag for harness memory | `general` |
 | `--harness-call-budget <n>` | Max harness executor calls. Below 4, the baseline runs once | `5` |
 
-## Interactive Mode Commands
+## Interactive TUI
 
-When running in interactive mode, these commands are available at the prompt:
+`knot3bot` with no `--server` or `--acp` opens the libvaxis screen. A terminal at least 76 columns wide has four zones: a session rail, the transcript, the composer, and a one-line workbar. Narrower terminals drop the rail and keep the other three. The rail shows the provider, model, session id, registered tool count, and the last prompt and completion token counts.
+
+The composer prompt is `> `. Typing `/` on an empty composer enters command mode and shows `/`; the slash is not stored until Enter sends it. Bracketed paste inserts into the composer. IME commits, including Han, are inserted as UTF-8. The Kitty keyboard protocol stays off so macOS can deliver those commits.
+
+### Slash commands
 
 | Command | Description |
 |---------|-------------|
-| `/help`, `/h` | Show commands |
-| `/quit`, `/q` | Exit |
+| `/help`, `/h` | Open the command list. Up and down move, Enter runs the highlighted command, Esc closes it |
+| `/quit`, `/q` | Exit and restore the terminal |
 | `/new` | Clear the transcript and start the stored session over |
-| `/config` | Show the current configuration |
-| `/model` | Open the model menu. Enter switches the live client |
+| `/config` | Show provider, model, session, tool count, and token counts. Esc closes the panel |
+| `/model` | Open this provider's model menu. Enter applies the highlighted name |
 | `/model <name>` | Switch to a name on this provider's menu |
-| `/tools` | List registered tools |
-| `/skills` | List skill directories under the workspace `skills/` folder |
+| `/tools` | Open the registered-tool menu. The title shows the current position, for example `1/37` |
+| `/skills` | Open skill directory names from the workspace `skills/` folder |
 
-The configuration wizard is `--config`, not a slash command. Harness flags apply to interactive mode, `--server`, and `--acp`. With RSI on and `--db-path` set, the same database holds `harness_patterns`, `harness_snapshots`, `harness_history` (newest 8 versions per tag), and `harness_failures`.
+`/model`, `/tools`, and `/skills` share one menu: Up and Down move one row, Page Up and Page Down move eight, Home and End jump to the ends, Esc closes. Enter on `/tools` or `/skills` closes the menu without running a tool. The configuration wizard is `--config`, not a slash command.
+
+`/new`, `/model <name>`, and choosing a model from the menu wait until the current reply finishes. The transcript then says `Wait for the reply to finish.`
+
+### Composer and transcript
+
+| Key | Action |
+|-----|--------|
+| Enter | Send the composer text |
+| Up, Down | Recall earlier composer text from this process |
+| Left, Right, Home, End | Move the cursor. Ctrl-A and Ctrl-E match Home and End |
+| Ctrl-Left, Ctrl-Right | Move by word |
+| Backspace, Delete | Delete the previous or next character |
+| Ctrl-U, Ctrl-K, Ctrl-W | Delete to the start, to the end, or the previous word |
+| Page Up, Page Down | Scroll the transcript by 10 lines |
+| Mouse wheel | Scroll the transcript by 3 lines when the pointer is above the composer |
+| Esc | Close an overlay, or leave command mode |
+| Ctrl-C, Ctrl-Q | Quit |
+
+History is whatever was sent in this process. There is no fixed length.
+
+### While a reply is running
+
+Each message is one model call on a background thread. The transcript does not paint tokens as they arrive. A spinner and the elapsed seconds stay on screen until the full answer, or an error name, replaces them. The composer stays editable.
+
+Enter during a reply stores one follow-up. A second Enter replaces that stored text. The follow-up is sent when the current reply lands. Ctrl-C and Ctrl-Q restore the terminal and exit without waiting for the model call.
+
+Without an API key, the user line is kept and the transcript adds `No API key configured.`
+
+Harness flags apply to interactive mode, `--server`, and `--acp`. With RSI on and `--db-path` set, the same database holds `harness_patterns`, `harness_snapshots`, `harness_history` (newest 8 versions per tag), and `harness_failures`.
 
 ## Examples
 
@@ -118,7 +151,7 @@ knot3bot
 
 ## Signal Handling
 
-knot3bot handles `SIGINT` (Ctrl+C) and `SIGTERM` gracefully, cleaning up resources before exit.
+In the TUI, Ctrl-C and Ctrl-Q are keys. They restore the terminal and exit immediately, including while a model call is still running. `SIGTERM` sets a shutdown flag that the loop reads after the next event.
 
 ## Next Steps
 

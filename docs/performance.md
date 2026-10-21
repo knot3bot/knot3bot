@@ -108,7 +108,7 @@ const allocator = arena.allocator();
 ```
 
 ### 4. Streaming and model choice
-Chat completions and the dashboard stream tokens as the provider returns them. The TUI shows the same stream. Model choice is `--model`; defaults and menus are in [Configuration](configuration.md#provider-configuration).
+The HTTP chat endpoint and the dashboard stream tokens as the provider returns them. The interactive TUI makes one call per message and waits for the finished text. While it waits, the screen shows a spinner and the elapsed seconds, and the composer stays usable. Model choice is `--model`; defaults and menus are in [Configuration](configuration.md#provider-configuration).
 
 ## Profiling
 

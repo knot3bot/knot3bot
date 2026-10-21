@@ -31,11 +31,12 @@ DEEPSEEK_API_KEY=sk-xxx ./zig-out/bin/knot3bot --server --port 8080
 - **Memory** — in-memory + SQLite (FTS5 full-text search), conversation history persistence
 
 ### CLI / TUI
-- **Slash commands**: `/help`, `/setup`, `/model`, `/provider`, `/config`, `/tools`, `/skills`, `/new`, `/quit`
-- **Interactive menus** — arrow-key navigation for model/tool/skills selection
-- **Command history** — up/down arrow recall of last 100 commands
-- **Rich prompt** — shows current model/provider/session
-- **Setup wizard** — 3-step interactive configuration (provider → API key → model)
+- **Layout** — session rail on wide terminals, transcript, `>` composer, and a workbar. The rail shows provider, model, session, tool count, and tokens
+- **Slash commands** — `/help`, `/model`, `/config`, `/tools`, `/skills`, `/new`, `/quit` (`/h` and `/q` match help and quit)
+- **Menus** — `/help`, `/model`, `/tools`, and `/skills` move with the arrow keys. Page Up, Page Down, Home, and End move inside `/model`, `/tools`, and `/skills`
+- **Composer** — up/down recall what you sent in this process. Word motion, paste, and IME text go into the same line
+- **One reply at a time** — the screen shows a spinner until the full answer arrives. Enter during a reply stores one follow-up. Ctrl-C quits without waiting
+- **Setup wizard** — `--config` walks provider, API key, then model
 
 ### Web Dashboard
 - **HTMX + Alpine.js + Tailwind CSS** — real-time chat interface

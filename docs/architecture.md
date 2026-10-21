@@ -26,6 +26,12 @@ knot3bot is built in layers:
 └─────────────────────────────────────────┘
 ```
 
+## Interactive TUI
+
+`src/tui/vaxis_tui.zig` draws the screen. `runCliMode` in `src/main.zig` owns the event loop and the agent. A reply calls `Agent.run` on a side thread, one model request per user message, so the composer can keep taking keys. The UI thread joins that thread when the reply is done, then appends the answer. It does not subscribe to provider chunks. A 100 ms ticker refreshes the spinner and the elapsed time. Ctrl-C restores the terminal and leaves the process without joining a call that is still on the network.
+
+The screen copies every painted string into a frame arena before `render`, because libvaxis keeps those slices until the frame is flushed. The Kitty keyboard protocol is turned off after the terminal query so an IME can deliver UTF-8. Mouse reporting is button and wheel events, which scroll the transcript.
+
 ## Agent Core
 
 ### ReAct Loop

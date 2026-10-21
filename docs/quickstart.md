@@ -22,7 +22,7 @@ See [Configuration](configuration.md) for all supported providers.
 ./zig-out/bin/knot3bot --provider openai
 ```
 
-Interactive mode uses the libvaxis TUI. The prompt is `> `. `/help` lists `/model`, `/config`, `/tools`, `/skills`, `/new`, and `/quit`. Harness comparison stays off unless you pass `--enable-harness-rsi`.
+Interactive mode uses the libvaxis TUI. Wide terminals show a session rail, the transcript, a `>` composer, and a workbar. `/help` opens a list you move with the arrow keys. Harness comparison stays off unless you pass `--enable-harness-rsi`. The screen waits for the whole reply; it does not draw tokens one by one. You can keep typing, and Enter stores one follow-up until that reply arrives.
 
 ## 3. Try a Task
 
@@ -56,7 +56,7 @@ curl -X POST http://localhost:8080/v1/chat/completions \
 
 ## 5. Interactive Commands
 
-`/help` lists them. The set is `/help`, `/quit`, `/new`, `/config`, `/model`, `/tools`, and `/skills`.
+`/help` opens `/model`, `/config`, `/tools`, `/skills`, `/new`, and `/quit`. Up and down move, Enter runs the line, Esc closes the list. `/h` and `/q` match `/help` and `/quit`. Keys, menus, and what happens during a reply are in [CLI Reference](cli.md#interactive-tui).
 
 ## Example Tasks
 

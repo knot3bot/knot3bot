@@ -58,7 +58,7 @@ The CLI and the HTTP server always keep an in-memory backend. With `--db-path` t
 
 ## Sessions
 
-`--session <id>` names the conversation stored in the selected backend. The TUI starts a fresh conversation with `/new`. It does not list sessions from the prompt; `GET /api/sessions` does that when the server is running.
+`--session <id>` names the conversation stored in the selected backend. The TUI starts a fresh conversation with `/new`. `/new` waits if a reply is still running. The prompt does not list sessions; `GET /api/sessions` does that when the server is running.
 
 ## Memory tool
 
