@@ -29,7 +29,7 @@ fn isAbsolutePath(path: []const u8) bool {
 }
 
 fn hasPathTraversal(path: []const u8) bool {
-    return std.mem.indexOf(u8, path, "..") != null;
+    return std.mem.find(u8, path, "..") != null;
 }
 
 fn validateAndNormalizePath(rel_path: []const u8, base_path: []const u8) ?[]const u8 {
@@ -43,13 +43,14 @@ fn validateAndNormalizePath(rel_path: []const u8, base_path: []const u8) ?[]cons
     }
     if (rel_path.len == 0) return null;
 
-    var full_path = std.array_list.AlignedManaged(u8, null).init(std.heap.page_allocator);
-    full_path.appendSlice(base_path) catch return null;
+    var full_path: std.ArrayList(u8) = .empty;
+    defer full_path.deinit(std.heap.page_allocator);
+    full_path.appendSlice(std.heap.page_allocator, base_path) catch return null;
     if (full_path.items[full_path.items.len - 1] != '/') {
-        full_path.append('/') catch return null;
+        full_path.append(std.heap.page_allocator, '/') catch return null;
     }
-    full_path.appendSlice(rel_path) catch return null;
-    return full_path.toOwnedSlice() catch null;
+    full_path.appendSlice(std.heap.page_allocator, rel_path) catch return null;
+    return full_path.toOwnedSlice(std.heap.page_allocator) catch null;
 }
 
 pub fn registerCredentialFile(relative_path: []const u8, container_base: []const u8) bool {
@@ -60,12 +61,13 @@ pub fn registerCredentialFile(relative_path: []const u8, container_base: []const
     const file = std.Io.Dir.openFileAbsolute(io_instance, validated, .{}) catch return false;
     file.close(io_instance);
 
-    var container_path = std.array_list.AlignedManaged(u8, null).init(std.heap.page_allocator);
-    container_path.appendSlice(container_base) catch return false;
+    var container_path: std.ArrayList(u8) = .empty;
+    defer container_path.deinit(std.heap.page_allocator);
+    container_path.appendSlice(std.heap.page_allocator, container_base) catch return false;
     if (container_path.items[container_path.items.len - 1] != '/') {
-        container_path.append('/') catch return false;
+        container_path.append(std.heap.page_allocator, '/') catch return false;
     }
-    container_path.appendSlice(relative_path) catch return false;
+    container_path.appendSlice(std.heap.page_allocator, relative_path) catch return false;
 
     const io = shared.io();
     cred_lock.lockUncancelable(io);
@@ -75,9 +77,9 @@ pub fn registerCredentialFile(relative_path: []const u8, container_base: []const
         return true;
     }
 
-    const owned_key = container_path.toOwnedSlice() catch return false;
+    const owned_key = container_path.toOwnedSlice(std.heap.page_allocator) catch return false;
     registered_files.put(owned_key, validated) catch return false;
-    std.debug.print("credential_files: registered {s} -> {s}\n", .{ validated, container_path.items });
+    std.debug.print("credential_files: registered {s} -> {s}\n", .{ validated, owned_key });
     return true;
 }
 
@@ -112,29 +114,29 @@ pub const CredentialFilesTool = struct {
         if (std.mem.eql(u8, action, "register")) {
             if (relative_path) |path| {
                 const success = registerCredentialFile(path, container_base);
-                const resp = try std.fmt.allocPrint(allocator, "{{\"success\":{},\"path\":\"{s}\"}}", .{ success, path });
+                const resp = try allocator.print("{{\"success\":{},\"path\":\"{s}\"}}", .{ success, path });
                 return ToolResult.ok(resp);
             }
             return ToolResult.fail("relative_path required for register action");
         } else if (std.mem.eql(u8, action, "list")) {
-            var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-            defer buf.deinit();
+            var buf: std.ArrayList(u8) = .empty;
+            defer buf.deinit(allocator);
 
-            try buf.appendSlice("{\"mounts\":[");
+            try buf.appendSlice(allocator, "{\"mounts\":[");
             const io = shared.io();
             cred_lock.lockUncancelable(io);
             var first = true;
             var it = registered_files.iterator();
             while (it.next()) |entry| {
-                if (!first) try buf.appendSlice(",");
-                const line = try std.fmt.allocPrint(allocator, "{{\"container_path\":\"{s}\",\"host_path\":\"{s}\"}}", .{ entry.key_ptr.*, entry.value_ptr.* });
+                if (!first) try buf.appendSlice(allocator, ",");
+                const line = try allocator.print("{{\"container_path\":\"{s}\",\"host_path\":\"{s}\"}}", .{ entry.key_ptr.*, entry.value_ptr.* });
                 defer allocator.free(line);
-                try buf.appendSlice(line);
+                try buf.appendSlice(allocator, line);
                 first = false;
             }
             cred_lock.unlock(io);
-            try buf.appendSlice("]}");
-            return ToolResult.ok(try buf.toOwnedSlice());
+            try buf.appendSlice(allocator, "]}");
+            return ToolResult.ok(try buf.toOwnedSlice(allocator));
         } else if (std.mem.eql(u8, action, "clear")) {
             clearCredentialFiles();
             return ToolResult.ok("{\"success\":true,\"message\":\"Credential files cleared\"}");

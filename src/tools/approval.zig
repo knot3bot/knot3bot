@@ -112,7 +112,7 @@ pub const ApprovalTool = struct {
         }
         try buf.appendSlice(allocator, ",\"pattern_key\":");
         if (result.pattern_key) |key| {
-            const k = try std.fmt.allocPrint(allocator, "\"{s}\"", .{key});
+            const k = try allocator.print("\"{s}\"", .{key});
             defer allocator.free(k);
             try buf.appendSlice(allocator, k);
         } else {
@@ -120,7 +120,7 @@ pub const ApprovalTool = struct {
         }
         try buf.appendSlice(allocator, ",\"description\":");
         if (result.description) |desc| {
-            const d = try std.fmt.allocPrint(allocator, "\"{s}\"", .{desc});
+            const d = try allocator.print("\"{s}\"", .{desc});
             defer allocator.free(d);
             try buf.appendSlice(allocator, d);
         } else {

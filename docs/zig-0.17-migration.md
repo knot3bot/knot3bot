@@ -100,6 +100,34 @@ json_logger.init(file_writer.interface);
 
 Zig 0.17 enforces symmetric whitespace around binary operators. The `**` operator was particularly affected before its removal.
 
+### 6. `std.fmt.allocPrint` → `Allocator.print`
+
+`std.fmt.allocPrint` is deprecated. Formatting now goes through the allocator:
+
+```zig
+const path = try allocator.print("{s}/{s}", .{ dir, name });
+```
+
+Every call site under `src/` uses `Allocator.print`.
+
+### 7. `DebugAllocator` → `SafeAllocator`
+
+`std.heap.DebugAllocator` is deprecated. Benchmarks use `std.heap.SafeAllocator`, backed by `std.heap.page_allocator`. `deinit` returns the leak count.
+
+### 8. Managed `ArrayList` → `std.ArrayList`
+
+`std.array_list.AlignedManaged` is deprecated. Lists are now `std.ArrayList(T)`, initialized with `.empty` or `initCapacity`, and every mutating call takes the allocator explicitly:
+
+```zig
+var list: std.ArrayList(u8) = .empty;
+defer list.deinit(allocator);
+try list.append(allocator, byte);
+```
+
+### 9. `std.mem` search names
+
+`indexOf`, `indexOfScalar`, `indexOfScalarPos`, `indexOfAny`, `indexOfSentinel`, and `lastIndexOf` are deprecated aliases. Call sites use `find`, `findScalar`, `findScalarPos`, `findAny`, `findSentinel`, and `findLast`. A multi-byte delimiter uses `splitSequence`. `StringArrayHashMapUnmanaged` is `std.array_hash_map.String`.
+
 ## Package Manifest Changes
 
 Update `.minimum_zig_version` in all `build.zig.zon` files:

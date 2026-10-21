@@ -46,18 +46,18 @@ pub const HttpRequestTool = struct {
         try argv.append(allocator, "-w");
         try argv.append(allocator, "\\n%{http_code}");
         try argv.append(allocator, "--max-time");
-        try argv.append(allocator, try std.fmt.allocPrint(allocator, "{d}", .{timeout}));
+        try argv.append(allocator, try allocator.print("{d}", .{timeout}));
 
         if (headers_str) |h| {
             var parts = std.mem.splitSequence(u8, h, ",");
             while (parts.next()) |pair| {
                 const trimmed = std.mem.trim(u8, pair, " \t");
                 if (trimmed.len > 0) {
-                    if (std.mem.indexOf(u8, trimmed, ":")) |colon_idx| {
+                    if (std.mem.find(u8, trimmed, ":")) |colon_idx| {
                         const name = trimmed[0..colon_idx];
                         const value = trimmed[colon_idx + 1 ..];
                         try argv.append(allocator, "-H");
-                        try argv.append(allocator, try std.fmt.allocPrint(allocator, "{s}: {s}", .{ name, std.mem.trim(u8, value, " \t") }));
+                        try argv.append(allocator, try allocator.print("{s}: {s}", .{ name, std.mem.trim(u8, value, " \t") }));
                     }
                 }
             }
@@ -83,19 +83,19 @@ pub const HttpRequestTool = struct {
         switch (result.term) {
             .exited => |code| {
                 if (code == 0) {
-                    const last_newline = std.mem.lastIndexOf(u8, result.stdout, "\n");
+                    const last_newline = std.mem.findLast(u8, result.stdout, "\n");
                     if (last_newline) |idx| {
                         const status_str = result.stdout[idx + 1 ..];
                         const response_body = result.stdout[0..idx];
                         const status_code = std.fmt.parseInt(u16, status_str, 10) catch 200;
-                        return ToolResult.ok(try std.fmt.allocPrint(allocator,
+                        return ToolResult.ok(try allocator.print(
                             \\{{"status":{d},"body":"{s}"}}
                         , .{ status_code, response_body }));
                     }
                     return ToolResult.ok(result.stdout);
                 } else {
                     allocator.free(result.stdout);
-                    return ToolResult.fail(try std.fmt.allocPrint(allocator, "HTTP request failed with code {d}", .{code}));
+                    return ToolResult.fail(try allocator.print("HTTP request failed with code {d}", .{code}));
                 }
             },
             else => {

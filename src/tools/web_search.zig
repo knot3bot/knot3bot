@@ -75,10 +75,10 @@ pub const WebSearchTool = struct {
         const api_key = shared.context.getenv("FIRECRAWL_API_KEY") orelse "";
         const api_url = shared.context.getenv("FIRECRAWL_API_URL") orelse "https://api.firecrawl.dev";
 
-        const url = try std.fmt.allocPrint(allocator, "{s}/v0/search", .{api_url});
+        const url = try allocator.print("{s}/v0/search", .{api_url});
         defer allocator.free(url);
 
-        const json_body = try std.fmt.allocPrint(allocator,
+        const json_body = try allocator.print(
             \\{{"query":"{s}","limit":{d}}}
         , .{ query, limit });
         defer allocator.free(json_body);
@@ -90,7 +90,7 @@ pub const WebSearchTool = struct {
         const api_key = shared.context.getenv("TAVILY_API_KEY") orelse "";
 
         const url = "https://api.tavily.com/search";
-        const json_body = try std.fmt.allocPrint(allocator,
+        const json_body = try allocator.print(
             \\{{"api_key":"{s}","query":"{s}","search_depth":"basic","max_results":{d}}}
         , .{ api_key, query, limit });
 
@@ -101,7 +101,7 @@ pub const WebSearchTool = struct {
         const api_key = shared.context.getenv("EXA_API_KEY") orelse "";
 
         const url = "https://api.exa.ai/search";
-        const json_body = try std.fmt.allocPrint(allocator,
+        const json_body = try allocator.print(
             \\{{"api_key":"{s}","query":"{s}","numResults":{d}}}
         , .{ api_key, query, limit });
 
@@ -112,7 +112,7 @@ pub const WebSearchTool = struct {
         const api_key = shared.context.getenv("PARALLEL_API_KEY") orelse "";
 
         const url = "https://api.parallel.ai/uko/v1/search";
-        const json_body = try std.fmt.allocPrint(allocator,
+        const json_body = try allocator.print(
             \\{{"api_key":"{s}","query":"{s}","limit":{d}}}
         , .{ api_key, query, limit });
 
@@ -123,7 +123,7 @@ pub const WebSearchTool = struct {
         const encoded = try percentEncode(allocator, query);
         defer allocator.free(encoded);
 
-        const url = try std.fmt.allocPrint(allocator, "https://html.duckduckgo.com/html/?q={s}", .{encoded});
+        const url = try allocator.print("https://html.duckduckgo.com/html/?q={s}", .{encoded});
         defer allocator.free(url);
 
         const argv = &[_][]const u8{
@@ -152,8 +152,8 @@ pub const WebSearchTool = struct {
         var pos: usize = 0;
 
         while (count < limit) {
-            const link_start = std.mem.indexOf(u8, html[pos..], "<a href=\"") orelse break;
-            const link_end = std.mem.indexOf(u8, html[pos + link_start + 9 ..], "\"") orelse break;
+            const link_start = std.mem.find(u8, html[pos..], "<a href=\"") orelse break;
+            const link_end = std.mem.find(u8, html[pos + link_start + 9 ..], "\"") orelse break;
             const actual_pos = pos + link_start + 9;
             const href = html[actual_pos .. actual_pos + link_end];
 
@@ -163,8 +163,8 @@ pub const WebSearchTool = struct {
             }
 
             pos = actual_pos + link_end;
-            const title_start = std.mem.indexOf(u8, html[pos..], ">") orelse break;
-            const title_end = std.mem.indexOf(u8, html[pos + title_start + 1 ..], "</a>") orelse break;
+            const title_start = std.mem.find(u8, html[pos..], ">") orelse break;
+            const title_end = std.mem.find(u8, html[pos + title_start + 1 ..], "</a>") orelse break;
             const actual_title_start = pos + title_start + 1;
             const title = html[actual_title_start .. actual_title_start + title_end];
 
@@ -279,7 +279,7 @@ pub const WebExtractTool = struct {
         const api_key = shared.context.getenv("FIRECRAWL_API_KEY") orelse "";
         const api_url = shared.context.getenv("FIRECRAWL_API_URL") orelse "https://api.firecrawl.dev";
 
-        const url = try std.fmt.allocPrint(allocator, "{s}/v0/extract", .{api_url});
+        const url = try allocator.print("{s}/v0/extract", .{api_url});
         defer allocator.free(url);
 
         var urls_json: std.ArrayList(u8) = .empty;
@@ -294,7 +294,7 @@ pub const WebExtractTool = struct {
         try allocating.writer.writeAll("]");
         urls_json = allocating.toArrayList();
 
-        const json_body = try std.fmt.allocPrint(allocator,
+        const json_body = try allocator.print(
             \\{{"urls":{s},"format":"markdown"}}
         , .{urls_json.items});
         defer allocator.free(json_body);
@@ -317,7 +317,7 @@ pub const WebExtractTool = struct {
         try allocating.writer.writeAll("]");
         urls_json = allocating.toArrayList();
 
-        const json_body = try std.fmt.allocPrint(allocator,
+        const json_body = try allocator.print(
             \\{{"api_key":"{s}","urls":{s}}}
         , .{ api_key, urls_json.items });
 
@@ -337,7 +337,7 @@ pub const WebExtractTool = struct {
         }
         urls_json = allocating.toArrayList();
 
-        const json_body = try std.fmt.allocPrint(allocator,
+        const json_body = try allocator.print(
             \\{{"api_key":"{s}","urls":{s}}}
         , .{ api_key, urls_json.items });
 
@@ -357,7 +357,7 @@ pub const WebExtractTool = struct {
         }
         urls_json = allocating.toArrayList();
 
-        const json_body = try std.fmt.allocPrint(allocator,
+        const json_body = try allocator.print(
             \\{{"api_key":"{s}","urls":{s}}}
         , .{ api_key, urls_json.items });
 
@@ -381,7 +381,7 @@ pub const WebExtractTool = struct {
         defer allocator.free(result.stdout);
         defer allocator.free(result.stderr);
 
-        return ToolResult.ok(try std.fmt.allocPrint(allocator,
+        return ToolResult.ok(try allocator.print(
             \\{{"url":"{s}","content":"{s}","extracted":true}}
         , .{ url, result.stdout }));
     }
@@ -397,7 +397,7 @@ fn makeHttpRequest(allocator: std.mem.Allocator, method: []const u8, url: []cons
     argv[2] = "-X";
     argv[3] = method;
     argv[4] = "-H";
-    argv[5] = try std.fmt.allocPrint(allocator, "Content-Type: {s}", .{content_type});
+    argv[5] = try allocator.print("Content-Type: {s}", .{content_type});
     argv[6] = "-H";
     argv[7] = "Accept: application/json";
     argv[8] = "-d";
@@ -407,7 +407,7 @@ fn makeHttpRequest(allocator: std.mem.Allocator, method: []const u8, url: []cons
 
     if (api_key.len > 0) {
         argv[10] = "-H";
-        argv[11] = try std.fmt.allocPrint(allocator, "Authorization: Bearer {s}", .{api_key});
+        argv[11] = try allocator.print("Authorization: Bearer {s}", .{api_key});
         argc = 12;
     }
 
@@ -427,7 +427,7 @@ fn makeHttpRequest(allocator: std.mem.Allocator, method: []const u8, url: []cons
                 return ToolResult.ok(result.stdout);
             } else {
                 allocator.free(result.stdout);
-                return ToolResult.fail(try std.fmt.allocPrint(allocator, "API request failed with code {d}: {s}", .{ code, result.stderr }));
+                return ToolResult.fail(try allocator.print("API request failed with code {d}: {s}", .{ code, result.stderr }));
             }
         },
         else => {

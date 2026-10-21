@@ -111,7 +111,7 @@ pub const AcpServer = struct {
     fn handleSessionNew(self: *AcpServer) ![]const u8 {
         var result: std.json.ObjectMap = .empty;
         defer result.deinit(self.allocator);
-        const session_id = try std.fmt.allocPrint(self.allocator, "sess_{d}", .{shared.timestamp()});
+        const session_id = try self.allocator.print("sess_{d}", .{shared.timestamp()});
         defer self.allocator.free(session_id);
         try result.put(self.allocator, "sessionId", .{ .string = session_id });
         return std.json.Stringify.valueAlloc(self.allocator, std.json.Value{ .object = result }, .{});
@@ -161,7 +161,7 @@ pub const AcpServer = struct {
         try out.appendSlice(self.allocator, "{\"jsonrpc\":\"2.0\",\"id\":");
         try appendJsonId(self.allocator, &out, id_val);
         try out.appendSlice(self.allocator, ",\"error\":{\"code\":");
-        const code_str = try std.fmt.allocPrint(self.allocator, "{d}", .{code});
+        const code_str = try self.allocator.print("{d}", .{code});
         defer self.allocator.free(code_str);
         try out.appendSlice(self.allocator, code_str);
         try out.appendSlice(self.allocator, ",\"message\":\"");
@@ -180,7 +180,7 @@ pub const AcpServer = struct {
     fn appendJsonId(allocator: std.mem.Allocator, out: *std.ArrayList(u8), id_val: ?std.json.Value) !void {
         if (id_val) |v| {
             if (v == .integer) {
-                const s = try std.fmt.allocPrint(allocator, "{d}", .{v.integer});
+                const s = try allocator.print("{d}", .{v.integer});
                 defer allocator.free(s);
                 try out.appendSlice(allocator, s);
                 return;

@@ -18,7 +18,7 @@ pub const App = struct {
     loop: vaxis.Loop(vaxis.Event),
 
     // Messages
-    messages: std.array_list.AlignedManaged(Message, null),
+    messages: std.ArrayList(Message),
     scroll_offset: usize = 0,
 
     // Input
@@ -32,7 +32,7 @@ pub const App = struct {
     command_len: usize = 0,
 
     // History
-    history: std.array_list.AlignedManaged([4096]u8, null),
+    history: std.ArrayList([4096]u8),
     history_idx: ?usize = null,
 
     // Status
@@ -45,7 +45,7 @@ pub const App = struct {
 
     // Streaming
     streaming: bool = false,
-    stream_buf: std.array_list.AlignedManaged(u8, null),
+    stream_buf: std.ArrayList(u8),
 
     // Overlays
     show_help: bool = false,
@@ -53,7 +53,7 @@ pub const App = struct {
     show_tools: bool = false,
     show_skills: bool = false,
     show_config: bool = false,
-    menu_items: std.array_list.AlignedManaged([]const u8, null),
+    menu_items: std.ArrayList([]const u8),
     menu_selected: usize = 0,
     menu_title: []const u8 = "",
 
@@ -74,19 +74,19 @@ pub const App = struct {
             .vx = try vaxis.init(io, allocator, env_map, .{}),
             .tty = try vaxis.Tty.init(io, &tty_buf),
             .loop = undefined,
-            .messages = std.array_list.AlignedManaged(Message, null).init(allocator),
-            .history = std.array_list.AlignedManaged([4096]u8, null).init(allocator),
-            .stream_buf = std.array_list.AlignedManaged(u8, null).init(allocator),
-            .menu_items = std.array_list.AlignedManaged([]const u8, null).init(allocator),
+            .messages = .empty,
+            .history = .empty,
+            .stream_buf = .empty,
+            .menu_items = .empty,
         };
     }
 
     pub fn deinit(self: *App) void {
         for (self.messages.items) |msg| self.allocator.free(msg.content);
-        self.messages.deinit();
-        self.history.deinit();
-        self.stream_buf.deinit();
-        self.menu_items.deinit();
+        self.messages.deinit(self.allocator);
+        self.history.deinit(self.allocator);
+        self.stream_buf.deinit(self.allocator);
+        self.menu_items.deinit(self.allocator);
     }
 
     pub fn start(self: *App) !void {
@@ -106,7 +106,7 @@ pub const App = struct {
 
     pub fn addMessage(self: *App, role: Role, content: []const u8) !void {
         const owned = try self.allocator.dupe(u8, content);
-        try self.messages.append(.{ .role = role, .content = owned });
+        try self.messages.append(self.allocator, .{ .role = role, .content = owned });
         self.scroll_offset = 0;
     }
 
@@ -114,7 +114,7 @@ pub const App = struct {
         if (cmd.len == 0 or cmd.len >= 4096) return;
         var entry: [4096]u8 = @splat(0);
         @memcpy(entry[0..cmd.len], cmd);
-        try self.history.append(entry);
+        try self.history.append(self.allocator, entry);
         self.history_idx = null;
     }
 
@@ -157,15 +157,15 @@ pub const App = struct {
         const chat_bottom: u16 = h - 2;
         const area_h = chat_bottom - chat_top;
 
-        var visible_lines = std.array_list.AlignedManaged(VisibleLine, null).init(self.allocator);
-        defer visible_lines.deinit();
+        var visible_lines: std.ArrayList(VisibleLine) = .empty;
+        defer visible_lines.deinit(self.allocator);
 
         if (self.streaming and self.stream_buf.items.len > 0) {
-            try wrapLines(self.stream_buf.items, w, &visible_lines, .assistant);
+            try wrapLines(self.allocator, self.stream_buf.items, w, &visible_lines, .assistant);
         }
         var idx: usize = if (self.messages.items.len > 0) self.messages.items.len - 1 else 0;
         while (visible_lines.items.len < area_h + self.scroll_offset and idx < self.messages.items.len) : (idx -|= 1) {
-            try wrapLines(self.messages.items[idx].content, w, &visible_lines, self.messages.items[idx].role);
+            try wrapLines(self.allocator, self.messages.items[idx].content, w, &visible_lines, self.messages.items[idx].role);
             if (idx == 0) break;
         }
 
@@ -381,7 +381,7 @@ pub fn shared_io() std.Io {
 
 const VisibleLine = struct { text: []const u8, role: Role };
 
-fn wrapLines(text: []const u8, max_width: u16, lines: *std.array_list.AlignedManaged(VisibleLine, null), role: Role) !void {
+fn wrapLines(allocator: std.mem.Allocator, text: []const u8, max_width: u16, lines: *std.ArrayList(VisibleLine), role: Role) !void {
     if (text.len == 0) return;
     const mw: usize = @intCast(max_width);
     var pos: usize = 0;
@@ -392,8 +392,8 @@ fn wrapLines(text: []const u8, max_width: u16, lines: *std.array_list.AlignedMan
             while (scan > pos and text[scan] != ' ' and text[scan] != '\n') scan -= 1;
             if (scan > pos + mw / 2) end = scan;
         }
-        if (std.mem.indexOfScalar(u8, text[pos..end], '\n')) |nl| end = pos + nl;
-        try lines.append(.{ .text = text[pos..end], .role = role });
+        if (std.mem.findScalar(u8, text[pos..end], '\n')) |nl| end = pos + nl;
+        try lines.append(allocator, .{ .text = text[pos..end], .role = role });
         pos = end;
         if (pos < text.len and text[pos] == '\n') pos += 1;
         if (pos < text.len and text[pos] == ' ') pos += 1;

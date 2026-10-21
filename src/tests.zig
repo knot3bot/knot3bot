@@ -49,4 +49,6 @@ test {
     _ = @import("agent/harness_compose.zig");
     _ = @import("agent/harness_session.zig");
     _ = @import("agent/harness_memory.zig");
+    _ = @import("agent/harness_store.zig");
+    _ = @import("agent/harness_trace.zig");
 }

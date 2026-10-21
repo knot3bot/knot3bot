@@ -14,12 +14,12 @@ pub const ValidationError = error{
 /// For symlink-safe validation, use validatePathWithWorkspace.
 pub fn validatePath(path: []const u8) ValidationError!void {
     // Reject null bytes (potential injection)
-    if (std.mem.indexOfScalar(u8, path, 0)) |_| {
+    if (std.mem.findScalar(u8, path, 0)) |_| {
         return error.InvalidPath;
     }
 
     // Reject obvious path traversal attempts (forward and backslash)
-    if (std.mem.indexOf(u8, path, "../") != null or std.mem.indexOf(u8, path, "..\\") != null) {
+    if (std.mem.find(u8, path, "../") != null or std.mem.find(u8, path, "..\\") != null) {
         return error.PathTraversal;
     }
 
@@ -54,11 +54,11 @@ pub fn validatePathWithWorkspace(workspace_dir: []const u8, relative_path: []con
     // Resolve both paths through realpath
     var ws_buf: [4096]u8 = undefined;
     const real_ws_ptr = std.c.realpath(workspace_z.ptr, &ws_buf) orelse return error.InvalidPath;
-    const real_ws_len = std.mem.indexOfSentinel(u8, 0, real_ws_ptr);
+    const real_ws_len = std.mem.findSentinel(u8, 0, real_ws_ptr);
 
     var cand_buf: [4096]u8 = undefined;
     if (std.c.realpath(candidate_z.ptr, &cand_buf)) |resolved_ptr| {
-        const resolved_len = std.mem.indexOfSentinel(u8, 0, resolved_ptr);
+        const resolved_len = std.mem.findSentinel(u8, 0, resolved_ptr);
         if (!std.mem.startsWith(u8, resolved_ptr[0..resolved_len], real_ws_ptr[0..real_ws_len])) {
             return error.PathTraversal;
         }
@@ -72,7 +72,7 @@ pub fn validatePathWithWorkspace(workspace_dir: []const u8, relative_path: []con
 
         var parent_buf: [4096]u8 = undefined;
         const real_parent_ptr = std.c.realpath(parent_z.ptr, &parent_buf) orelse return error.PathTraversal;
-        const parent_len = std.mem.indexOfSentinel(u8, 0, real_parent_ptr);
+        const parent_len = std.mem.findSentinel(u8, 0, real_parent_ptr);
         if (!std.mem.startsWith(u8, real_parent_ptr[0..parent_len], real_ws_ptr[0..real_ws_len])) {
             return error.PathTraversal;
         }
@@ -81,7 +81,7 @@ pub fn validatePathWithWorkspace(workspace_dir: []const u8, relative_path: []con
 
 /// Extract hostname from a URL string.
 fn extractHostname(url: []const u8) ?[]const u8 {
-    const proto_end = std.mem.indexOf(u8, url, "://") orelse return null;
+    const proto_end = std.mem.find(u8, url, "://") orelse return null;
     const host_start = proto_end + 3;
 
     var host_end = url.len;
@@ -106,7 +106,7 @@ fn extractHostname(url: []const u8) ?[]const u8 {
 
     // Remove brackets from IPv6 addresses
     if (hostname[0] == '[') {
-        if (std.mem.indexOf(u8, hostname, "]")) |end| {
+        if (std.mem.find(u8, hostname, "]")) |end| {
             return hostname[1..end];
         }
     }
@@ -149,7 +149,7 @@ fn isPrivateIpv4(ip: []const u8) bool {
 /// Parses the hostname from the URL and checks it against blocked patterns.
 pub fn validateUrl(url: []const u8) ValidationError!void {
     // Reject null bytes
-    if (std.mem.indexOfScalar(u8, url, 0)) |_| {
+    if (std.mem.findScalar(u8, url, 0)) |_| {
         return error.InvalidUrl;
     }
 
@@ -196,8 +196,8 @@ pub fn validateUrl(url: []const u8) ValidationError!void {
     }
 
     // Check if hostname contains internal/metadata keywords
-    if (std.mem.indexOf(u8, lower, "metadata") != null) return error.BlockedHost;
-    if (std.mem.indexOf(u8, lower, "internal") != null) return error.BlockedHost;
+    if (std.mem.find(u8, lower, "metadata") != null) return error.BlockedHost;
+    if (std.mem.find(u8, lower, "internal") != null) return error.BlockedHost;
 
     // Check if hostname is a private IPv4 address
     if (std.Io.net.IpAddress.parseIp4(hostname, 0)) |_| {

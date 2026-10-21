@@ -68,19 +68,19 @@ pub const SkillSelfImproveTool = struct {
 
         if (content.len > 0) {
             if (scanForDangerousPatterns(content)) |pattern| {
-                const msg = try std.fmt.allocPrint(allocator, "Security: dangerous pattern '{s}'", .{pattern});
+                const msg = try allocator.print("Security: dangerous pattern '{s}'", .{pattern});
                 return ToolResult.fail(msg);
             }
         }
 
-        const skill_path = try std.fmt.allocPrint(allocator, "{s}/skills/{s}/SKILL.md", .{ self.skills_dir, name });
+        const skill_path = try allocator.print("{s}/skills/{s}/SKILL.md", .{ self.skills_dir, name });
         defer allocator.free(skill_path);
 
         const dir_path = std.fs.path.dirname(skill_path) orelse return ToolResult.fail("Invalid path");
         shared.cwdMakePath(dir_path) catch {};
         shared.cwdWriteFile(skill_path, content) catch return ToolResult.fail("Failed to create skill");
 
-        const resp = try std.fmt.allocPrint(allocator, "Skill '{s}' created", .{name});
+        const resp = try allocator.print("Skill '{s}' created", .{name});
         return ToolResult.ok(resp);
     }
 
@@ -89,7 +89,7 @@ pub const SkillSelfImproveTool = struct {
         const old_str = getString(args, "old_string") orelse return ToolResult.fail("old_string required");
         const new_str = getString(args, "new_string") orelse "";
 
-        const skill_path = try std.fmt.allocPrint(allocator, "{s}/skills/{s}/SKILL.md", .{ self.skills_dir, name });
+        const skill_path = try allocator.print("{s}/skills/{s}/SKILL.md", .{ self.skills_dir, name });
         defer allocator.free(skill_path);
 
         const content = shared.cwdReadFileAlloc(allocator, skill_path, 1024 * 1024) catch {
@@ -97,7 +97,7 @@ pub const SkillSelfImproveTool = struct {
         };
         defer allocator.free(content);
 
-        if (std.mem.indexOf(u8, content, old_str) == null) {
+        if (std.mem.find(u8, content, old_str) == null) {
             return ToolResult.fail("old_string not found");
         }
 
@@ -106,7 +106,7 @@ pub const SkillSelfImproveTool = struct {
 
         shared.cwdWriteFile(skill_path, new_content) catch return ToolResult.fail("Failed to write patched skill");
 
-        const resp = try std.fmt.allocPrint(allocator, "Skill '{s}' patched", .{name});
+        const resp = try allocator.print("Skill '{s}' patched", .{name});
         return ToolResult.ok(resp);
     }
 
@@ -118,14 +118,14 @@ pub const SkillSelfImproveTool = struct {
             return ToolResult.fail("memory_type must be USER.md or MEMORY.md");
         }
 
-        const memory_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ self.memory_dir, memory_type });
+        const memory_path = try allocator.print("{s}/{s}", .{ self.memory_dir, memory_type });
         defer allocator.free(memory_path);
 
         const existing = shared.cwdReadFileAlloc(allocator, memory_path, 1024 * 1024) catch "";
         defer if (existing.len > 0) allocator.free(existing);
 
         const timestamp = std.Io.Clock.Timestamp.now(shared.io(), .real).raw.toSeconds();
-        const new_entry = try std.fmt.allocPrint(allocator, "\n---\n{} | user\n---\n{s}\n", .{ timestamp, memory_content });
+        const new_entry = try allocator.print("\n---\n{} | user\n---\n{s}\n", .{ timestamp, memory_content });
         defer allocator.free(new_entry);
 
         const updated = if (existing.len > 0)
@@ -136,7 +136,7 @@ pub const SkillSelfImproveTool = struct {
 
         shared.cwdWriteFile(memory_path, updated) catch return ToolResult.fail("Failed to write memory");
 
-        const resp = try std.fmt.allocPrint(allocator, "Updated {s}", .{memory_type});
+        const resp = try allocator.print("Updated {s}", .{memory_type});
         return ToolResult.ok(resp);
     }
 
@@ -144,11 +144,11 @@ pub const SkillSelfImproveTool = struct {
         const skill_name = getString(args, "skill_name") orelse "unknown";
         const memory_content = getString(args, "memory_content") orelse "";
 
-        const log_path = try std.fmt.allocPrint(allocator, "{s}/skill-improvements.md", .{self.memory_dir});
+        const log_path = try allocator.print("{s}/skill-improvements.md", .{self.memory_dir});
         defer allocator.free(log_path);
 
         const timestamp = std.Io.Clock.Timestamp.now(shared.io(), .real).raw.toSeconds();
-        const entry = try std.fmt.allocPrint(allocator, "\n## {} - {s}\n{s}\n", .{ timestamp, skill_name, memory_content });
+        const entry = try allocator.print("\n## {} - {s}\n{s}\n", .{ timestamp, skill_name, memory_content });
         defer allocator.free(entry);
 
         const existing = shared.cwdReadFileAlloc(allocator, log_path, 1024 * 1024) catch "";
@@ -165,7 +165,7 @@ pub const SkillSelfImproveTool = struct {
     }
 
     fn getSuggestions(self: *SkillSelfImproveTool, allocator: std.mem.Allocator) !ToolResult {
-        const suggestions_path = try std.fmt.allocPrint(allocator, "{s}/skill-suggestions.json", .{self.memory_dir});
+        const suggestions_path = try allocator.print("{s}/skill-suggestions.json", .{self.memory_dir});
         defer allocator.free(suggestions_path);
 
         const content = shared.cwdReadFileAlloc(allocator, suggestions_path, 4096) catch {
@@ -193,7 +193,7 @@ fn scanForDangerousPatterns(content: []const u8) ?[]const u8 {
     };
 
     inline for (DANGEROUS_PATTERNS) |pattern| {
-        if (std.mem.indexOf(u8, content, pattern) != null) {
+        if (std.mem.find(u8, content, pattern) != null) {
             return pattern;
         }
     }

@@ -175,7 +175,7 @@ pub const SpawnTool = struct {
                 .stderr = .inherit,
                 .cwd = if (cwd != null and env_type == .local) .{ .path = cwd.? } else .inherit,
             }) catch |err| {
-                return ToolResult.fail(std.fmt.allocPrint(allocator, "Failed to spawn process: {}", .{err}) catch "Failed to spawn");
+                return ToolResult.fail(allocator.print("Failed to spawn process: {}", .{err}) catch "Failed to spawn");
             };
 
             const slot = findEmptySlot();
@@ -197,7 +197,7 @@ pub const SpawnTool = struct {
                 };
                 process_count += 1;
 
-                return ToolResult.ok(try std.fmt.allocPrint(allocator,
+                return ToolResult.ok(try allocator.print(
                     \\{{"started":true,"pid":{d},"detached":true,"env":"{s}","slot":{d}}}
                 , .{ pid, @tagName(env_type), s }));
             } else {
@@ -214,7 +214,7 @@ pub const SpawnTool = struct {
                 .stdout_limit = .limited(MAX_OUTPUT_BYTES),
                 .stderr_limit = .limited(MAX_STDERR_BYTES),
             }) catch |err| {
-                return ToolResult.fail(std.fmt.allocPrint(allocator, "Failed to spawn process: {}", .{err}) catch "Failed to spawn");
+                return ToolResult.fail(allocator.print("Failed to spawn process: {}", .{err}) catch "Failed to spawn");
             };
             defer allocator.free(result.stdout);
             defer allocator.free(result.stderr);
@@ -235,7 +235,7 @@ pub const SpawnTool = struct {
             else
                 result.stdout;
 
-            return ToolResult.ok(try std.fmt.allocPrint(allocator,
+            return ToolResult.ok(try allocator.print(
                 \\{{"exited":true,"exit_code":{d},"stdout":"{s}","stderr":"{s}","truncated":{}}}
             , .{ exit_code, truncated_stdout, result.stderr, result.stdout.len > MAX_OUTPUT_BYTES }));
         }
@@ -283,7 +283,7 @@ pub const SpawnTool = struct {
         const slot = findByPid(pid);
         if (slot) |s| {
             if (process_table[s].env_type == .docker) {
-                const docker_argv = &[_][]const u8{ "docker", "kill", "--signal=KILL", try std.fmt.allocPrint(allocator, "{d}", .{pid}) };
+                const docker_argv = &[_][]const u8{ "docker", "kill", "--signal=KILL", try allocator.print("{d}", .{pid}) };
                 _ = std.process.spawn(shared.context.io(), .{
                     .argv = docker_argv,
                 }) catch {};
@@ -306,7 +306,7 @@ pub const SpawnTool = struct {
             const child = process_table[s].child;
             if (child) |c| {
                 const term = c.wait(shared.context.io()) catch |err| {
-                    return ToolResult.fail(try std.fmt.allocPrint(allocator, "Failed to wait: {}", .{err}));
+                    return ToolResult.fail(try allocator.print("Failed to wait: {}", .{err}));
                 };
 
                 const exit_code: i32 = switch (term) {
@@ -319,7 +319,7 @@ pub const SpawnTool = struct {
                 process_table[s].exited = true;
                 process_table[s].exit_code = exit_code;
 
-                return ToolResult.ok(try std.fmt.allocPrint(allocator,
+                return ToolResult.ok(try allocator.print(
                     \\{{"exited":true,"exit_code":{d},"pid":{d}}}
                 , .{ exit_code, pid }));
             } else {
@@ -334,11 +334,11 @@ pub const SpawnTool = struct {
         const slot = findByPid(pid);
         if (slot) |s| {
             if (process_table[s].exited) {
-                return ToolResult.ok(try std.fmt.allocPrint(allocator,
+                return ToolResult.ok(try allocator.print(
                     \\{{"pid":{d},"exited":true,"exit_code":{any}}}
                 , .{ pid, process_table[s].exit_code }));
             }
-            return ToolResult.ok(try std.fmt.allocPrint(allocator,
+            return ToolResult.ok(try allocator.print(
                 \\{{"pid":{d},"running":true}}
             , .{pid}));
         }
@@ -357,7 +357,7 @@ pub const SpawnTool = struct {
         };
 
         for (dangerous) |pattern| {
-            if (std.mem.indexOf(u8, command, pattern) != null) {
+            if (std.mem.find(u8, command, pattern) != null) {
                 return "Command contains dangerous pattern";
             }
         }

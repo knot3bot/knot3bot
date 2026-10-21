@@ -4,14 +4,14 @@ const std = @import("std");
 
 fn validateCommand(command: []const u8) ?[]const u8 {
     if (command.len == 0) return "empty";
-    if (std.mem.indexOfScalar(u8, command, 0) != null) return "null byte";
+    if (std.mem.findScalar(u8, command, 0) != null) return "null byte";
     for (command) |c| {
         if (c < 0x20 and c != '\t') return "control char";
     }
-    if (std.mem.indexOfScalar(u8, command, '\n') != null or std.mem.indexOfScalar(u8, command, '\r') != null) return "newline";
+    if (std.mem.findScalar(u8, command, '\n') != null or std.mem.findScalar(u8, command, '\r') != null) return "newline";
     const meta = [_][]const u8{ "&&", "||", "|", ";", ">", "<", "$(", "`", "&>", ">&", "<>", "<<<", "<<", ">>" };
     for (meta) |mc| {
-        if (std.mem.indexOf(u8, command, mc) != null) return "metachar";
+        if (std.mem.find(u8, command, mc) != null) return "metachar";
     }
     const prefixes = [_][]const u8{ "cd ", "export ", "source ", "eval ", "exec ", ". ", "alias ", "set ", "unset " };
     for (prefixes) |p| {

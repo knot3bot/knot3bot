@@ -117,7 +117,7 @@ pub const TodoStore = struct {
 
         for (active_items.items) |item| {
             const marker: []const u8 = if (std.mem.eql(u8, item.status, "in_progress")) "[>]" else "[ ]";
-            const line = try std.fmt.allocPrint(allocator, "- {s} {s}. {s}\n", .{ marker, item.id, item.content });
+            const line = try allocator.print("- {s} {s}. {s}\n", .{ marker, item.id, item.content });
             defer allocator.free(line);
             try buf.appendSlice(allocator, line);
         }
@@ -223,23 +223,23 @@ pub const TodoTool = struct {
             try buf.appendSlice(allocator, "\"}");
         }
         try buf.appendSlice(allocator, "],\"summary\":{\"total\":");
-        const ts = try std.fmt.allocPrint(allocator, "{d}", .{items.len});
+        const ts = try allocator.print("{d}", .{items.len});
         defer allocator.free(ts);
         try buf.appendSlice(allocator, ts);
         try buf.appendSlice(allocator, ",\"pending\":");
-        const ps = try std.fmt.allocPrint(allocator, "{d}", .{pending});
+        const ps = try allocator.print("{d}", .{pending});
         defer allocator.free(ps);
         try buf.appendSlice(allocator, ps);
         try buf.appendSlice(allocator, ",\"in_progress\":");
-        const ip = try std.fmt.allocPrint(allocator, "{d}", .{in_progress});
+        const ip = try allocator.print("{d}", .{in_progress});
         defer allocator.free(ip);
         try buf.appendSlice(allocator, ip);
         try buf.appendSlice(allocator, ",\"completed\":");
-        const cs = try std.fmt.allocPrint(allocator, "{d}", .{completed});
+        const cs = try allocator.print("{d}", .{completed});
         defer allocator.free(cs);
         try buf.appendSlice(allocator, cs);
         try buf.appendSlice(allocator, ",\"cancelled\":");
-        const ca = try std.fmt.allocPrint(allocator, "{d}", .{cancelled});
+        const ca = try allocator.print("{d}", .{cancelled});
         defer allocator.free(ca);
         try buf.appendSlice(allocator, ca);
         try buf.appendSlice(allocator, "}}");

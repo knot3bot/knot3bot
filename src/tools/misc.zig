@@ -74,7 +74,7 @@ pub const CalculatorTool = struct {
         }
 
         // Use allocator to allocate result string so it survives function return
-        const result_str = try std.fmt.allocPrint(allocator, "{d}", .{result});
+        const result_str = try allocator.print("{d}", .{result});
         return ToolResult.ok(result_str);
     }
 

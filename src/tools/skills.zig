@@ -26,7 +26,7 @@ const DANGEROUS_PATTERNS = [_][]const u8{
 
 pub fn scanForDangerousPatterns(content: []const u8) ?[]const u8 {
     inline for (DANGEROUS_PATTERNS) |pattern| {
-        if (std.mem.indexOf(u8, content, pattern) != null) {
+        if (std.mem.find(u8, content, pattern) != null) {
             return pattern;
         }
     }
@@ -38,15 +38,15 @@ pub fn validateFrontmatter(content: []const u8) ?[]const u8 {
         return "SKILL.md must start with YAML frontmatter (---)";
     }
     const rest = content[3..];
-    const end_idx = std.mem.indexOf(u8, rest, "---");
+    const end_idx = std.mem.find(u8, rest, "---");
     if (end_idx == null) {
         return "SKILL.md frontmatter is not closed";
     }
     const yaml_content = rest[0..end_idx.?];
-    if (std.mem.indexOf(u8, yaml_content, "name:") == null) {
+    if (std.mem.find(u8, yaml_content, "name:") == null) {
         return "Frontmatter must include 'name' field";
     }
-    if (std.mem.indexOf(u8, yaml_content, "description:") == null) {
+    if (std.mem.find(u8, yaml_content, "description:") == null) {
         return "Frontmatter must include 'description' field";
     }
     const body_start = 3 + end_idx.? + 3;
@@ -60,7 +60,7 @@ const ALLOWED_SUBDIRS = [_][]const u8{ "references", "templates", "scripts", "as
 
 pub fn validateSkillFilePath(file_path: []const u8) ?[]const u8 {
     if (file_path.len == 0) return "file_path is required";
-    if (std.mem.indexOf(u8, file_path, "..") != null) {
+    if (std.mem.find(u8, file_path, "..") != null) {
         return "Path traversal ('..') is not allowed";
     }
     var found = false;
@@ -92,7 +92,7 @@ pub const SkillManifest = struct {
 /// Load skill manifest - tries manifest.json first, then falls back to SKILL.md frontmatter
 pub fn loadSkillManifest(allocator: std.mem.Allocator, skill_dir: []const u8, skill_name: []const u8) !SkillManifest {
     // Try manifest.json first
-    const manifest_path = try std.fmt.allocPrint(allocator, "{s}/{s}/manifest.json", .{ skill_dir, skill_name });
+    const manifest_path = try allocator.print("{s}/{s}/manifest.json", .{ skill_dir, skill_name });
     defer allocator.free(manifest_path);
 
     if (shared.cwdReadFileAlloc(allocator, manifest_path, 65536)) |json_content| {
@@ -153,7 +153,7 @@ pub fn loadSkillManifest(allocator: std.mem.Allocator, skill_dir: []const u8, sk
     }
 
     // Try SKILL.md frontmatter
-    const skill_md_path = try std.fmt.allocPrint(allocator, "{s}/{s}/SKILL.md", .{ skill_dir, skill_name });
+    const skill_md_path = try allocator.print("{s}/{s}/SKILL.md", .{ skill_dir, skill_name });
     defer allocator.free(skill_md_path);
 
     const content = shared.cwdReadFileAlloc(allocator, skill_md_path, 65536) catch {
@@ -187,46 +187,46 @@ fn parseSkillFrontmatterToManifest(content: []const u8) SkillManifest {
     };
     if (!std.mem.startsWith(u8, content, "---")) return result;
     const rest = content[3..];
-    const end_idx = std.mem.indexOf(u8, rest, "---");
+    const end_idx = std.mem.find(u8, rest, "---");
     if (end_idx == null) return result;
     const yaml_content = rest[0..end_idx.?];
 
     // Simple YAML parsing
-    if (std.mem.indexOf(u8, yaml_content, "name:")) |name_idx| {
+    if (std.mem.find(u8, yaml_content, "name:")) |name_idx| {
         const name_start = name_idx + 5;
-        const line_end = std.mem.indexOf(u8, yaml_content[name_start..], "\n") orelse yaml_content.len;
+        const line_end = std.mem.find(u8, yaml_content[name_start..], "\n") orelse yaml_content.len;
         var name = std.mem.trim(u8, yaml_content[name_start .. name_start + line_end], " \t");
         if (std.mem.startsWith(u8, name, "\"")) name = name[1..];
         if (std.mem.endsWith(u8, name, "\"")) name = name[0 .. name.len - 1];
         result.name = name;
     }
-    if (std.mem.indexOf(u8, yaml_content, "description:")) |desc_idx| {
+    if (std.mem.find(u8, yaml_content, "description:")) |desc_idx| {
         const desc_start = desc_idx + 12;
-        const line_end = std.mem.indexOf(u8, yaml_content[desc_start..], "\n") orelse yaml_content.len;
+        const line_end = std.mem.find(u8, yaml_content[desc_start..], "\n") orelse yaml_content.len;
         var desc = std.mem.trim(u8, yaml_content[desc_start .. desc_start + line_end], " \t");
         if (std.mem.startsWith(u8, desc, "\"")) desc = desc[1..];
         if (std.mem.endsWith(u8, desc, "\"")) desc = desc[0 .. desc.len - 1];
         result.description = desc;
     }
-    if (std.mem.indexOf(u8, yaml_content, "category:")) |cat_idx| {
+    if (std.mem.find(u8, yaml_content, "category:")) |cat_idx| {
         const cat_start = cat_idx + 9;
-        const line_end = std.mem.indexOf(u8, yaml_content[cat_start..], "\n") orelse yaml_content.len;
+        const line_end = std.mem.find(u8, yaml_content[cat_start..], "\n") orelse yaml_content.len;
         var cat = std.mem.trim(u8, yaml_content[cat_start .. cat_start + line_end], " \t");
         if (std.mem.startsWith(u8, cat, "\"")) cat = cat[1..];
         if (std.mem.endsWith(u8, cat, "\"")) cat = cat[0 .. cat.len - 1];
         if (cat.len > 0) result.category = cat;
     }
-    if (std.mem.indexOf(u8, yaml_content, "version:")) |ver_idx| {
+    if (std.mem.find(u8, yaml_content, "version:")) |ver_idx| {
         const ver_start = ver_idx + 8;
-        const line_end = std.mem.indexOf(u8, yaml_content[ver_start..], "\n") orelse yaml_content.len;
+        const line_end = std.mem.find(u8, yaml_content[ver_start..], "\n") orelse yaml_content.len;
         var ver = std.mem.trim(u8, yaml_content[ver_start .. ver_start + line_end], " \t");
         if (std.mem.startsWith(u8, ver, "\"")) ver = ver[1..];
         if (std.mem.endsWith(u8, ver, "\"")) ver = ver[0 .. ver.len - 1];
         if (ver.len > 0) result.version = ver;
     }
-    if (std.mem.indexOf(u8, yaml_content, "author:")) |auth_idx| {
+    if (std.mem.find(u8, yaml_content, "author:")) |auth_idx| {
         const auth_start = auth_idx + 7;
-        const line_end = std.mem.indexOf(u8, yaml_content[auth_start..], "\n") orelse yaml_content.len;
+        const line_end = std.mem.find(u8, yaml_content[auth_start..], "\n") orelse yaml_content.len;
         var auth = std.mem.trim(u8, yaml_content[auth_start .. auth_start + line_end], " \t");
         if (std.mem.startsWith(u8, auth, "\"")) auth = auth[1..];
         if (std.mem.endsWith(u8, auth, "\"")) auth = auth[0 .. auth.len - 1];
@@ -241,32 +241,32 @@ fn parseSkillFrontmatter(content: []const u8) struct { name: []const u8, descrip
     var result = struct { name: []const u8, description: []const u8, category: ?[]const u8 }{ .name = "", .description = "", .category = null };
     if (!std.mem.startsWith(u8, content, "---")) return result;
     const rest = content[3..];
-    const end_idx = std.mem.indexOf(u8, rest, "---");
+    const end_idx = std.mem.find(u8, rest, "---");
     if (end_idx == null) return result;
     const yaml_content = rest[0..end_idx.?];
 
     // Simple YAML parsing - extract name, description, category
-    if (std.mem.indexOf(u8, yaml_content, "name:")) |name_idx| {
+    if (std.mem.find(u8, yaml_content, "name:")) |name_idx| {
         const name_start = name_idx + 5;
-        const line_end = std.mem.indexOf(u8, yaml_content[name_start..], "\n") orelse yaml_content.len;
+        const line_end = std.mem.find(u8, yaml_content[name_start..], "\n") orelse yaml_content.len;
         var name = std.mem.trim(u8, yaml_content[name_start .. name_start + line_end], " \t");
         if (std.mem.startsWith(u8, name, "\"")) name = name[1..];
         if (std.mem.endsWith(u8, name, "\"")) name = name[0 .. name.len - 1];
         result.name = name;
     }
 
-    if (std.mem.indexOf(u8, yaml_content, "description:")) |desc_idx| {
+    if (std.mem.find(u8, yaml_content, "description:")) |desc_idx| {
         const desc_start = desc_idx + 12;
-        const line_end = std.mem.indexOf(u8, yaml_content[desc_start..], "\n") orelse yaml_content.len;
+        const line_end = std.mem.find(u8, yaml_content[desc_start..], "\n") orelse yaml_content.len;
         var desc = std.mem.trim(u8, yaml_content[desc_start .. desc_start + line_end], " \t");
         if (std.mem.startsWith(u8, desc, "\"")) desc = desc[1..];
         if (std.mem.endsWith(u8, desc, "\"")) desc = desc[0 .. desc.len - 1];
         result.description = desc;
     }
 
-    if (std.mem.indexOf(u8, yaml_content, "category:")) |cat_idx| {
+    if (std.mem.find(u8, yaml_content, "category:")) |cat_idx| {
         const cat_start = cat_idx + 9;
-        const line_end = std.mem.indexOf(u8, yaml_content[cat_start..], "\n") orelse yaml_content.len;
+        const line_end = std.mem.find(u8, yaml_content[cat_start..], "\n") orelse yaml_content.len;
         var cat = std.mem.trim(u8, yaml_content[cat_start .. cat_start + line_end], " \t");
         if (std.mem.startsWith(u8, cat, "\"")) cat = cat[1..];
         if (std.mem.endsWith(u8, cat, "\"")) cat = cat[0 .. cat.len - 1];
@@ -290,7 +290,7 @@ pub const SkillsListTool = struct {
     pub fn execute(self: *SkillsListTool, allocator: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
         const category_filter = getString(args, "category");
 
-        const skill_path = try std.fmt.allocPrint(allocator, "{s}/skills", .{self.skills_dir});
+        const skill_path = try allocator.print("{s}/skills", .{self.skills_dir});
         defer allocator.free(skill_path);
 
         var output = std.ArrayList(u8).empty;
@@ -367,7 +367,7 @@ pub const SkillsListTool = struct {
         }
 
         try output.appendSlice(allocator, "],\"count\":");
-        try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, "{}", .{count}));
+        try output.appendSlice(allocator, try allocator.print("{}", .{count}));
         try output.appendSlice(allocator, "}");
         return ToolResult.ok(try output.toOwnedSlice(allocator));
     }
@@ -395,17 +395,17 @@ pub const SkillViewTool = struct {
         const file_path = getString(args, "file_path");
 
         const skill_md_path = if (file_path) |fp|
-            try std.fmt.allocPrint(allocator, "{s}/skills/{s}/{s}", .{ self.skills_dir, name, fp })
+            try allocator.print("{s}/skills/{s}/{s}", .{ self.skills_dir, name, fp })
         else
-            try std.fmt.allocPrint(allocator, "{s}/skills/{s}/SKILL.md", .{ self.skills_dir, name });
+            try allocator.print("{s}/skills/{s}/SKILL.md", .{ self.skills_dir, name });
         defer allocator.free(skill_md_path);
 
         const content = shared.cwdReadFileAlloc(allocator, skill_md_path, 1024 * 1024) catch {
-            return ToolResult.fail(try std.fmt.allocPrint(allocator, "Skill '{s}' not found", .{name}));
+            return ToolResult.fail(try allocator.print("Skill '{s}' not found", .{name}));
         };
 
         if (scanForDangerousPatterns(content)) |pattern| {
-            return ToolResult.fail(try std.fmt.allocPrint(allocator, "Security warning: dangerous pattern '{s}'", .{pattern}));
+            return ToolResult.fail(try allocator.print("Security warning: dangerous pattern '{s}'", .{pattern}));
         }
 
         return ToolResult.ok(content);
@@ -488,7 +488,7 @@ pub const SkillManagerTool = struct {
 
         try output.appendSlice(allocator, "Skills:\n");
 
-        const skill_path = try std.fmt.allocPrint(allocator, "{s}/skills", .{self.skills_dir});
+        const skill_path = try allocator.print("{s}/skills", .{self.skills_dir});
         defer allocator.free(skill_path);
 
         var dir = shared.cwdOpenDir(skill_path, .{ .iterate = true }) catch {
@@ -517,15 +517,15 @@ pub const SkillManagerTool = struct {
         if (content.len > 0) {
             if (validateFrontmatter(content)) |err| return ToolResult.fail(err);
             if (scanForDangerousPatterns(content)) |pattern| {
-                return ToolResult.fail(try std.fmt.allocPrint(allocator, "Security warning: dangerous pattern '{s}'", .{pattern}));
+                return ToolResult.fail(try allocator.print("Security warning: dangerous pattern '{s}'", .{pattern}));
             }
         }
 
         var skill_path: []u8 = undefined;
         if (category) |cat| {
-            skill_path = try std.fmt.allocPrint(allocator, "{s}/skills/{s}/{s}/SKILL.md", .{ self.skills_dir, cat, name });
+            skill_path = try allocator.print("{s}/skills/{s}/{s}/SKILL.md", .{ self.skills_dir, cat, name });
         } else {
-            skill_path = try std.fmt.allocPrint(allocator, "{s}/skills/{s}/SKILL.md", .{ self.skills_dir, name });
+            skill_path = try allocator.print("{s}/skills/{s}/SKILL.md", .{ self.skills_dir, name });
         }
         defer allocator.free(skill_path);
 
@@ -536,7 +536,7 @@ pub const SkillManagerTool = struct {
             return ToolResult.fail("Failed to create skill file");
         };
 
-        const msg = try std.fmt.allocPrint(allocator, "Skill '{s}' created", .{name});
+        const msg = try allocator.print("Skill '{s}' created", .{name});
         defer allocator.free(msg);
         return ToolResult.ok(msg);
     }
@@ -545,10 +545,10 @@ pub const SkillManagerTool = struct {
         if (content.len == 0) return ToolResult.fail("Skill content is required");
         if (validateFrontmatter(content)) |err| return ToolResult.fail(err);
         if (scanForDangerousPatterns(content)) |pattern| {
-            return ToolResult.fail(try std.fmt.allocPrint(allocator, "Security warning: dangerous pattern '{s}'", .{pattern}));
+            return ToolResult.fail(try allocator.print("Security warning: dangerous pattern '{s}'", .{pattern}));
         }
 
-        const skill_path = try std.fmt.allocPrint(allocator, "{s}/skills/{s}/SKILL.md", .{ self.skills_dir, name });
+        const skill_path = try allocator.print("{s}/skills/{s}/SKILL.md", .{ self.skills_dir, name });
         defer allocator.free(skill_path);
 
         shared.cwdAccess(skill_path) catch {
@@ -559,20 +559,20 @@ pub const SkillManagerTool = struct {
             return ToolResult.fail("Failed to write skill file");
         };
 
-        const msg = try std.fmt.allocPrint(allocator, "Skill '{s}' updated", .{name});
+        const msg = try allocator.print("Skill '{s}' updated", .{name});
         defer allocator.free(msg);
         return ToolResult.ok(msg);
     }
 
     fn deleteSkill(self: *SkillManagerTool, allocator: std.mem.Allocator, name: []const u8) !ToolResult {
-        const skill_dir = try std.fmt.allocPrint(allocator, "{s}/skills/{s}", .{ self.skills_dir, name });
+        const skill_dir = try allocator.print("{s}/skills/{s}", .{ self.skills_dir, name });
         defer allocator.free(skill_dir);
 
         shared.cwdDeleteTree(skill_dir) catch {
             return ToolResult.fail("Skill not found");
         };
 
-        const msg = try std.fmt.allocPrint(allocator, "Skill '{s}' deleted", .{name});
+        const msg = try allocator.print("Skill '{s}' deleted", .{name});
         defer allocator.free(msg);
         return ToolResult.ok(msg);
     }
@@ -581,9 +581,9 @@ pub const SkillManagerTool = struct {
         if (old_string.len == 0) return ToolResult.fail("old_string is required");
 
         const target_path = if (file_path) |fp|
-            try std.fmt.allocPrint(allocator, "{s}/skills/{s}/{s}", .{ self.skills_dir, name, fp })
+            try allocator.print("{s}/skills/{s}/{s}", .{ self.skills_dir, name, fp })
         else
-            try std.fmt.allocPrint(allocator, "{s}/skills/{s}/SKILL.md", .{ self.skills_dir, name });
+            try allocator.print("{s}/skills/{s}/SKILL.md", .{ self.skills_dir, name });
         defer allocator.free(target_path);
 
         const content = shared.cwdReadFileAlloc(allocator, target_path, 1024 * 1024) catch {
@@ -591,7 +591,7 @@ pub const SkillManagerTool = struct {
         };
         defer allocator.free(content);
 
-        if (std.mem.indexOf(u8, content, old_string) == null) {
+        if (std.mem.find(u8, content, old_string) == null) {
             return ToolResult.fail("old_string not found in file");
         }
 
@@ -602,14 +602,14 @@ pub const SkillManagerTool = struct {
             return ToolResult.fail("Failed to write patched file");
         };
 
-        return ToolResult.ok(try std.fmt.allocPrint(allocator, "Patched skill '{s}'", .{name}));
+        return ToolResult.ok(try allocator.print("Patched skill '{s}'", .{name}));
     }
 
     fn writeSkillFile(self: *SkillManagerTool, allocator: std.mem.Allocator, name: []const u8, file_path: []const u8, file_content: []const u8) !ToolResult {
         if (file_path.len == 0) return ToolResult.fail("file_path is required");
         if (validateSkillFilePath(file_path)) |err| return ToolResult.fail(err);
 
-        const full_path = try std.fmt.allocPrint(allocator, "{s}/skills/{s}/{s}", .{ self.skills_dir, name, file_path });
+        const full_path = try allocator.print("{s}/skills/{s}/{s}", .{ self.skills_dir, name, file_path });
         defer allocator.free(full_path);
 
         const dir_path = std.fs.path.dirname(full_path) orelse return ToolResult.fail("Invalid path");
@@ -619,44 +619,44 @@ pub const SkillManagerTool = struct {
             return ToolResult.fail("Failed to write file");
         };
 
-        return ToolResult.ok(try std.fmt.allocPrint(allocator, "File '{s}' written to skill '{s}'", .{ file_path, name }));
+        return ToolResult.ok(try allocator.print("File '{s}' written to skill '{s}'", .{ file_path, name }));
     }
 
     fn removeSkillFile(self: *SkillManagerTool, allocator: std.mem.Allocator, name: []const u8, file_path: []const u8) !ToolResult {
         if (file_path.len == 0) return ToolResult.fail("file_path is required");
         if (validateSkillFilePath(file_path)) |err| return ToolResult.fail(err);
 
-        const full_path = try std.fmt.allocPrint(allocator, "{s}/skills/{s}/{s}", .{ self.skills_dir, name, file_path });
+        const full_path = try allocator.print("{s}/skills/{s}/{s}", .{ self.skills_dir, name, file_path });
         defer allocator.free(full_path);
 
         shared.cwdDeleteFile(full_path) catch {
             return ToolResult.fail("File not found");
         };
 
-        return ToolResult.ok(try std.fmt.allocPrint(allocator, "File '{s}' removed from skill '{s}'", .{ file_path, name }));
+        return ToolResult.ok(try allocator.print("File '{s}' removed from skill '{s}'", .{ file_path, name }));
     }
 
     fn createManifest(self: *SkillManagerTool, allocator: std.mem.Allocator, name: []const u8, manifest_json: []const u8) !ToolResult {
         // Validate JSON
         const parsed = std.json.parseFromSlice(std.json.Value, allocator, manifest_json, .{}) catch |err| {
-            return ToolResult.fail(try std.fmt.allocPrint(allocator, "Invalid JSON: {}", .{err}));
+            return ToolResult.fail(try allocator.print("Invalid JSON: {}", .{err}));
         };
         defer parsed.deinit();
 
         // Ensure skill directory exists
-        const skill_dir = try std.fmt.allocPrint(allocator, "{s}/skills/{s}", .{ self.skills_dir, name });
+        const skill_dir = try allocator.print("{s}/skills/{s}", .{ self.skills_dir, name });
         defer allocator.free(skill_dir);
         shared.cwdMakePath(skill_dir) catch {};
 
         // Write manifest.json
-        const manifest_path = try std.fmt.allocPrint(allocator, "{s}/manifest.json", .{skill_dir});
+        const manifest_path = try allocator.print("{s}/manifest.json", .{skill_dir});
         defer allocator.free(manifest_path);
 
         shared.cwdWriteFile(manifest_path, manifest_json) catch {
             return ToolResult.fail("Failed to write manifest.json");
         };
 
-        return ToolResult.ok(try std.fmt.allocPrint(allocator, "Manifest created for skill '{s}'", .{name}));
+        return ToolResult.ok(try allocator.print("Manifest created for skill '{s}'", .{name}));
     }
 
     pub const vtable = root.ToolVTable(@This());
@@ -681,17 +681,17 @@ pub const SkillRunTool = struct {
         };
         const skill_args = getString(args, "args") orelse "";
 
-        const skill_md_path = try std.fmt.allocPrint(allocator, "{s}/skills/{s}/SKILL.md", .{ self.skills_dir, name });
+        const skill_md_path = try allocator.print("{s}/skills/{s}/SKILL.md", .{ self.skills_dir, name });
         defer allocator.free(skill_md_path);
 
         const content = shared.cwdReadFileAlloc(allocator, skill_md_path, 1024 * 1024) catch {
-            return ToolResult.fail(try std.fmt.allocPrint(allocator, "Skill '{s}' not found", .{name}));
+            return ToolResult.fail(try allocator.print("Skill '{s}' not found", .{name}));
         };
         defer allocator.free(content);
 
         // Security scan
         if (scanForDangerousPatterns(content)) |pattern| {
-            return ToolResult.fail(try std.fmt.allocPrint(allocator, "Security warning: dangerous pattern '{s}'", .{pattern}));
+            return ToolResult.fail(try allocator.print("Security warning: dangerous pattern '{s}'", .{pattern}));
         }
         // Skill body extraction available via extractSkillBody() if needed
         _ = extractSkillBody(content);
@@ -712,7 +712,7 @@ pub const SkillRunTool = struct {
     fn extractSkillBody(content: []const u8) []const u8 {
         if (!std.mem.startsWith(u8, content, "---")) return content;
         const rest = content[3..];
-        const end_idx = std.mem.indexOf(u8, rest, "---");
+        const end_idx = std.mem.find(u8, rest, "---");
         if (end_idx == null) return content;
         const body_start = 3 + end_idx.? + 3;
         if (body_start >= content.len) return "";

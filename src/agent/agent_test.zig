@@ -138,9 +138,9 @@ test "ReActStep.toJSON - serializes step with thought only" {
     const json = try step.toJSON(allocator);
     defer allocator.free(json);
 
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"step\":1") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"thought\":\"I should help the user\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"duration_ms\":100") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"step\":1") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"thought\":\"I should help the user\"") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"duration_ms\":100") != null);
 }
 
 test "ReActStep.toJSON - serializes step with action and observation" {
@@ -158,9 +158,9 @@ test "ReActStep.toJSON - serializes step with action and observation" {
     const json = try step.toJSON(allocator);
     defer allocator.free(json);
 
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"step\":2") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"action\":\"read_file\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"observation\":\"File contains: hello world\"") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"step\":2") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"action\":\"read_file\"") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"observation\":\"File contains: hello world\"") != null);
 }
 
 test "ReActStep.toJSON - serializes step with result" {
@@ -178,7 +178,7 @@ test "ReActStep.toJSON - serializes step with result" {
     const json = try step.toJSON(allocator);
     defer allocator.free(json);
 
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"result\":\"The answer is 42\"") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"result\":\"The answer is 42\"") != null);
 }
 
 test "ReActStep.toJSON - serializes step with error" {
@@ -197,7 +197,7 @@ test "ReActStep.toJSON - serializes step with error" {
     const json = try step.toJSON(allocator);
     defer allocator.free(json);
 
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"error\":\"File not found\"") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"error\":\"File not found\"") != null);
 }
 
 // ============================================================================
@@ -382,5 +382,5 @@ test "createReActSystemPrompt - generates non-empty prompt" {
     const prompt = try Agent.createReActSystemPrompt(allocator, undefined);
     defer allocator.free(prompt);
     // The prompt should contain ReAct-related content
-    try std.testing.expect(std.mem.indexOf(u8, prompt, "ReAct") != null);
+    try std.testing.expect(std.mem.find(u8, prompt, "ReAct") != null);
 }

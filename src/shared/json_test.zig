@@ -46,8 +46,8 @@ test "jsonError - creates error response" {
     const allocator = std.testing.allocator;
     const result = try json.jsonError(allocator, "Something went wrong");
     defer allocator.free(result);
-    try std.testing.expect(std.mem.indexOf(u8, result, "error") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "Something went wrong") != null);
+    try std.testing.expect(std.mem.find(u8, result, "error") != null);
+    try std.testing.expect(std.mem.find(u8, result, "Something went wrong") != null);
 }
 
 test "jsonError - escapes special characters in error message" {
@@ -55,6 +55,6 @@ test "jsonError - escapes special characters in error message" {
     const result = try json.jsonError(allocator, "Error with \"quotes\" and \\backslash\\");
     defer allocator.free(result);
     // Should contain escaped versions
-    try std.testing.expect(std.mem.indexOf(u8, result, "\\\"quotes\\\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, result, "\\\\backslash\\\\") != null);
+    try std.testing.expect(std.mem.find(u8, result, "\\\"quotes\\\"") != null);
+    try std.testing.expect(std.mem.find(u8, result, "\\\\backslash\\\\") != null);
 }

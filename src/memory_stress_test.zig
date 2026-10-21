@@ -20,7 +20,7 @@ test "Memory pressure - session with 1000 messages" {
 
     // Add 1000 messages
     for (0..1000) |i| {
-        const content = try std.fmt.allocPrint(allocator, "Message {d} with some content here", .{i});
+        const content = try allocator.print("Message {d} with some content here", .{i});
         defer allocator.free(content);
         try memory.addMessage("large-session", if (i % 2 == 0) "user" else "assistant", content);
     }
@@ -79,7 +79,7 @@ test "Memory pressure - 100 concurrent sessions" {
 
     // Create 100 sessions
     for (0..100) |i| {
-        const session_id = try std.fmt.allocPrint(allocator, "session-{d}", .{i});
+        const session_id = try allocator.print("session-{d}", .{i});
         defer allocator.free(session_id);
         try memory.createSession(session_id);
         try memory.addMessage(session_id, "user", "Initial message");
@@ -101,12 +101,12 @@ test "Memory pressure - 500 sessions with messages" {
 
     // Create 500 sessions with 5 messages each
     for (0..500) |i| {
-        const session_id = try std.fmt.allocPrint(allocator, "sess-{d}", .{i});
+        const session_id = try allocator.print("sess-{d}", .{i});
         defer allocator.free(session_id);
         try memory.createSession(session_id);
 
         for (0..5) |j| {
-            const msg = try std.fmt.allocPrint(allocator, "msg-{d}-{d}", .{ i, j });
+            const msg = try allocator.print("msg-{d}-{d}", .{ i, j });
             defer allocator.free(msg);
             try memory.addMessage(session_id, if (j % 2 == 0) "user" else "assistant", msg);
         }
@@ -132,7 +132,7 @@ test "Memory pressure - search with 1000 sessions" {
 
     // Create sessions with searchable content
     for (0..1000) |i| {
-        const session_id = try std.fmt.allocPrint(allocator, "searchable-{d}", .{i});
+        const session_id = try allocator.print("searchable-{d}", .{i});
         defer allocator.free(session_id);
         try memory.createSession(session_id);
 
@@ -200,7 +200,7 @@ test "Memory pressure - getHistoryJSON with large session" {
 
     // Add messages with varied content
     for (0..100) |i| {
-        const msg = try std.fmt.allocPrint(allocator, "Detailed message {d} with substantial content", .{i});
+        const msg = try allocator.print("Detailed message {d} with substantial content", .{i});
         defer allocator.free(msg);
         try memory.addMessage("json-large", if (i % 2 == 0) "user" else "assistant", msg);
     }
@@ -223,7 +223,7 @@ test "Memory pressure - rapid session create/delete" {
 
     // Rapidly create and delete sessions
     for (0..50) |i| {
-        const session_id = try std.fmt.allocPrint(allocator, "temp-{d}", .{i});
+        const session_id = try allocator.print("temp-{d}", .{i});
         defer allocator.free(session_id);
         try memory.createSession(session_id);
         try memory.addMessage(session_id, "user", "Temporary");
@@ -231,7 +231,7 @@ test "Memory pressure - rapid session create/delete" {
 
     // Delete all
     for (0..50) |i| {
-        const session_id = try std.fmt.allocPrint(allocator, "temp-{d}", .{i});
+        const session_id = try allocator.print("temp-{d}", .{i});
         defer allocator.free(session_id);
         memory.deleteSession(session_id);
     }
@@ -254,7 +254,7 @@ test "Memory pressure - session update cycles" {
 
     // Multiple update cycles
     for (0..100) |i| {
-        const msg = try std.fmt.allocPrint(allocator, "Update {d}", .{i});
+        const msg = try allocator.print("Update {d}", .{i});
         defer allocator.free(msg);
         try memory.addMessage("updating", "user", msg);
     }
@@ -320,12 +320,12 @@ test "MemoryBackend - stress with in-memory backend" {
 
     // Create multiple sessions
     for (0..100) |i| {
-        const session_id = try std.fmt.allocPrint(allocator, "backend-sess-{d}", .{i});
+        const session_id = try allocator.print("backend-sess-{d}", .{i});
         defer allocator.free(session_id);
         try backend.createSession(session_id);
 
         for (0..10) |j| {
-            const msg = try std.fmt.allocPrint(allocator, "Message {d}-{d}", .{ i, j });
+            const msg = try allocator.print("Message {d}-{d}", .{ i, j });
             defer allocator.free(msg);
             try backend.addMessage(session_id, "user", msg);
         }
@@ -347,14 +347,14 @@ test "MemoryBackend - search with many sessions" {
 
     // Create sessions with search terms
     for (0..200) |i| {
-        const session_id = try std.fmt.allocPrint(allocator, "s-{d}", .{i});
+        const session_id = try allocator.print("s-{d}", .{i});
         defer allocator.free(session_id);
         try backend.createSession(session_id);
 
         const content = if (i % 5 == 0)
-            try std.fmt.allocPrint(allocator, "Contains keyword for search", .{})
+            try allocator.print("Contains keyword for search", .{})
         else
-            try std.fmt.allocPrint(allocator, "Regular content {d}", .{i});
+            try allocator.print("Regular content {d}", .{i});
         try backend.addMessage(session_id, "user", content);
         allocator.free(content);
     }
@@ -391,7 +391,7 @@ test "Memory simulation - interleaved session operations" {
     // Round 2: Add messages (interleaved)
     for (session_ids, 0..) |sid, round| {
         for (0..10) |i| {
-            const msg = try std.fmt.allocPrint(allocator, "Round{d}-Msg{d}", .{ round, i });
+            const msg = try allocator.print("Round{d}-Msg{d}", .{ round, i });
             defer allocator.free(msg);
             try memory.addMessage(sid, "user", msg);
         }
@@ -425,8 +425,8 @@ test "Memory simulation - session migration pattern" {
     try std.testing.expectEqual(@as(usize, 5), session.?.messages.items.len);
 
     // Verify conversation flow
-    try std.testing.expect(std.mem.indexOf(u8, session.?.messages.items[1].content, "Context A") != null);
-    try std.testing.expect(std.mem.indexOf(u8, session.?.messages.items[3].content, "Context B") != null);
+    try std.testing.expect(std.mem.find(u8, session.?.messages.items[1].content, "Context A") != null);
+    try std.testing.expect(std.mem.find(u8, session.?.messages.items[3].content, "Context B") != null);
 }
 
 // ============================================================================
@@ -485,7 +485,7 @@ test "Edge case - delete during iteration" {
 
     // Create sessions
     for (0..20) |i| {
-        const sid = try std.fmt.allocPrint(allocator, "del-{d}", .{i});
+        const sid = try allocator.print("del-{d}", .{i});
         defer allocator.free(sid);
         try memory.createSession(sid);
     }
@@ -493,7 +493,7 @@ test "Edge case - delete during iteration" {
     // Delete every other session
     for (0..20) |i| {
         if (i % 2 == 0) {
-            const sid = try std.fmt.allocPrint(allocator, "del-{d}", .{i});
+            const sid = try allocator.print("del-{d}", .{i});
             defer allocator.free(sid);
             memory.deleteSession(sid);
         }

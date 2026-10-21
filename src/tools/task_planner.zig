@@ -57,7 +57,7 @@ pub const TaskPlannerTool = struct {
             next_id += 1;
             task_count += 1;
 
-            const resp = try std.fmt.allocPrint(allocator, "{{\"created\":true,\"task_id\":{d},\"total_tasks\":{d}}}", .{ next_id - 1, task_count });
+            const resp = try allocator.print("{{\"created\":true,\"task_id\":{d},\"total_tasks\":{d}}}", .{ next_id - 1, task_count });
             return ToolResult.ok(resp);
         } else if (std.mem.eql(u8, action, "list")) {
             var buf = std.ArrayList(u8).initCapacity(allocator, 4096) catch return ToolResult.fail("OOM");
@@ -74,17 +74,17 @@ pub const TaskPlannerTool = struct {
                     .blocked => "blocked",
                     .cancelled => "cancelled",
                 };
-                const entry = try std.fmt.allocPrint(allocator, "{{\"id\":{d},\"title\":\"{s}\",\"status\":\"{s}\"", .{ t.id, t.title, status_str });
+                const entry = try allocator.print("{{\"id\":{d},\"title\":\"{s}\",\"status\":\"{s}\"", .{ t.id, t.title, status_str });
                 defer allocator.free(entry);
                 try buf.appendSlice(allocator, entry);
                 if (t.depends_on) |d| {
-                    const dep = try std.fmt.allocPrint(allocator, ",\"depends_on\":{d}", .{d});
+                    const dep = try allocator.print(",\"depends_on\":{d}", .{d});
                     defer allocator.free(dep);
                     try buf.appendSlice(allocator, dep);
                 }
                 try buf.appendSlice(allocator, "}");
             }
-            const footer = try std.fmt.allocPrint(allocator, "],\"count\":{d}}}", .{task_count});
+            const footer = try allocator.print("],\"count\":{d}}}", .{task_count});
             defer allocator.free(footer);
             try buf.appendSlice(allocator, footer);
             return ToolResult{ .success = true, .output = try buf.toOwnedSlice(allocator) };
@@ -103,7 +103,7 @@ pub const TaskPlannerTool = struct {
                 }
             }
             const progress = if (task_count > 0) @as(f32, @floatFromInt(completed)) / @as(f32, @floatFromInt(task_count)) * 100.0 else 0.0;
-            const resp = try std.fmt.allocPrint(allocator, "{{\"total\":{d},\"pending\":{d},\"in_progress\":{d},\"completed\":{d},\"blocked\":{d},\"progress_pct\":{d:.1}}}", .{ task_count, pending, in_progress, completed, blocked, progress });
+            const resp = try allocator.print("{{\"total\":{d},\"pending\":{d},\"in_progress\":{d},\"completed\":{d},\"blocked\":{d},\"progress_pct\":{d:.1}}}", .{ task_count, pending, in_progress, completed, blocked, progress });
             return ToolResult.ok(resp);
         } else {
             const task_id = if (root.getInt(args, "task_id")) |id| @as(u32, @intCast(id)) else return ToolResult.fail("task_id required");
@@ -125,7 +125,7 @@ pub const TaskPlannerTool = struct {
             } else {
                 return ToolResult.fail("unknown action");
             }
-            const resp = try std.fmt.allocPrint(allocator, "{{\"updated\":true,\"task_id\":{d}}}", .{task_id});
+            const resp = try allocator.print("{{\"updated\":true,\"task_id\":{d}}}", .{task_id});
             return ToolResult.ok(resp);
         }
     }

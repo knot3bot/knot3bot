@@ -45,7 +45,7 @@ pub const WebFetchTool = struct {
             "curl",
             "-s",
             "--max-time",
-            try std.fmt.allocPrint(allocator, "{d}", .{timeout}),
+            try allocator.print("{d}", .{timeout}),
             "-L",
             "-A",
             "knot3bot/1.0",
@@ -66,7 +66,7 @@ pub const WebFetchTool = struct {
                     return ToolResult.ok(result.stdout);
                 } else {
                     allocator.free(result.stdout);
-                    return ToolResult.fail(try std.fmt.allocPrint(allocator, "Fetch failed with code {d}", .{code}));
+                    return ToolResult.fail(try allocator.print("Fetch failed with code {d}", .{code}));
                 }
             },
             else => {

@@ -56,12 +56,12 @@ pub const RoutingDecision = struct {
 /// Model registry with metadata and routing
 pub const ModelRegistry = struct {
     allocator: std.mem.Allocator,
-    models: std.StringArrayHashMapUnmanaged(ModelMetadata),
+    models: std.array_hash_map.String(ModelMetadata),
 
     pub fn init(allocator: std.mem.Allocator) !ModelRegistry {
         return .{
             .allocator = allocator,
-            .models = try std.StringArrayHashMapUnmanaged(ModelMetadata).init(allocator, &.{}, &.{}),
+            .models = try std.array_hash_map.String(ModelMetadata).init(allocator, &.{}, &.{}),
         };
     }
 

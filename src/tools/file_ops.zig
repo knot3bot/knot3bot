@@ -32,7 +32,7 @@ pub const FileReadTool = struct {
             return ToolResult.fail("Invalid or unsafe path");
         };
 
-        const full_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ self.workspace_dir, path });
+        const full_path = try allocator.print("{s}/{s}", .{ self.workspace_dir, path });
         defer allocator.free(full_path);
 
         const content = shared.context.cwdReadFileAlloc(allocator, full_path, 1024 * 1024) catch {
@@ -70,7 +70,7 @@ pub const FileWriteTool = struct {
             return ToolResult.fail("Invalid or unsafe path");
         };
 
-        const full_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ self.workspace_dir, path });
+        const full_path = try allocator.print("{s}/{s}", .{ self.workspace_dir, path });
         defer allocator.free(full_path);
 
         shared.context.cwdWriteFile(full_path, content) catch {
@@ -103,7 +103,7 @@ pub const ListDirectoryTool = struct {
             return ToolResult.fail("Invalid or unsafe path");
         };
 
-        const full_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ self.workspace_dir, path });
+        const full_path = try allocator.print("{s}/{s}", .{ self.workspace_dir, path });
         defer allocator.free(full_path);
 
         var dir = shared.context.cwdOpenDir(full_path, .{ .iterate = true }) catch {
@@ -151,7 +151,7 @@ pub const GrepTool = struct {
             return ToolResult.fail("Invalid or unsafe path");
         };
 
-        const full_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ self.workspace_dir, path });
+        const full_path = try allocator.print("{s}/{s}", .{ self.workspace_dir, path });
         defer allocator.free(full_path);
 
         const content = shared.context.cwdReadFileAlloc(allocator, full_path, 1024 * 1024) catch {
@@ -164,7 +164,7 @@ pub const GrepTool = struct {
         var lines = std.mem.splitScalar(u8, content, '\n');
         var line_num: usize = 0;
         while (lines.next()) |line| : (line_num += 1) {
-            if (std.mem.indexOf(u8, line, pattern) != null) {
+            if (std.mem.find(u8, line, pattern) != null) {
                 var num_buf: [32]u8 = undefined;
                 const num_str = std.fmt.bufPrint(&num_buf, "{d}", .{line_num}) catch "";
                 try results.appendSlice(allocator, num_str);
@@ -224,7 +224,7 @@ pub const GlobTool = struct {
         var iterator = dir.iterate();
         while (iterator.next(shared.context.io()) catch null) |entry| {
             const full_path = if (prefix.len > 0)
-                try std.fmt.allocPrint(allocator, "{s}/{s}", .{ prefix, entry.name })
+                try allocator.print("{s}/{s}", .{ prefix, entry.name })
             else
                 try allocator.dupe(u8, entry.name);
             defer allocator.free(full_path);
@@ -254,7 +254,7 @@ pub const GlobTool = struct {
 /// Simple glob pattern matching (supports * wildcard)
 fn matchesGlobPattern(name: []const u8, pattern: []const u8) bool {
     if (std.mem.eql(u8, pattern, "*")) return true;
-    if (std.mem.indexOfScalar(u8, pattern, '*')) |_| {
+    if (std.mem.findScalar(u8, pattern, '*')) |_| {
         var parts = std.mem.splitScalar(u8, pattern, '*');
         const before = parts.first();
         const after = parts.rest();

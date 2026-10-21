@@ -10,6 +10,9 @@ const models = @import("../models.zig");
 const prompt_cache = @import("prompt_cache.zig");
 const harness_mod = @import("harness.zig");
 const harness_session = @import("harness_session.zig");
+const harness_memory_mod = @import("harness_memory.zig");
+const harness_store = @import("harness_store.zig");
+const harness_trace = @import("harness_trace.zig");
 const credential_pool = @import("credential_pool.zig");
 const json_mod = @import("../shared/json.zig");
 const ToolRegistry = tools.ToolRegistry;
@@ -87,7 +90,7 @@ pub const ReActStep = struct {
         }
 
         try output.appendSlice(allocator, "{\"step\":");
-        const step_str = try std.fmt.allocPrint(allocator, "{}", .{self.step_number});
+        const step_str = try allocator.print("{}", .{self.step_number});
         try temp_allocs.append(allocator, step_str);
         try output.appendSlice(allocator, step_str);
         try output.appendSlice(allocator, ",\"thought\":\"");
@@ -121,7 +124,7 @@ pub const ReActStep = struct {
         }
 
         try output.appendSlice(allocator, ",\"duration_ms\":");
-        const duration_str = try std.fmt.allocPrint(allocator, "{}", .{self.duration_ms});
+        const duration_str = try allocator.print("{}", .{self.duration_ms});
         try temp_allocs.append(allocator, duration_str);
         try output.appendSlice(allocator, duration_str);
         try output.appendSlice(allocator, "}");
@@ -215,6 +218,10 @@ pub const AgentConfig = struct {
     enable_harness_rsi: bool = false,
     harness_task_tag: []const u8 = "general",
     harness_rsi_k: u8 = 1,
+    /// Executor calls allowed for one RSI task. 5 covers three probes, one official run, and one parent rerun. Below 4, the task runs once on the baseline.
+    harness_call_budget: u8 = 5,
+    /// When set together with RSI, winning patches are read and written in this SQLite file.
+    harness_db_path: ?[]const u8 = null,
 };
 
 pub const LLMResult = struct {
@@ -261,6 +268,13 @@ pub const Agent = struct {
     inside_harness_exec: bool = false,
     harness_max_retries: u8 = 0,
     harness_base_prompt: ?[]const u8 = null,
+    /// Tool names visible to the model for the harness currently executing. Empty allows every tool.
+    harness_tool_order: []const []const u8 = &.{},
+    /// Winner of the last comparison in this process. The next task starts from this baseline.
+    current_harness: ?harness_mod.Harness = null,
+    harness_memory: ?harness_memory_mod.HarnessMemory = null,
+    /// Every tool call in the current harness execution. Names are owned here until the summary is built.
+    harness_tool_notes: std.ArrayList(harness_trace.ActionNote) = .empty,
     credential_pool: ?*credential_pool.CredentialPool = null,
     anthropic_client: ?providers.anthropic.AnthropicClient = null,
     skill_self_improve: ?*SkillSelfImprove = null,
@@ -283,6 +297,14 @@ pub const Agent = struct {
                 }
             }
         }
+        var harness_memory: ?harness_memory_mod.HarnessMemory = null;
+        errdefer if (harness_memory) |mem| mem.deinit();
+        if (config.enable_harness_rsi) {
+            if (config.harness_db_path) |path| {
+                harness_memory = try harness_memory_mod.HarnessMemory.open(allocator, path);
+            }
+        }
+
         const effective_key = if (config.credential_pool) |pool| pool.nextKey() else (config.api_key orelse "");
         if (effective_key.len > 0) {
             if (config.provider == .anthropic) {
@@ -313,6 +335,7 @@ pub const Agent = struct {
             .model_registry = config.model_registry,
             .enable_smart_routing = config.enable_smart_routing,
             .skill_self_improve = config.skill_self_improve,
+            .harness_memory = harness_memory,
         };
     }
 
@@ -348,6 +371,9 @@ pub const Agent = struct {
         if (self.client) |*c| c.deinit();
         if (self.anthropic_client) |*ac| ac.deinit();
         if (self.harness_base_prompt) |prompt| self.allocator.free(prompt);
+        if (self.current_harness) |harness| harness_mod.freeHarness(self.allocator, harness);
+        if (self.harness_memory) |mem| mem.deinit();
+        self.clearHarnessToolNotes();
     }
 
     /// Run agent with query and return detailed step-by-step result
@@ -357,6 +383,7 @@ pub const Agent = struct {
         }
         self.step_logs.clearRetainingCapacity();
         self.usage = UsageStats{};
+        if (self.inside_harness_exec) self.clearHarnessToolNotes();
 
         try self.messages.append(self.allocator, .{ .role = .user, .content = try self.allocator.dupe(u8, query) });
         errdefer {
@@ -469,7 +496,9 @@ pub const Agent = struct {
                     const tool_start = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toMilliseconds();
 
                     // Execute tool with error handling
+                    const errors_before = self.usage.errors;
                     const tool_result = self.executeToolWithError(tc.function.name, tc.function.arguments);
+                    if (self.inside_harness_exec) self.noteHarnessTool(tc.function.name, tool_result == null or self.usage.errors != errors_before);
                     const tool_duration: u64 = @intCast(std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toMilliseconds() - tool_start);
 
                     // Transfer ownership: tool_result is already an allocated copy
@@ -652,10 +681,10 @@ pub const Agent = struct {
                         const result_str = if (tool_result) |tr| tr else "{\"error\":\"Tool execution failed\"}";
                         if (all_results.items.len > 0) try all_results.appendSlice(self.allocator, ", ");
                         try all_results.appendSlice(self.allocator, result_str);
-                        const tool_msg = try std.fmt.allocPrint(self.allocator, "{s}", .{result_str});
+                        const tool_msg = try self.allocator.print("{s}", .{result_str});
                         try self.messages.append(self.allocator, .{ .role = .tool, .content = tool_msg, .tool_call_id = tc.id });
                     }
-                    const indicator = try std.fmt.allocPrint(self.allocator, "[Tool(s) executed. Results: {s}]", .{try all_results.toOwnedSlice(self.allocator)});
+                    const indicator = try self.allocator.print("[Tool(s) executed. Results: {s}]", .{try all_results.toOwnedSlice(self.allocator)});
                     defer self.allocator.free(indicator);
                     callback(indicator, user_data);
                     continue;
@@ -689,8 +718,20 @@ pub const Agent = struct {
             failing_allocator = si.allocator;
         }
         defer if (failing_allocator) |a| a.free(failing);
+        var loaded_failures: [][]const u8 = &.{};
+        defer self.freeLoadedFailures(loaded_failures);
+        if (failing.len == 0) {
+            if (self.harness_memory) |*mem| {
+                loaded_failures = mem.loadFailingTools(self.config.harness_task_tag) catch |err| blk: {
+                    std.log.warn("harness failing tools load: {s}", .{@errorName(err)});
+                    break :blk &.{};
+                };
+                failing = loaded_failures;
+            }
+        }
+        self.restoreHarness();
 
-        const baseline = harness_mod.Harness{
+        const baseline = self.current_harness orelse harness_mod.Harness{
             .version = 1,
             .parent = null,
             .prompt_section = "",
@@ -698,24 +739,119 @@ pub const Agent = struct {
             .max_retries = 0,
             .checklist = "",
         };
-        var gate = HarnessGate{ .agent = self };
+        const specs = self.registry.list();
+        const available = try self.allocator.alloc([]const u8, specs.len);
+        defer self.allocator.free(available);
+        for (specs, 0..) |entry, i| available[i] = entry.spec.name;
+
+        var history: []harness_mod.Harness = &.{};
+        if (self.harness_memory) |*mem| {
+            history = mem.loadHistory(self.config.harness_task_tag) catch |err| blk: {
+                std.log.warn("harness history load: {s}", .{@errorName(err)});
+                break :blk &.{};
+            };
+        }
+        defer if (self.harness_memory) |*mem| harness_memory_mod.HarnessMemory.freeHistory(mem.allocator, history);
+
+        var gate = HarnessGate{ .agent = self, .single_run = self.config.harness_call_budget < 4 };
+        defer if (gate.trace) |summary| harness_trace.freeSummary(self.allocator, summary);
+        const store: ?harness_session.PatchStore = if (self.harness_memory) |*mem|
+            harness_store.bind(mem)
+        else
+            null;
         const out = try harness_session.runSession(
             self.allocator,
             .{
                 .enable_harness_rsi = true,
                 .task_tag = self.config.harness_task_tag,
                 .k = self.config.harness_rsi_k,
+                .available_tools = available,
+                .call_budget = self.config.harness_call_budget,
+                .prior_snapshots = history,
             },
             baseline,
             query,
             failing,
-            null,
+            store,
             harnessTaskExec,
             harnessJudge,
             @ptrCast(&gate),
         );
+        const kept = cloneHarness(self.allocator, out.harness) catch |err| {
+            harness_session.freeSession(self.allocator, out);
+            return err;
+        };
+        if (self.current_harness) |old| harness_mod.freeHarness(self.allocator, old);
+        self.current_harness = kept;
+        self.storeHarness();
+        self.storeFailingTools(out.summary);
         harness_session.freeSession(self.allocator, out);
         return gate.official orelse error.HarnessRunMissing;
+    }
+
+    fn cloneHarness(allocator: std.mem.Allocator, src: harness_mod.Harness) !harness_mod.Harness {
+        const prompt = try allocator.dupe(u8, src.prompt_section);
+        errdefer allocator.free(prompt);
+        const checklist = try allocator.dupe(u8, src.checklist);
+        errdefer allocator.free(checklist);
+        const names = try allocator.alloc([]const u8, src.tool_order.len);
+        errdefer allocator.free(names);
+        var copied: usize = 0;
+        errdefer for (names[0..copied]) |name| allocator.free(name);
+        for (src.tool_order) |name| {
+            names[copied] = try allocator.dupe(u8, name);
+            copied += 1;
+        }
+        return .{
+            .version = src.version,
+            .parent = src.parent,
+            .prompt_section = prompt,
+            .tool_order = names,
+            .max_retries = src.max_retries,
+            .checklist = checklist,
+        };
+    }
+
+    fn restoreHarness(self: *Agent) void {
+        if (self.current_harness != null) return;
+        const mem = if (self.harness_memory) |*opened| opened else return;
+        const loaded = mem.loadHarness(self.config.harness_task_tag) catch |err| {
+            std.log.warn("harness snapshot load: {s}", .{@errorName(err)});
+            return;
+        };
+        if (loaded) |harness| self.current_harness = harness;
+    }
+
+    fn storeHarness(self: *Agent) void {
+        const harness = self.current_harness orelse return;
+        const mem = if (self.harness_memory) |*opened| opened else return;
+        mem.saveHarness(self.config.harness_task_tag, harness) catch |err| {
+            std.log.warn("harness snapshot save: {s}", .{@errorName(err)});
+        };
+    }
+
+    fn storeFailingTools(self: *Agent, summary: harness_mod.TrajectorySummary) void {
+        const mem = if (self.harness_memory) |*opened| opened else return;
+        var names: std.ArrayList([]const u8) = .empty;
+        defer names.deinit(self.allocator);
+        const count = @min(summary.tool_names.len, summary.tool_success.len);
+        var i: usize = 0;
+        while (i < count) : (i += 1) {
+            if (summary.tool_success[i]) continue;
+            names.append(self.allocator, summary.tool_names[i]) catch {
+                std.log.warn("harness failing tools save: OutOfMemory", .{});
+                return;
+            };
+        }
+        mem.saveFailingTools(self.config.harness_task_tag, names.items) catch |err| {
+            std.log.warn("harness failing tools save: {s}", .{@errorName(err)});
+        };
+    }
+
+    fn freeLoadedFailures(self: *Agent, names: [][]const u8) void {
+        const mem = if (self.harness_memory) |*opened| opened else return;
+        for (names) |name| mem.allocator.free(name);
+        mem.allocator.free(names);
     }
 
     fn installHarness(self: *Agent, h: harness_mod.Harness) !void {
@@ -760,6 +896,18 @@ pub const Agent = struct {
         }
     }
 
+    fn clearHarnessToolNotes(self: *Agent) void {
+        for (self.harness_tool_notes.items) |note| self.allocator.free(note.name);
+        self.harness_tool_notes.clearRetainingCapacity();
+    }
+
+    fn noteHarnessTool(self: *Agent, name: []const u8, failed: bool) void {
+        const copy = self.allocator.dupe(u8, name) catch return;
+        self.harness_tool_notes.append(self.allocator, .{ .name = copy, .failed = failed }) catch {
+            self.allocator.free(copy);
+        };
+    }
+
     fn freeStepResult(self: *Agent, result: StepResult) void {
         for (result.steps) |*step| {
             self.allocator.free(step.thought);
@@ -780,7 +928,6 @@ pub const Agent = struct {
         var attempt: u8 = 0;
         while (true) {
             const result = self.registry.call(self.allocator, tool_name, arguments) catch |err| {
-                self.usage.errors += 1;
                 if (self.config.verbose) {
                     std.debug.print("[Tool error: {s} - {}]\n", .{ tool_name, err });
                 }
@@ -788,11 +935,11 @@ pub const Agent = struct {
                     attempt += 1;
                     continue;
                 }
+                self.usage.errors += 1;
                 return null;
             };
 
             if (!result.success) {
-                self.usage.errors += 1;
                 if (self.config.verbose) {
                     std.debug.print("[Tool failed: {s} - {s}]\n", .{ tool_name, result.error_msg orelse "unknown" });
                 }
@@ -800,6 +947,7 @@ pub const Agent = struct {
                     attempt += 1;
                     continue;
                 }
+                self.usage.errors += 1;
             }
             if (result.output.len == 0) return "";
 
@@ -1121,10 +1269,16 @@ pub const Agent = struct {
 
     fn getToolDefs(self: *Agent) ![]ToolDef {
         const specs = self.registry.list();
-        const result = try self.allocator.alloc(ToolDef, specs.len);
+        var visible: usize = 0;
+        for (specs) |entry| {
+            if (self.toolVisible(entry.spec.name)) visible += 1;
+        }
+        const result = try self.allocator.alloc(ToolDef, visible);
         errdefer self.allocator.free(result);
 
-        for (specs, 0..) |entry, idx| {
+        var idx: usize = 0;
+        for (specs) |entry| {
+            if (!self.toolVisible(entry.spec.name)) continue;
             result[idx] = .{
                 .type = "function",
                 .function = .{
@@ -1133,8 +1287,20 @@ pub const Agent = struct {
                     .parameters = try self.allocator.dupe(u8, entry.spec.parameters_json),
                 },
             };
+            idx += 1;
         }
         return result;
+    }
+
+    fn toolVisible(self: *const Agent, name: []const u8) bool {
+        return harness_mod.toolAllowed(.{
+            .version = 0,
+            .parent = null,
+            .prompt_section = "",
+            .tool_order = self.harness_tool_order,
+            .max_retries = 0,
+            .checklist = "",
+        }, name);
     }
 
     pub fn getUsageStats(self: *const Agent) UsageStats {
@@ -1154,7 +1320,7 @@ pub const Agent = struct {
         const registry = self.skill_registry orelse return false;
         const prompt = registry.loadSkillPrompt(skill_name, self.allocator) catch return false;
         if (prompt) |p| {
-            const skill_msg = try std.fmt.allocPrint(self.allocator, "[SKILL: {s}]\n{s}", .{ skill_name, p });
+            const skill_msg = try self.allocator.print("[SKILL: {s}]\n{s}", .{ skill_name, p });
             defer self.allocator.free(skill_msg);
             try self.messages.append(self.allocator, .{ .role = .system, .content = skill_msg });
             try self.active_skills.append(self.allocator, try self.allocator.dupe(u8, skill_name));
@@ -1203,44 +1369,89 @@ const HarnessGate = struct {
     agent: *Agent,
     calls: usize = 0,
     official: ?StepResult = null,
+    /// Budget below 4 runs the baseline once. That single call is the user-facing result.
+    single_run: bool = false,
+    /// Message length after the previous official harness was installed.
+    official_mark: ?usize = null,
+    /// Last executor summary. The caller copies it before the next exec frees it.
+    trace: ?harness_mod.TrajectorySummary = null,
 };
 
 fn harnessTaskExec(_: std.mem.Allocator, h: harness_mod.Harness, task: []const u8, ctx: *anyopaque) anyerror!harness_mod.TrajectorySummary {
     const gate: *HarnessGate = @ptrCast(@alignCast(ctx));
     const agent = gate.agent;
     gate.calls += 1;
-    const official = gate.calls > 3;
+    const official = gate.single_run or gate.calls > 3;
     agent.inside_harness_exec = true;
     defer agent.inside_harness_exec = false;
-    agent.bypass_prompt_cache = !official;
+    agent.bypass_prompt_cache = !official or !harness_mod.allowsPromptCache(h);
     defer agent.bypass_prompt_cache = false;
-    agent.harness_max_retries = if (official) h.max_retries else 0;
+    agent.harness_max_retries = h.max_retries;
+    agent.harness_tool_order = h.tool_order;
+    defer agent.harness_tool_order = &.{};
     defer agent.harness_max_retries = 0;
 
+    if (official) {
+        if (gate.official_mark) |previous_mark| agent.truncateMessages(previous_mark);
+        if (gate.official) |previous| {
+            agent.freeStepResult(previous);
+            gate.official = null;
+        }
+    }
     try agent.installHarness(h);
     const mark = agent.messages.items.len;
+    if (official) gate.official_mark = mark;
     const step = try agent.runWithSteps(task);
-    const errors = step.usage.errors;
+    const fallback = agent.harness_tool_notes.items.len == 0;
+    const notes = if (fallback) try actionNotes(agent.allocator, step.steps) else agent.harness_tool_notes.items;
+    defer if (fallback) agent.allocator.free(notes);
+    defer agent.clearHarnessToolNotes();
+    const summary = try harness_trace.buildSummary(
+        agent.allocator,
+        h.version,
+        agent.config.harness_task_tag,
+        step.final_answer,
+        notes,
+        step.usage.errors,
+    );
+    if (gate.trace) |previous| harness_trace.freeSummary(agent.allocator, previous);
+    gate.trace = summary;
+
     if (!official) {
         agent.freeStepResult(step);
         agent.truncateMessages(mark);
     } else {
         gate.official = step;
     }
-    return .{
-        .harness_version = h.version,
-        .task_tag = agent.config.harness_task_tag,
-        .final_answer = "",
-        .tool_names = &.{},
-        .tool_success = &.{},
-        .error_count = errors,
-    };
+    return summary;
+}
+
+fn actionNotes(allocator: std.mem.Allocator, steps: []const ReActStep) ![]harness_trace.ActionNote {
+    var count: usize = 0;
+    for (steps) |step| {
+        if (step.action != null) count += 1;
+    }
+    const notes = try allocator.alloc(harness_trace.ActionNote, count);
+    var i: usize = 0;
+    for (steps) |step| {
+        if (step.action) |name| {
+            notes[i] = .{
+                .name = name,
+                .failed = step.error_msg != null or observationFailed(step.observation),
+            };
+            i += 1;
+        }
+    }
+    return notes;
+}
+
+fn observationFailed(observation: ?[]const u8) bool {
+    const text = observation orelse return false;
+    return std.mem.find(u8, text, "Tool execution failed") != null;
 }
 
 fn harnessJudge(_: std.mem.Allocator, _: []const u8, left: harness_mod.TrajectorySummary, right: harness_mod.TrajectorySummary, _: *anyopaque) anyerror!harness_mod.PairPreference {
-    if (left.error_count < right.error_count) return .left;
-    if (right.error_count < left.error_count) return .right;
-    return .tie;
+    return harness_mod.prefer(left, right);
 }
 
 pub fn createDefaultSystemPrompt(allocator: std.mem.Allocator, registry: *const ToolRegistry) ![]const u8 {

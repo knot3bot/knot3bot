@@ -132,8 +132,8 @@ pub const ToolCallHistory = struct {
 
     /// Get failed tools with high failure rate
     pub fn getFailingTools(self: *const ToolCallHistory, min_failures: u32, min_failure_rate: f32) ![]const []const u8 {
-        var failing = std.array_list.AlignedManaged([]const u8, null).init(self.allocator);
-        defer failing.deinit();
+        var failing: std.ArrayList([]const u8) = .empty;
+        defer failing.deinit(self.allocator);
 
         var it = self.patterns.iterator();
         while (it.next()) |entry| {
@@ -142,11 +142,11 @@ pub const ToolCallHistory = struct {
                 const rate = @as(f32, @floatFromInt(pattern.failure_count)) /
                     @as(f32, @floatFromInt(pattern.failure_count + pattern.success_count));
                 if (rate >= min_failure_rate) {
-                    failing.append(entry.key_ptr.*) catch continue;
+                    failing.append(self.allocator, entry.key_ptr.*) catch continue;
                 }
             }
         }
-        return failing.toOwnedSlice();
+        return failing.toOwnedSlice(self.allocator);
     }
 };
 
@@ -215,8 +215,8 @@ pub const SkillSelfImprove = struct {
     pub fn runCheckpoint(self: *SkillSelfImprove) !CheckpointResult {
         self.tool_calls_since_checkpoint = 0;
 
-        var suggestions = std.array_list.AlignedManaged(ImprovementSuggestion, null).init(self.allocator);
-        defer suggestions.deinit();
+        var suggestions: std.ArrayList(ImprovementSuggestion) = .empty;
+        defer suggestions.deinit(self.allocator);
 
         // Check for failing tools that might need skill guidance
         const failing_tools = try self.history.getFailingTools(3, 0.5);
@@ -231,12 +231,12 @@ pub const SkillSelfImprove = struct {
             if (self.history.patterns.get(tool_name)) |pattern| {
                 const rate = @as(f32, @floatFromInt(pattern.failure_count)) /
                     @as(f32, @floatFromInt(pattern.failure_count + pattern.success_count));
-                try suggestions.append(.{
+                try suggestions.append(self.allocator, .{
                     .action = .update_memory,
                     .skill_name = null,
-                    .reason = try std.fmt.allocPrint(self.allocator, "Tool '{s}' has {d:.0}% failure rate. Consider adding error handling guidance.", .{ tool_name, rate * 100 }),
+                    .reason = try self.allocator.print("Tool '{s}' has {d:.0}% failure rate. Consider adding error handling guidance.", .{ tool_name, rate * 100 }),
                     .confidence = rate,
-                    .pattern_data = try std.fmt.allocPrint(self.allocator, "{{\"tool\":\"{s}\",\"failures\":{d},\"successes\":{d}}}", .{ tool_name, pattern.failure_count, pattern.success_count }),
+                    .pattern_data = try self.allocator.print("{{\"tool\":\"{s}\",\"failures\":{d},\"successes\":{d}}}", .{ tool_name, pattern.failure_count, pattern.success_count }),
                 });
             }
         }
@@ -247,7 +247,7 @@ pub const SkillSelfImprove = struct {
         const result = CheckpointResult{
             .should_checkpoint = suggestions.items.len > 0,
             .checkpoint_type = .periodic,
-            .suggestions = try suggestions.toOwnedSlice(),
+            .suggestions = try suggestions.toOwnedSlice(self.allocator),
         };
 
         // Free old suggestions and store new
@@ -280,14 +280,14 @@ pub const SkillSelfImprove = struct {
             const action_name = @tagName(s.action);
 
             if (s.skill_name) |name| {
-                const entry = std.fmt.allocPrint(self.allocator, "\n{{\"action\":\"{s}\",\"skill_name\":\"{s}\",\"reason\":\"{s}\",\"confidence\":{d:.2},\"pattern_data\":\"{s}\"}}", .{ action_name, name, s.reason, s.confidence, s.pattern_data }) catch continue;
+                const entry = self.allocator.print("\n{{\"action\":\"{s}\",\"skill_name\":\"{s}\",\"reason\":\"{s}\",\"confidence\":{d:.2},\"pattern_data\":\"{s}\"}}", .{ action_name, name, s.reason, s.confidence, s.pattern_data }) catch continue;
                 json.appendSlice(self.allocator, entry) catch {
                     self.allocator.free(entry);
                     continue;
                 };
                 self.allocator.free(entry);
             } else {
-                const entry = std.fmt.allocPrint(self.allocator, "\n{{\"action\":\"{s}\",\"reason\":\"{s}\",\"confidence\":{d:.2},\"pattern_data\":\"{s}\"}}", .{ action_name, s.reason, s.confidence, s.pattern_data }) catch continue;
+                const entry = self.allocator.print("\n{{\"action\":\"{s}\",\"reason\":\"{s}\",\"confidence\":{d:.2},\"pattern_data\":\"{s}\"}}", .{ action_name, s.reason, s.confidence, s.pattern_data }) catch continue;
                 json.appendSlice(self.allocator, entry) catch {
                     self.allocator.free(entry);
                     continue;
@@ -302,7 +302,7 @@ pub const SkillSelfImprove = struct {
     }
 
     /// Detect successful patterns that could become skills
-    fn detectSuccessfulPatterns(self: *SkillSelfImprove, suggestions: *std.array_list.AlignedManaged(ImprovementSuggestion, null)) !void {
+    fn detectSuccessfulPatterns(self: *SkillSelfImprove, suggestions: *std.ArrayList(ImprovementSuggestion)) !void {
         var it = self.history.patterns.iterator();
         while (it.next()) |entry| {
             const pattern = entry.value_ptr.*;
@@ -321,15 +321,15 @@ pub const SkillSelfImprove = struct {
                 const confidence = success_rate * @as(f32, @floatFromInt(@min(pattern.success_count, 10))) / 10.0;
 
                 if (confidence >= self.min_confidence_for_skill) {
-                    const skill_name = try std.fmt.allocPrint(self.allocator, "{s}-workflow", .{entry.key_ptr.*});
+                    const skill_name = try self.allocator.print("{s}-workflow", .{entry.key_ptr.*});
                     errdefer self.allocator.free(skill_name);
 
-                    try suggestions.append(.{
+                    try suggestions.append(self.allocator, .{
                         .action = .create_skill,
                         .skill_name = skill_name,
-                        .reason = try std.fmt.allocPrint(self.allocator, "Tool '{s}' used successfully {d} times - consider capturing as reusable skill", .{ entry.key_ptr.*, pattern.success_count }),
+                        .reason = try self.allocator.print("Tool '{s}' used successfully {d} times - consider capturing as reusable skill", .{ entry.key_ptr.*, pattern.success_count }),
                         .confidence = confidence,
-                        .pattern_data = try std.fmt.allocPrint(self.allocator, "{{\"tool\":\"{s}\",\"examples\":{d},\"avg_duration_ms\":{d}}}", .{
+                        .pattern_data = try self.allocator.print("{{\"tool\":\"{s}\",\"examples\":{d},\"avg_duration_ms\":{d}}}", .{
                             entry.key_ptr.*,
                             pattern.success_count,
                             pattern.total_duration_ms / pattern.success_count,
@@ -344,8 +344,8 @@ pub const SkillSelfImprove = struct {
     pub fn runCompletionEvaluation(self: *SkillSelfImprove) !CheckpointResult {
         self.tool_calls_since_checkpoint = 0;
 
-        var suggestions = std.array_list.AlignedManaged(ImprovementSuggestion, null).init(self.allocator);
-        defer suggestions.deinit();
+        var suggestions: std.ArrayList(ImprovementSuggestion) = .empty;
+        defer suggestions.deinit(self.allocator);
 
         // Check for overall success patterns
         const total_calls = self.history.totalCalls();
@@ -362,12 +362,12 @@ pub const SkillSelfImprove = struct {
 
             if (all_success and total_calls >= 10) {
                 // Complex successful task - suggest skill for future similar tasks
-                try suggestions.append(.{
+                try suggestions.append(self.allocator, .{
                     .action = .create_skill,
                     .skill_name = try self.allocator.dupe(u8, "successful-workflow"),
-                    .reason = try std.fmt.allocPrint(self.allocator, "Complex task ({d} tool calls) completed successfully - worth capturing as skill template", .{total_calls}),
+                    .reason = try self.allocator.print("Complex task ({d} tool calls) completed successfully - worth capturing as skill template", .{total_calls}),
                     .confidence = 0.8,
-                    .pattern_data = try std.fmt.allocPrint(self.allocator, "{{\"total_calls\":{d},\"tools\":{d}}}", .{
+                    .pattern_data = try self.allocator.print("{{\"total_calls\":{d},\"tools\":{d}}}", .{
                         total_calls,
                         self.history.patterns.count(),
                     }),
@@ -386,12 +386,12 @@ pub const SkillSelfImprove = struct {
 
         for (failing_tools) |tool_name| {
             if (self.history.patterns.get(tool_name)) |pattern| {
-                try suggestions.append(.{
+                try suggestions.append(self.allocator, .{
                     .action = .update_memory,
                     .skill_name = null,
-                    .reason = try std.fmt.allocPrint(self.allocator, "Tool '{s}' failed {d} time(s). Add to USER.md for future reference.", .{ tool_name, pattern.failure_count }),
+                    .reason = try self.allocator.print("Tool '{s}' failed {d} time(s). Add to USER.md for future reference.", .{ tool_name, pattern.failure_count }),
                     .confidence = 0.9,
-                    .pattern_data = try std.fmt.allocPrint(self.allocator, "{{\"tool\":\"{s}\",\"failure_count\":{d}}}", .{ tool_name, pattern.failure_count }),
+                    .pattern_data = try self.allocator.print("{{\"tool\":\"{s}\",\"failure_count\":{d}}}", .{ tool_name, pattern.failure_count }),
                 });
             }
         }
@@ -399,7 +399,7 @@ pub const SkillSelfImprove = struct {
         const result = CheckpointResult{
             .should_checkpoint = suggestions.items.len > 0,
             .checkpoint_type = .task_complete,
-            .suggestions = try suggestions.toOwnedSlice(),
+            .suggestions = try suggestions.toOwnedSlice(self.allocator),
         };
 
         // Free old suggestions and store new
@@ -431,7 +431,7 @@ pub const SkillSelfImprove = struct {
         if (self.improvement_log_path == null) return;
 
         const timestamp = std.Io.Clock.Timestamp.now(shared.context.io(), .real).raw.toSeconds();
-        const log_line = try std.fmt.allocPrint(self.allocator, "\n{} | {s} | {s} | {s} | {}", .{ timestamp, @tagName(suggestion.action), suggestion.reason, suggestion.pattern_data, suggestion.confidence });
+        const log_line = try self.allocator.print("\n{} | {s} | {s} | {s} | {}", .{ timestamp, @tagName(suggestion.action), suggestion.reason, suggestion.pattern_data, suggestion.confidence });
         defer self.allocator.free(log_line);
 
         const existing = shared.context.cwdReadFileAlloc(self.allocator, self.improvement_log_path.?, 1024 * 1024) catch "";
@@ -449,11 +449,11 @@ pub const SkillSelfImprove = struct {
 
 /// Build self-evaluation prompt for LLM-based checkpoint (optional - more expensive)
 pub fn buildCheckpointPrompt(history: *const ToolCallHistory) []const u8 {
-    var prompt = std.ArrayList(u8).init(history.allocator);
-    defer prompt.deinit();
+    var prompt: std.ArrayList(u8) = .empty;
+    defer prompt.deinit(history.allocator);
 
-    prompt.appendSlice("Self-Evaluation Checkpoint\n\n") catch return "";
-    prompt.appendSlice("Evaluate the following tool usage patterns:\n\n") catch return "";
+    prompt.appendSlice(history.allocator, "Self-Evaluation Checkpoint\n\n") catch return "";
+    prompt.appendSlice(history.allocator, "Evaluate the following tool usage patterns:\n\n") catch return "";
 
     var it = history.patterns.iterator();
     while (it.next()) |entry| {
@@ -461,12 +461,14 @@ pub fn buildCheckpointPrompt(history: *const ToolCallHistory) []const u8 {
         const total = p.success_count + p.failure_count;
         const rate = if (total > 0) @as(f32, @floatFromInt(p.success_count)) / @as(f32, @floatFromInt(total)) else 1.0;
 
-        std.fmt.format("Tool: {s}\n  Success: {d}, Failures: {d}, Rate: {d:.1%}\n  Last args: {s}\n\n", .{ entry.key_ptr.*, p.success_count, p.failure_count, rate, p.last_args orelse "N/A" }) catch return "";
+        const line = history.allocator.print("Tool: {s}\n  Success: {d}, Failures: {d}, Rate: {d:.1%}\n  Last args: {s}\n\n", .{ entry.key_ptr.*, p.success_count, p.failure_count, rate, p.last_args orelse "N/A" }) catch return "";
+        defer history.allocator.free(line);
+        prompt.appendSlice(history.allocator, line) catch return "";
     }
 
-    prompt.appendSlice("\nShould any of these patterns be captured as reusable skills? " ++ "Reply with JSON: {{\"skills_to_create\": [{{\"name\": \"...\", \"reason\": \"...\"}}], " ++ "\"memory_updates\": [{{\"fact\": \"...\"}}], \"none\": true}}\n") catch return "";
+    prompt.appendSlice(history.allocator, "\nShould any of these patterns be captured as reusable skills? " ++ "Reply with JSON: {{\"skills_to_create\": [{{\"name\": \"...\", \"reason\": \"...\"}}], " ++ "\"memory_updates\": [{{\"fact\": \"...\"}}], \"none\": true}}\n") catch return "";
 
-    return prompt.toOwnedSlice();
+    return prompt.toOwnedSlice(history.allocator) catch "";
 }
 
 test "tool call history basic" {

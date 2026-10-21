@@ -69,7 +69,7 @@ pub const ClarifyTool = struct {
             try buf.appendSlice(allocator, "[");
             for (choices, 0..) |choice, i| {
                 if (i > 0) try buf.appendSlice(allocator, ",");
-                const c = try std.fmt.allocPrint(allocator, "\"{s}\"", .{choice});
+                const c = try allocator.print("\"{s}\"", .{choice});
                 defer allocator.free(c);
                 try buf.appendSlice(allocator, c);
             }

@@ -32,7 +32,7 @@ pub const TrackedProcess = struct {
     pid: ?u32 = null,
     state: ProcessState = .running,
     exit_code: ?u8 = null,
-    output_buffer: std.array_list.AlignedManaged(u8, null),
+    output_buffer: std.ArrayList(u8),
     started_at: i64,
 };
 
@@ -52,7 +52,7 @@ pub const ProcessRegistry = struct {
         var it = self.processes.iterator();
         while (it.next()) |entry| {
             self.allocator.free(entry.key_ptr.*);
-            entry.value_ptr.output_buffer.deinit();
+            entry.value_ptr.output_buffer.deinit(self.allocator);
         }
         self.processes.deinit();
     }
@@ -63,11 +63,11 @@ pub const ProcessRegistry = struct {
             return error.TooManyProcesses;
         }
 
-        const id = try std.fmt.allocPrint(self.allocator, "proc_{}", .{std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds()});
+        const id = try self.allocator.print("proc_{}", .{std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds()});
         const proc = TrackedProcess{
             .id = id,
             .command = command,
-            .output_buffer = std.array_list.AlignedManaged(u8, null).init(self.allocator),
+            .output_buffer = .empty,
             .started_at = std.Io.Clock.Timestamp.now(std.Io.Threaded.global_single_threaded.io(), .real).raw.toSeconds(),
         };
 
@@ -135,22 +135,22 @@ pub const ProcessRegistryTool = struct {
         };
 
         if (std.mem.eql(u8, action, "list")) {
-            var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-            defer buf.deinit();
+            var buf: std.ArrayList(u8) = .empty;
+            defer buf.deinit(allocator);
 
-            try buf.appendSlice("{\"processes\":[");
+            try buf.appendSlice(allocator, "{\"processes\":[");
             var it = self.registry.processes.iterator();
             var first = true;
             while (it.next()) |entry| {
-                if (!first) try buf.appendSlice(",");
+                if (!first) try buf.appendSlice(allocator, ",");
                 first = false;
-                const line = try std.fmt.allocPrint(allocator, "{{\"id\":\"{s}\",\"command\":\"{s}\",\"state\":\"{s}\"}}", .{ entry.key_ptr.*, entry.value_ptr.command, @tagName(entry.value_ptr.state) });
+                const line = try allocator.print("{{\"id\":\"{s}\",\"command\":\"{s}\",\"state\":\"{s}\"}}", .{ entry.key_ptr.*, entry.value_ptr.command, @tagName(entry.value_ptr.state) });
                 defer allocator.free(line);
-                try buf.appendSlice(line);
+                try buf.appendSlice(allocator, line);
             }
-            try buf.appendSlice("]}");
+            try buf.appendSlice(allocator, "]}");
 
-            return ToolResult{ .success = true, .output = try buf.toOwnedSlice() };
+            return ToolResult{ .success = true, .output = try buf.toOwnedSlice(allocator) };
         }
 
         const id = root.getString(args, "id") orelse {
@@ -159,12 +159,12 @@ pub const ProcessRegistryTool = struct {
 
         if (std.mem.eql(u8, action, "poll")) {
             if (self.registry.poll(id)) |proc| {
-                const pid_str = if (proc.pid) |p| try std.fmt.allocPrint(allocator, "{}", .{p}) else try allocator.dupe(u8, "0");
+                const pid_str = if (proc.pid) |p| try allocator.print("{}", .{p}) else try allocator.dupe(u8, "0");
                 defer if (proc.pid != null) allocator.free(pid_str);
-                const exit_str = if (proc.exit_code) |c| try std.fmt.allocPrint(allocator, "{}", .{c}) else try allocator.dupe(u8, "-1");
+                const exit_str = if (proc.exit_code) |c| try allocator.print("{}", .{c}) else try allocator.dupe(u8, "-1");
                 defer if (proc.exit_code != null) allocator.free(exit_str);
 
-                const resp = try std.fmt.allocPrint(allocator, "{{\"id\":\"{s}\",\"command\":\"{s}\",\"state\":\"{s}\",\"pid\":{s},\"exit_code\":{s}}}", .{ proc.id, proc.command, @tagName(proc.state), pid_str, exit_str });
+                const resp = try allocator.print("{{\"id\":\"{s}\",\"command\":\"{s}\",\"state\":\"{s}\",\"pid\":{s},\"exit_code\":{s}}}", .{ proc.id, proc.command, @tagName(proc.state), pid_str, exit_str });
                 return ToolResult{ .success = true, .output = resp };
             }
             return ToolResult.fail("Process not found");
@@ -196,7 +196,7 @@ pub const ProcessRegistryTool = struct {
             };
             return ToolResult{
                 .success = true,
-                .output = try std.fmt.allocPrint(allocator, "{{\"id\":\"{s}\"}}", .{proc_id}),
+                .output = try allocator.print("{{\"id\":\"{s}\"}}", .{proc_id}),
             };
         }
 

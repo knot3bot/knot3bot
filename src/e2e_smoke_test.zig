@@ -42,7 +42,7 @@ test "System prompt contains guidance" {
     const prompt = "You are knot3bot, an intelligent AI assistant built with Zig.";
     const msg = ChatMessage{ .role = "system", .content = prompt };
     try std.testing.expect(msg.content.len > 20);
-    try std.testing.expect(std.mem.indexOf(u8, msg.content, "knot3bot") != null);
+    try std.testing.expect(std.mem.find(u8, msg.content, "knot3bot") != null);
 }
 
 test "Health endpoint response schema" {
@@ -65,7 +65,7 @@ test "Error response format" {
 test "SSE event format" {
     const sse = "data: {\"id\":\"chatcmpl-1\",\"object\":\"chat.completion.chunk\",\"created\":0,\"model\":\"gpt-4\",\"choices\":[{\"index\":0,\"delta\":{\"content\":\"Hello\"}}]}";
     try std.testing.expect(std.mem.startsWith(u8, sse, "data: "));
-    try std.testing.expect(std.mem.indexOf(u8, sse, "\"content\":\"Hello\"") != null);
+    try std.testing.expect(std.mem.find(u8, sse, "\"content\":\"Hello\"") != null);
 }
 
 test "SSE DONE signal format" {

@@ -61,7 +61,7 @@ pub fn parseCommand(allocator: std.mem.Allocator, input: []const u8) CliAction {
 
     const rest = trimmed[1..];
     // Split on first whitespace (space, tab, newline) to get the command
-    const space_idx = std.mem.indexOfAny(u8, rest, " \t\n\r") orelse rest.len;
+    const space_idx = std.mem.findAny(u8, rest, " \t\n\r") orelse rest.len;
     const cmd = rest[0..space_idx];
     const args = if (space_idx < rest.len) std.mem.trim(u8, rest[space_idx + 1 ..], " \t\n\r") else "";
 
@@ -131,7 +131,7 @@ pub fn discoverCommands(partial: []const u8) void {
     std.debug.print("\n", .{});
     var matched: usize = 0;
     for (all_cmds) |cmd| {
-        if (trimmed.len == 0 or std.mem.startsWith(u8, cmd, partial) or std.mem.indexOf(u8, cmd, trimmed) != null) {
+        if (trimmed.len == 0 or std.mem.startsWith(u8, cmd, partial) or std.mem.find(u8, cmd, trimmed) != null) {
             std.debug.print("  {s}{s}{s}\n", .{ display.Colors.cyan, cmd, display.Colors.reset });
             matched += 1;
         }

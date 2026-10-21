@@ -1,4 +1,4 @@
-//! Global process context for Zig 0.16.0 migration.
+//! Global process context. `main` receives `std.process.Init` and stores it here.
 //!
 //! In Zig 0.16.0, I/O and environment variables are no longer globally
 //! accessible. This module provides a pragmatic migration path by storing

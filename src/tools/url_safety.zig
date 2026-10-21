@@ -18,7 +18,7 @@ pub fn isSafeUrl(allocator: std.mem.Allocator, url: []const u8) bool {
 /// Extract hostname from URL
 fn extractHostname(url: []const u8) ?[]const u8 {
     // Simple URL parsing - find host after :// and before : or /
-    const proto_end = std.mem.indexOf(u8, url, "://") orelse return null;
+    const proto_end = std.mem.find(u8, url, "://") orelse return null;
     const host_start = proto_end + 3;
 
     var host_end = url.len;
@@ -34,7 +34,7 @@ fn extractHostname(url: []const u8) ?[]const u8 {
 
     // Remove brackets from IPv6 addresses
     if (hostname[0] == '[') {
-        if (std.mem.indexOf(u8, hostname, "]")) |end| {
+        if (std.mem.find(u8, hostname, "]")) |end| {
             return hostname[1..end];
         }
     }
@@ -88,9 +88,9 @@ fn checkResolvedIp(allocator: std.mem.Allocator, hostname: []const u8) bool {
     defer allocator.free(lower);
 
     // Internal network hostnames
-    if (std.mem.indexOf(u8, lower, "internal") != null) return false;
-    if (std.mem.indexOf(u8, lower, "localhost") != null) return false;
-    if (std.mem.indexOf(u8, lower, "metadata") != null) return false;
+    if (std.mem.find(u8, lower, "internal") != null) return false;
+    if (std.mem.find(u8, lower, "localhost") != null) return false;
+    if (std.mem.find(u8, lower, "metadata") != null) return false;
 
     return true;
 }
@@ -180,7 +180,7 @@ pub const UrlSafetyTool = struct {
             try buf.appendSlice(allocator, "false");
         }
         try buf.appendSlice(allocator, ",\"url\":");
-        const u = try std.fmt.allocPrint(allocator, "\"{s}\"", .{url});
+        const u = try allocator.print("\"{s}\"", .{url});
         defer allocator.free(u);
         try buf.appendSlice(allocator, u);
         try buf.appendSlice(allocator, "}");

@@ -48,21 +48,21 @@ pub const ShellTool = struct {
             return ToolResult.ok(result.stdout);
         } else {
             allocator.free(result.stdout);
-            const err_output = if (result.stderr.len > 0) result.stderr else try std.fmt.allocPrint(allocator, "Exit code: {d}", .{exit_code});
+            const err_output = if (result.stderr.len > 0) result.stderr else try allocator.print("Exit code: {d}", .{exit_code});
             return ToolResult.fail(err_output);
         }
     }
 
     pub fn validateCommand(command: []const u8) ?[]const u8 {
         if (command.len == 0) return "empty";
-        if (std.mem.indexOfScalar(u8, command, 0) != null) return "null byte";
+        if (std.mem.findScalar(u8, command, 0) != null) return "null byte";
         for (command) |c| {
             if (c < 0x20 and c != '\t') return "control char";
         }
-        if (std.mem.indexOfScalar(u8, command, '\n') != null or std.mem.indexOfScalar(u8, command, '\r') != null) return "newline";
+        if (std.mem.findScalar(u8, command, '\n') != null or std.mem.findScalar(u8, command, '\r') != null) return "newline";
         const meta = [_][]const u8{ "&&", "||", "|", ";", ">", "<", "$(", "${", "`", "&>", ">&", "|&", "<>", "<<<", "<<", ">>" };
         for (meta) |mc| {
-            if (std.mem.indexOf(u8, command, mc) != null) return "metachar";
+            if (std.mem.find(u8, command, mc) != null) return "metachar";
         }
         const prefixes = [_][]const u8{ "cd ", "export ", "source ", "eval ", "exec ", ". ", "alias ", "set ", "unset ", "sudo ", "chmod ", "chown " };
         for (prefixes) |p| {
@@ -74,11 +74,11 @@ pub const ShellTool = struct {
         }
         const dangerous_kw = [_][]const u8{ "/dev/tcp", "/dev/udp", "> /dev/tcp", "mkfifo", "nc -e", "nc -c" };
         for (dangerous_kw) |k| {
-            if (std.mem.indexOf(u8, command, k) != null) return "reverse shell";
+            if (std.mem.find(u8, command, k) != null) return "reverse shell";
         }
         const destructive = [_][]const u8{ "rm -rf /", "mkfs.", "dd if=", "shred ", ":(){ :|:& };" };
         for (destructive) |d| {
-            if (std.mem.indexOf(u8, command, d) != null) return "destructive";
+            if (std.mem.find(u8, command, d) != null) return "destructive";
         }
         return null;
     }

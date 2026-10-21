@@ -91,8 +91,8 @@ test "MCP listTools returns server tool descriptors" {
     const allocator = testing.allocator;
     const tools_json = try mcp.listTools(allocator, fake_config);
     defer allocator.free(tools_json);
-    try testing.expect(std.mem.indexOf(u8, tools_json, "\"echo\"") != null);
-    try testing.expect(std.mem.indexOf(u8, tools_json, "Echo text") != null);
+    try testing.expect(std.mem.find(u8, tools_json, "\"echo\"") != null);
+    try testing.expect(std.mem.find(u8, tools_json, "Echo text") != null);
 }
 
 test "MCP callTool round trips arguments and content" {

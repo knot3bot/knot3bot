@@ -325,10 +325,10 @@ test "serializeForSummary - formats all roles" {
     defer arena.deinit();
     const output = try serializeForSummary(arena.allocator(), messages);
 
-    try std.testing.expect(std.mem.indexOf(u8, output, "[system]") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "[user]") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "[ASSISTANT]") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "[TOOL RESULT]") != null);
+    try std.testing.expect(std.mem.find(u8, output, "[system]") != null);
+    try std.testing.expect(std.mem.find(u8, output, "[user]") != null);
+    try std.testing.expect(std.mem.find(u8, output, "[ASSISTANT]") != null);
+    try std.testing.expect(std.mem.find(u8, output, "[TOOL RESULT]") != null);
 }
 
 test "serializeForSummary - truncates long content" {
@@ -342,7 +342,7 @@ test "serializeForSummary - truncates long content" {
     const output = try serializeForSummary(arena.allocator(), messages);
 
     // Should contain truncation markers
-    try std.testing.expect(std.mem.indexOf(u8, output, "...[truncated]...") != null);
+    try std.testing.expect(std.mem.find(u8, output, "...[truncated]...") != null);
     // Should not contain full content
     try std.testing.expect(output.len < long_content.len);
 }
@@ -355,8 +355,8 @@ test "serializeForSummary - preserves short content" {
     defer arena.deinit();
     const output = try serializeForSummary(arena.allocator(), messages);
 
-    try std.testing.expect(std.mem.indexOf(u8, output, "Hello world") != null);
-    try std.testing.expect(std.mem.indexOf(u8, output, "...[truncated]...") == null);
+    try std.testing.expect(std.mem.find(u8, output, "Hello world") != null);
+    try std.testing.expect(std.mem.find(u8, output, "...[truncated]...") == null);
 }
 
 // ============================================================================
@@ -432,7 +432,7 @@ test "ContextCompressor.compress - preserves system message" {
     }
 
     try std.testing.expect(result.messages[0].role == .system);
-    try std.testing.expect(std.mem.indexOf(u8, result.messages[0].content, "helpful") != null);
+    try std.testing.expect(std.mem.find(u8, result.messages[0].content, "helpful") != null);
 }
 
 test "ContextCompressor - consecutive compressions increment counter" {
@@ -485,7 +485,7 @@ test "Memory pressure - large number of messages" {
     var messages_arr: [500]Message = undefined;
     var contents: [500][]u8 = undefined;
     for (0..500) |i| {
-        contents[i] = try std.fmt.allocPrint(allocator, "Message number {d} with some content", .{i});
+        contents[i] = try allocator.print("Message number {d} with some content", .{i});
         messages_arr[i] = .{ .role = if (i % 2 == 0) .user else .assistant, .content = contents[i] };
     }
     defer for (contents) |content| allocator.free(content);
@@ -518,7 +518,7 @@ test "Memory pressure - many short messages" {
     // 1000 tiny messages
     var messages_arr: [1000]Message = undefined;
     for (0..1000) |i| {
-        const num_str = try std.fmt.allocPrint(std.testing.allocator, "{d}", .{i});
+        const num_str = try std.testing.allocator.print("{d}", .{i});
         defer std.testing.allocator.free(num_str);
         messages_arr[i] = .{ .role = if (i % 2 == 0) .user else .assistant, .content = num_str };
     }

@@ -60,7 +60,7 @@ pub const JsonBuilder = struct {
         try self.buf.appendSlice(self.allocator, "\"");
         try self.buf.appendSlice(self.allocator, key);
         try self.buf.appendSlice(self.allocator, "\":");
-        const val = try std.fmt.allocPrint(self.allocator, fmt, args);
+        const val = try self.allocator.print(fmt, args);
         defer self.allocator.free(val);
         try self.buf.appendSlice(self.allocator, val);
     }

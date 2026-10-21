@@ -46,7 +46,7 @@ pub const DiffTool = struct {
         const mod_lines = splitLines(allocator, modified);
         defer allocator.free(mod_lines);
 
-        const header = try std.fmt.allocPrint(allocator, "--- original\n+++ modified\n@@ -1,{d} +1,{d} @@\n", .{ orig_lines.len, mod_lines.len });
+        const header = try allocator.print("--- original\n+++ modified\n@@ -1,{d} +1,{d} @@\n", .{ orig_lines.len, mod_lines.len });
         defer allocator.free(header);
         try buf.appendSlice(allocator, header);
 
@@ -55,17 +55,17 @@ pub const DiffTool = struct {
             const o = if (i < orig_lines.len) orig_lines[i] else "";
             const m = if (i < mod_lines.len) mod_lines[i] else "";
             if (std.mem.eql(u8, o, m)) {
-                const line = try std.fmt.allocPrint(allocator, " {s}\n", .{o});
+                const line = try allocator.print(" {s}\n", .{o});
                 defer allocator.free(line);
                 try buf.appendSlice(allocator, line);
             } else {
                 if (o.len > 0) {
-                    const line = try std.fmt.allocPrint(allocator, "-{s}\n", .{o});
+                    const line = try allocator.print("-{s}\n", .{o});
                     defer allocator.free(line);
                     try buf.appendSlice(allocator, line);
                 }
                 if (m.len > 0) {
-                    const line = try std.fmt.allocPrint(allocator, "+{s}\n", .{m});
+                    const line = try allocator.print("+{s}\n", .{m});
                     defer allocator.free(line);
                     try buf.appendSlice(allocator, line);
                 }
@@ -78,10 +78,10 @@ pub const DiffTool = struct {
         _ = patch;
         // For a complete implementation: parse the unified diff hunks and apply to the file.
         // This requires proper diff parsing and hunk application logic.
-        const full_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ workspace, file_path });
+        const full_path = try allocator.print("{s}/{s}", .{ workspace, file_path });
         defer allocator.free(full_path);
 
-        const response = try std.fmt.allocPrint(allocator, "{{\"applied\":false,\"reason\":\"patch parsing not yet implemented\",\"file\":\"{s}\"}}", .{full_path});
+        const response = try allocator.print("{{\"applied\":false,\"reason\":\"patch parsing not yet implemented\",\"file\":\"{s}\"}}", .{full_path});
         return ToolResult.ok(response);
     }
 

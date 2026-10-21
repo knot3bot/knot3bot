@@ -57,15 +57,15 @@ pub const CronTool = struct {
     }
 
     fn addJob(self: *CronTool, allocator: std.mem.Allocator, name: []const u8, schedule: []const u8, command: []const u8) !ToolResult {
-        const cron_dir_path = try std.fmt.allocPrint(allocator, "{s}/.knot3bot/cron", .{self.workspace_dir});
+        const cron_dir_path = try allocator.print("{s}/.knot3bot/cron", .{self.workspace_dir});
         defer allocator.free(cron_dir_path);
 
         shared.context.cwdMakeDir(cron_dir_path) catch |err| if (err != error.PathAlreadyExists) return err;
 
-        const job_id = try std.fmt.allocPrint(allocator, "{d}", .{shared.context.timestamp()});
+        const job_id = try allocator.print("{d}", .{shared.context.timestamp()});
         defer allocator.free(job_id);
 
-        const job_path = try std.fmt.allocPrint(allocator, "{s}/{s}.json", .{ cron_dir_path, job_id });
+        const job_path = try allocator.print("{s}/{s}.json", .{ cron_dir_path, job_id });
         defer allocator.free(job_path);
 
         var job_file = try shared.context.cwdCreateFile(job_path, .{});
@@ -84,11 +84,11 @@ pub const CronTool = struct {
 
         try job_file.writeStreamingAll(shared.context.io(), json_str);
 
-        return ToolResult.ok(try std.fmt.allocPrint(allocator, "Job added: {s} (ID: {s})", .{ name, job_id }));
+        return ToolResult.ok(try allocator.print("Job added: {s} (ID: {s})", .{ name, job_id }));
     }
 
     fn listJobs(self: *CronTool, allocator: std.mem.Allocator) !ToolResult {
-        const cron_dir_path = try std.fmt.allocPrint(allocator, "{s}/.knot3bot/cron", .{self.workspace_dir});
+        const cron_dir_path = try allocator.print("{s}/.knot3bot/cron", .{self.workspace_dir});
         defer allocator.free(cron_dir_path);
 
         var dir = shared.context.cwdOpenDir(cron_dir_path, .{ .iterate = true }) catch |err| {
@@ -106,7 +106,7 @@ pub const CronTool = struct {
         var it = dir.iterate();
         while (it.next(shared.context.io()) catch null) |entry| {
             if (std.mem.endsWith(u8, entry.name, ".json")) {
-                const full_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ cron_dir_path, entry.name });
+                const full_path = try allocator.print("{s}/{s}", .{ cron_dir_path, entry.name });
                 defer allocator.free(full_path);
 
                 const content = try shared.context.cwdReadFileAlloc(allocator, full_path, 4096);
@@ -121,10 +121,10 @@ pub const CronTool = struct {
     }
 
     fn removeJob(self: *CronTool, allocator: std.mem.Allocator, job_id: []const u8) !ToolResult {
-        const cron_dir_path = try std.fmt.allocPrint(allocator, "{s}/.knot3bot/cron", .{self.workspace_dir});
+        const cron_dir_path = try allocator.print("{s}/.knot3bot/cron", .{self.workspace_dir});
         defer allocator.free(cron_dir_path);
 
-        const job_path = try std.fmt.allocPrint(allocator, "{s}/{s}.json", .{ cron_dir_path, job_id });
+        const job_path = try allocator.print("{s}/{s}.json", .{ cron_dir_path, job_id });
         defer allocator.free(job_path);
 
         shared.context.cwdDeleteFile(job_path) catch |err| {
@@ -138,10 +138,10 @@ pub const CronTool = struct {
     }
 
     fn runJob(self: *CronTool, allocator: std.mem.Allocator, job_id: []const u8) !ToolResult {
-        const cron_dir_path = try std.fmt.allocPrint(allocator, "{s}/.knot3bot/cron", .{self.workspace_dir});
+        const cron_dir_path = try allocator.print("{s}/.knot3bot/cron", .{self.workspace_dir});
         defer allocator.free(cron_dir_path);
 
-        const job_path = try std.fmt.allocPrint(allocator, "{s}/{s}.json", .{ cron_dir_path, job_id });
+        const job_path = try allocator.print("{s}/{s}.json", .{ cron_dir_path, job_id });
         defer allocator.free(job_path);
 
         const content = shared.context.cwdReadFileAlloc(allocator, job_path, 4096) catch |err| {
@@ -153,7 +153,7 @@ pub const CronTool = struct {
         defer allocator.free(content);
 
         const command = parseJsonCommand(content, allocator) catch |parse_err| {
-            return ToolResult.fail(try std.fmt.allocPrint(allocator, "Failed to parse job: {}", .{parse_err}));
+            return ToolResult.fail(try allocator.print("Failed to parse job: {}", .{parse_err}));
         };
         defer allocator.free(command);
 

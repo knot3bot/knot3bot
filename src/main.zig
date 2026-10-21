@@ -68,6 +68,9 @@ const CliConfig = struct {
     port: u16,
     config_mode: bool,
     enable_skill_self_improve: bool,
+    enable_harness_rsi: bool,
+    harness_task_tag: []const u8,
+    harness_call_budget: u8,
 };
 
 fn validateApiKeyFormat(key: []const u8, provider: providers.Provider) void {
@@ -140,7 +143,7 @@ fn collectKeysForProvider(allocator: std.mem.Allocator, environ: *const std.proc
 /// Copy built-in skills from src/skills/ and src/option-skills/ to workspace
 fn setupBuiltinSkills(allocator: std.mem.Allocator, workspace_dir: []const u8) !void {
     const builtin_dirs = [_][]const u8{ "src/skills", "src/option-skills" };
-    const target_dir = try std.fmt.allocPrint(allocator, "{s}/skills", .{workspace_dir});
+    const target_dir = try allocator.print("{s}/skills", .{workspace_dir});
     defer allocator.free(target_dir);
 
     // Ensure target skills directory exists
@@ -159,20 +162,20 @@ fn setupBuiltinSkills(allocator: std.mem.Allocator, workspace_dir: []const u8) !
             const skill_name = entry.name;
 
             // Source: src/skills/code-review/
-            const src_skill_dir = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ src_dir, skill_name });
+            const src_skill_dir = try allocator.print("{s}/{s}", .{ src_dir, skill_name });
             defer allocator.free(src_skill_dir);
 
             // Target: /tmp/skills/code-review/
-            const tgt_skill_dir = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ target_dir, skill_name });
+            const tgt_skill_dir = try allocator.print("{s}/{s}", .{ target_dir, skill_name });
             defer allocator.free(tgt_skill_dir);
 
             // Create target directory
             shared.context.cwdMakePath(tgt_skill_dir) catch continue;
 
             // Copy SKILL.md
-            const src_md = try std.fmt.allocPrint(allocator, "{s}/SKILL.md", .{src_skill_dir});
+            const src_md = try allocator.print("{s}/SKILL.md", .{src_skill_dir});
             defer allocator.free(src_md);
-            const tgt_md = try std.fmt.allocPrint(allocator, "{s}/SKILL.md", .{tgt_skill_dir});
+            const tgt_md = try allocator.print("{s}/SKILL.md", .{tgt_skill_dir});
             defer allocator.free(tgt_md);
 
             const content = shared.context.cwdReadFileAlloc(allocator, src_md, 1024 * 1024) catch continue;
@@ -196,6 +199,9 @@ fn parseArgs(args: std.process.Args, environ: *const std.process.Environ.Map) !C
         .port = 38789,
         .config_mode = false,
         .enable_skill_self_improve = false,
+        .enable_harness_rsi = false,
+        .harness_task_tag = "general",
+        .harness_call_budget = 5,
     };
 
     // Override with environment variables
@@ -245,6 +251,13 @@ fn parseArgs(args: std.process.Args, environ: *const std.process.Environ.Map) !C
             config.port = try std.fmt.parseInt(u16, port_str, 10);
         } else if (std.mem.eql(u8, arg, "--enable-skill-self-improve")) {
             config.enable_skill_self_improve = true;
+        } else if (std.mem.eql(u8, arg, "--enable-harness-rsi")) {
+            config.enable_harness_rsi = true;
+        } else if (std.mem.eql(u8, arg, "--harness-tag")) {
+            config.harness_task_tag = args_iter.next() orelse return error.MissingHarnessTag;
+        } else if (std.mem.eql(u8, arg, "--harness-call-budget")) {
+            const text = args_iter.next() orelse return error.MissingHarnessCallBudget;
+            config.harness_call_budget = std.fmt.parseInt(u8, text, 10) catch return error.InvalidHarnessCallBudget;
         }
     }
 
@@ -273,6 +286,9 @@ fn printHelp() !void {
         \\  --acp                   Serve ACP (Agent Client Protocol) over stdio
         \\  --port <port>           Server port (default: 8080)
         \\  --enable-skill-self-improve  Enable skill self-improvement (default: off)
+        \\  --enable-harness-rsi    Enable harness RSI (default: off)
+        \\  --harness-tag <tag>     Harness task tag (default: general)
+        \\  --harness-call-budget <n>  Max harness executor calls (default: 5)
         \\
         \\Environment variables:
         \\  OPENAI_API_KEY, KIMI_API_KEY, MINIMAX_API_KEY,
@@ -423,9 +439,9 @@ fn runCliMode(config: *CliConfig, registry: *ToolRegistry) !void {
                             const name = try allocator.dupe(u8, trimmed["/model ".len..]);
                             config.model = name;
                             vx_tui.model_name = name;
-                            try vx_tui.addMessage(.system, try std.fmt.allocPrint(allocator, "Model: {s}", .{name}));
+                            try vx_tui.addMessage(.system, try allocator.print("Model: {s}", .{name}));
                         } else {
-                            try vx_tui.addMessage(.err, try std.fmt.allocPrint(allocator, "Unknown: {s}", .{trimmed}));
+                            try vx_tui.addMessage(.err, try allocator.print("Unknown: {s}", .{trimmed}));
                         }
                         try vx_tui.renderFrame();
                         continue;
@@ -461,6 +477,10 @@ fn runCliMode(config: *CliConfig, registry: *ToolRegistry) !void {
                             .enable_smart_routing = true,
                             .enable_skill_self_improve = config.enable_skill_self_improve,
                             .skill_self_improve = if (si_engine) |*si| si else null,
+                            .enable_harness_rsi = config.enable_harness_rsi,
+                            .harness_task_tag = config.harness_task_tag,
+                            .harness_call_budget = config.harness_call_budget,
+                            .harness_db_path = config.db_path,
                             .credential_pool = if (cp.keys.len > 0) &cp else null,
                         };
                         agent_instance = try Agent.Agent.init(allocator, agent_config, registry);
@@ -474,7 +494,7 @@ fn runCliMode(config: *CliConfig, registry: *ToolRegistry) !void {
                     vx_tui.streaming = true;
                     try vx_tui.renderFrame();
                     const response = agent_instance.run(trimmed) catch |err| {
-                        try vx_tui.addMessage(.err, try std.fmt.allocPrint(gpa, "Error: {}", .{err}));
+                        try vx_tui.addMessage(.err, try gpa.print("Error: {}", .{err}));
                         vx_tui.streaming = false;
                         try vx_tui.renderFrame();
                         continue;
@@ -509,20 +529,21 @@ fn runCliMode(config: *CliConfig, registry: *ToolRegistry) !void {
 }
 
 fn cleanResponse(allocator: std.mem.Allocator, text: []const u8) ![]const u8 {
-    var result = std.array_list.AlignedManaged(u8, null).init(allocator);
+    var result: std.ArrayList(u8) = .empty;
+    errdefer result.deinit(allocator);
     var pos: usize = 0;
     while (pos < text.len) {
         if (std.mem.startsWith(u8, text[pos..], "[Tool(s) executed.")) {
-            if (std.mem.indexOfScalarPos(u8, text, pos, ']')) |end| {
+            if (std.mem.findScalarPos(u8, text, pos, ']')) |end| {
                 pos = end + 1;
                 if (pos < text.len and text[pos] == '\n') pos += 1;
                 continue;
             }
         }
-        try result.append(text[pos]);
+        try result.append(allocator, text[pos]);
         pos += 1;
     }
-    return result.toOwnedSlice();
+    return result.toOwnedSlice(allocator);
 }
 /// Run an interactive selection menu, returning the chosen index or null.
 fn interactiveSelect(allocator: std.mem.Allocator, title: []const u8, items: []const []const u8) ?usize {
@@ -672,6 +693,10 @@ pub fn main(init: std.process.Init) !u8 {
             .model = config.model,
             .api_key = config.api_key,
             .provider = config.provider,
+            .enable_harness_rsi = config.enable_harness_rsi,
+            .harness_task_tag = config.harness_task_tag,
+            .harness_call_budget = config.harness_call_budget,
+            .harness_db_path = config.db_path,
         };
         // Per-process arena like the server's request handling: agent and
         // parse lifetimes are bounded by the process, and several agent code
@@ -694,6 +719,10 @@ pub fn main(init: std.process.Init) !u8 {
             .model = config.model,
             .api_key = config.api_key,
             .provider = config.provider,
+            .enable_harness_rsi = config.enable_harness_rsi,
+            .harness_task_tag = config.harness_task_tag,
+            .harness_call_budget = config.harness_call_budget,
+            .harness_db_path = config.db_path,
         };
 
         const auth_keys = if (config.api_key) |key| &.{key} else &[_][]const u8{};
@@ -713,8 +742,12 @@ pub fn main(init: std.process.Init) !u8 {
             auth_config,
             ServerConfig{
                 .enable_skill_self_improve = config.enable_skill_self_improve,
+                .enable_harness_rsi = config.enable_harness_rsi,
+                .harness_task_tag = config.harness_task_tag,
             },
         );
+        server.enable_harness_rsi = config.enable_harness_rsi;
+        server.harness_task_tag = config.harness_task_tag;
 
         // Initialize credential pool for server mode
         server.credential_pool = credential_pool.CredentialPool.init(

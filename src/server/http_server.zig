@@ -83,6 +83,10 @@ pub const ServerConfig = struct {
     max_connections: u32 = 100,
     /// Enable skill self-improvement (default: false)
     enable_skill_self_improve: bool = false,
+    /// Enable harness RSI (default: false)
+    enable_harness_rsi: bool = false,
+    /// Task tag used to store and reuse harness patches (default: general)
+    harness_task_tag: []const u8 = "general",
 };
 
 // ============================================================================
@@ -207,6 +211,10 @@ pub const Server = struct {
     skill_self_improve: ?*skill_self_improve_mod.SkillSelfImprove = null,
     /// Whether skill self-improvement is enabled
     enable_skill_self_improve: bool = false,
+    /// Whether harness RSI is enabled
+    enable_harness_rsi: bool = false,
+    /// Task tag used to store and reuse harness patches
+    harness_task_tag: []const u8 = "general",
     /// Credential pool for multi-key rotation in server mode
     credential_pool: ?credential_pool_mod.CredentialPool = null,
 
@@ -360,9 +368,9 @@ pub const Server = struct {
 
     fn extractAuthHeader(request: []const u8) ?[]const u8 {
         const auth_prefix = "Authorization: ";
-        if (std.mem.indexOf(u8, request, auth_prefix)) |auth_idx| {
+        if (std.mem.find(u8, request, auth_prefix)) |auth_idx| {
             const value_start = auth_idx + auth_prefix.len;
-            const line_end = std.mem.indexOfScalar(u8, request[value_start..], '\r') orelse request.len;
+            const line_end = std.mem.findScalar(u8, request[value_start..], '\r') orelse request.len;
             return request[value_start .. value_start + line_end];
         }
         return null;
@@ -457,9 +465,9 @@ pub const Server = struct {
             try self.sendJson(conn, 429, "{\"error\":{\"message\":\"Rate limit exceeded\",\"type\":\"rate_limit_exceeded\"}}", request_id);
             return;
         }
-        const method_end = std.mem.indexOfScalar(u8, request, ' ') orelse return;
+        const method_end = std.mem.findScalar(u8, request, ' ') orelse return;
         const path_start = method_end + 1;
-        const path_end = std.mem.indexOfScalar(u8, request[path_start..], ' ') orelse return;
+        const path_end = std.mem.findScalar(u8, request[path_start..], ' ') orelse return;
         const method = request[0..method_end];
         const path = request[path_start .. path_start + path_end];
         std.log.info("[{s}] {s} {s}", .{ request_id, method, path });
@@ -503,11 +511,11 @@ pub const Server = struct {
                 return;
             }
             if (std.mem.eql(u8, path, "/v1/chat/completions")) {
-                const header_end = std.mem.indexOf(u8, request, "\r\n\r\n") orelse return;
+                const header_end = std.mem.find(u8, request, "\r\n\r\n") orelse return;
                 const body = request[header_end + 4 ..];
                 try self.handleChatCompletion(conn, body, request_id);
             } else if (std.mem.eql(u8, path, "/v1/responses")) {
-                const header_end = std.mem.indexOf(u8, request, "\r\n\r\n") orelse return;
+                const header_end = std.mem.find(u8, request, "\r\n\r\n") orelse return;
                 const body = request[header_end + 4 ..];
                 try self.handleResponses(conn, body, request_id);
             } else {
@@ -544,7 +552,7 @@ pub const Server = struct {
             self.metrics.circuit_breaker_rejections += 1;
             const remaining = self.circuit_brk.remainingTimeout();
             std.log.warn("[{s}] Circuit breaker OPEN, retry after {d}s", .{ request_id, remaining });
-            const err_resp = try std.fmt.allocPrint(self.allocator, "{{\"error\":{{\"message\":\"Service temporarily unavailable\",\"type\":\"circuit_breaker_open\",\"retry_after_seconds\":{}}}}}", .{remaining});
+            const err_resp = try self.allocator.print("{{\"error\":{{\"message\":\"Service temporarily unavailable\",\"type\":\"circuit_breaker_open\",\"retry_after_seconds\":{}}}}}", .{remaining});
             defer self.allocator.free(err_resp);
             try self.sendJson(conn, 503, err_resp, request_id);
             return;
@@ -595,6 +603,10 @@ pub const Server = struct {
             .enable_skill_self_improve = self.enable_skill_self_improve,
             .skill_self_improve = if (si_engine) |*si| si else null,
             .credential_pool = if (self.credential_pool) |*cp| cp else null,
+            .enable_harness_rsi = self.agent_config.enable_harness_rsi,
+            .harness_task_tag = self.agent_config.harness_task_tag,
+            .harness_call_budget = self.agent_config.harness_call_budget,
+            .harness_db_path = self.db_path,
         };
 
         var agent = Agent.Agent.init(allocator, agent_config, self.registry) catch |err| {
@@ -728,7 +740,7 @@ pub const Server = struct {
             var json_buf = std.ArrayList(u8).empty;
             defer json_buf.deinit(self.allocator);
 
-            const chat_id = std.fmt.allocPrint(self.allocator, "chatcmpl-{s}", .{request_id}) catch "chatcmpl-1";
+            const chat_id = self.allocator.print("chatcmpl-{s}", .{request_id}) catch "chatcmpl-1";
             defer self.allocator.free(chat_id);
 
             const ut = usage_stats;
@@ -777,7 +789,7 @@ pub const Server = struct {
             self.metrics.circuit_breaker_rejections += 1;
             const remaining = self.circuit_brk.remainingTimeout();
             std.log.warn("[{s}] Circuit breaker OPEN, retry after {d}s", .{ request_id, remaining });
-            const err_resp = try std.fmt.allocPrint(self.allocator, "{{\"error\":{{\"message\":\"Service temporarily unavailable\",\"type\":\"circuit_breaker_open\",\"retry_after_seconds\":{}}}}}", .{remaining});
+            const err_resp = try self.allocator.print("{{\"error\":{{\"message\":\"Service temporarily unavailable\",\"type\":\"circuit_breaker_open\",\"retry_after_seconds\":{}}}}}", .{remaining});
             defer self.allocator.free(err_resp);
             try self.sendJson(conn, 503, err_resp, request_id);
             return;
@@ -819,6 +831,10 @@ pub const Server = struct {
             .model_registry = self.model_registry,
             .enable_smart_routing = self.model_registry != null,
             .credential_pool = if (self.credential_pool) |*cp| cp else null,
+            .enable_harness_rsi = self.agent_config.enable_harness_rsi,
+            .harness_task_tag = self.agent_config.harness_task_tag,
+            .harness_call_budget = self.agent_config.harness_call_budget,
+            .harness_db_path = self.db_path,
         };
 
         var agent = Agent.Agent.init(allocator, agent_config, self.registry) catch |err| {
@@ -879,7 +895,7 @@ pub const Server = struct {
         var json_buf = std.ArrayList(u8).empty;
         defer json_buf.deinit(self.allocator);
 
-        const resp_id = std.fmt.allocPrint(self.allocator, "resp-{s}", .{request_id}) catch "resp-1";
+        const resp_id = self.allocator.print("resp-{s}", .{request_id}) catch "resp-1";
         defer self.allocator.free(resp_id);
 
         try json_buf.appendSlice(self.allocator, "{\"id\":\"");
@@ -926,7 +942,7 @@ pub const Server = struct {
             return;
         };
         const size = @as(usize, @intCast(stat.size));
-        const header = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 200 OK\r\nContent-Type: {s}\r\nContent-Length: {d}\r\nAccess-Control-Allow-Origin: *\r\nX-Request-ID: {s}\r\n\r\n", .{ content_type, size, request_id });
+        const header = try self.allocator.print("HTTP/1.1 200 OK\r\nContent-Type: {s}\r\nContent-Length: {d}\r\nAccess-Control-Allow-Origin: *\r\nX-Request-ID: {s}\r\n\r\n", .{ content_type, size, request_id });
         defer self.allocator.free(header);
         try streamWriteAll(conn, header);
         var buf: [8192]u8 = undefined;
@@ -944,7 +960,7 @@ pub const Server = struct {
     }
 
     fn sendOptions(self: *Server, conn: std.Io.net.Stream, request_id: []const u8) !void {
-        const header = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 204 No Content\r\n" ++
+        const header = try self.allocator.print("HTTP/1.1 204 No Content\r\n" ++
             "Server: knot3bot\r\n" ++
             "X-Content-Type-Options: nosniff\r\n" ++
             "X-Frame-Options: DENY\r\n" ++
@@ -959,7 +975,7 @@ pub const Server = struct {
     }
 
     fn sendJson(self: *Server, conn: std.Io.net.Stream, status: u16, json: []const u8, request_id: []const u8) !void {
-        const header = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 {d} OK\r\n" ++
+        const header = try self.allocator.print("HTTP/1.1 {d} OK\r\n" ++
             "Server: knot3bot\r\n" ++
             "X-Content-Type-Options: nosniff\r\n" ++
             "X-Frame-Options: DENY\r\n" ++
@@ -991,7 +1007,7 @@ pub const Server = struct {
         const commit = @import("config").version;
         const rss_bytes = getProcessRss();
         const total_requests = self.metrics.total_requests;
-        const response = try std.fmt.allocPrint(self.allocator, "{{\"status\":\"ok\",\"service\":\"knot3bot\",\"version\":\"{s}\",\"commit\":\"{s}\",\"uptime_seconds\":{d},\"provider\":\"{s}\",\"model\":\"{s}\",\"tools\":{d},\"skill_self_improve\":\"{s}\",\"request_id\":\"{s}\",\"memory_rss_bytes\":{d},\"total_requests\":{d}}}", .{ version, commit, uptime, provider, model, tool_count, skill_status, request_id, rss_bytes, total_requests });
+        const response = try self.allocator.print("{{\"status\":\"ok\",\"service\":\"knot3bot\",\"version\":\"{s}\",\"commit\":\"{s}\",\"uptime_seconds\":{d},\"provider\":\"{s}\",\"model\":\"{s}\",\"tools\":{d},\"skill_self_improve\":\"{s}\",\"request_id\":\"{s}\",\"memory_rss_bytes\":{d},\"total_requests\":{d}}}", .{ version, commit, uptime, provider, model, tool_count, skill_status, request_id, rss_bytes, total_requests });
         defer self.allocator.free(response);
         try self.sendJson(conn, 200, response, request_id);
     }
@@ -1017,7 +1033,7 @@ pub const Server = struct {
         const ready = db_healthy and provider_healthy;
         const provider = self.agent_config.provider.name();
         const status_code: u16 = if (ready) 200 else 503;
-        const response = try std.fmt.allocPrint(self.allocator,
+        const response = try self.allocator.print(
             \\{{"ready":{s},"provider":"{s}","database":"{s}"}}
         , .{
             if (ready) "true" else "false",
@@ -1244,7 +1260,7 @@ pub const Server = struct {
     }
 
     fn handleGetSkills(self: *Server, conn: std.Io.net.Stream, request_id: []const u8) !void {
-        const skills_dir = try std.fmt.allocPrint(self.allocator, "{s}/skills", .{"/tmp"});
+        const skills_dir = try self.allocator.print("{s}/skills", .{"/tmp"});
         defer self.allocator.free(skills_dir);
 
         var json_buf = std.ArrayList(u8).empty;
@@ -1276,7 +1292,7 @@ pub const Server = struct {
     fn handleGetConfig(self: *Server, conn: std.Io.net.Stream, request_id: []const u8) !void {
         const uptime = shared.timestamp() - self.start_time;
         const avg_ms = if (self.metrics.total_requests > 0) self.metrics.total_response_time_ms / self.metrics.total_requests else 0;
-        const response = try std.fmt.allocPrint(self.allocator,
+        const response = try self.allocator.print(
             \\{{"provider":"{s}","model":"{s}","version":"0.1.0","uptime_seconds":{d},"total_requests":{d},"avg_response_ms":{d},"rate_limit_exceeded":{d},"max_request_size":{d},"session_id":"default"}}
         , .{ self.agent_config.provider.name(), self.agent_config.model, uptime, self.metrics.total_requests, avg_ms, self.metrics.rate_limit_exceeded, self.config.max_request_size });
         defer self.allocator.free(response);
@@ -1284,7 +1300,7 @@ pub const Server = struct {
     }
 
     fn sendMetrics(self: *Server, conn: std.Io.net.Stream, metrics: []const u8, request_id: []const u8) !void {
-        const header = try std.fmt.allocPrint(self.allocator, "HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\nContent-Length: {d}\r\nAccess-Control-Allow-Origin: *\r\nX-Request-ID: {s}\r\n\r\n", .{ metrics.len, request_id });
+        const header = try self.allocator.print("HTTP/1.1 200 OK\r\nContent-Type: text/plain; version=0.0.4\r\nContent-Length: {d}\r\nAccess-Control-Allow-Origin: *\r\nX-Request-ID: {s}\r\n\r\n", .{ metrics.len, request_id });
         defer self.allocator.free(header);
         try streamWriteAll(conn, header);
         try streamWriteAll(conn, metrics);
@@ -1313,7 +1329,7 @@ pub const Server = struct {
         const tool_count = self.registry.count();
         const provider = self.agent_config.provider.name();
         const model = self.agent_config.model;
-        const resp = try std.fmt.allocPrint(self.allocator, "{{\"status\":\"ok\",\"provider\":\"{s}\",\"model\":\"{s}\",\"tools\":{d},\"uptime\":{d},\"total_requests\":{d},\"errors\":{d},\"streaming\":{d},\"circuit_state\":\"{s}\",\"version\":\"{s}\"}}", .{ provider, model, tool_count, uptime, self.metrics.total_requests, self.metrics.error_count, self.metrics.streaming_requests, @tagName(self.circuit_brk.getState()), @import("config").release_version });
+        const resp = try self.allocator.print("{{\"status\":\"ok\",\"provider\":\"{s}\",\"model\":\"{s}\",\"tools\":{d},\"uptime\":{d},\"total_requests\":{d},\"errors\":{d},\"streaming\":{d},\"circuit_state\":\"{s}\",\"version\":\"{s}\"}}", .{ provider, model, tool_count, uptime, self.metrics.total_requests, self.metrics.error_count, self.metrics.streaming_requests, @tagName(self.circuit_brk.getState()), @import("config").release_version });
         defer self.allocator.free(resp);
         try self.sendJson(conn, 200, resp, request_id);
     }

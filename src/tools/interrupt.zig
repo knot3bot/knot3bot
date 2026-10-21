@@ -37,7 +37,7 @@ pub const InterruptTool = struct {
             return ToolResult.ok("{\"interrupted\":false}");
         }
         const state = isInterrupted();
-        const resp = try std.fmt.allocPrint(allocator, "{{\"interrupted\":{s}}}", .{if (state) "true" else "false"});
+        const resp = try allocator.print("{{\"interrupted\":{s}}}", .{if (state) "true" else "false"});
         return ToolResult.ok(resp);
     }
 

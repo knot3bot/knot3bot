@@ -97,7 +97,7 @@ pub const EnvPassthroughTool = struct {
             var key_iter = allowed_set.keyIterator();
             while (key_iter.next()) |key_ptr| {
                 if (!first) try buf.appendSlice(allocator, ",");
-                const ks = try std.fmt.allocPrint(allocator, "\"{s}\"", .{key_ptr.*});
+                const ks = try allocator.print("\"{s}\"", .{key_ptr.*});
                 defer allocator.free(ks);
                 try buf.appendSlice(allocator, ks);
                 first = false;
@@ -118,7 +118,7 @@ pub const EnvPassthroughTool = struct {
                 const allowed = isEnvPassthrough(name);
                 var buf: std.ArrayList(u8) = .empty;
                 defer buf.deinit(allocator);
-                const result = try std.fmt.allocPrint(allocator, "{{\"variable\":\"{s}\",\"allowed\":{}}}", .{ name, allowed });
+                const result = try allocator.print("{{\"variable\":\"{s}\",\"allowed\":{}}}", .{ name, allowed });
                 defer allocator.free(result);
                 try buf.appendSlice(allocator, result);
                 return ToolResult{

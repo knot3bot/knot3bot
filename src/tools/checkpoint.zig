@@ -22,23 +22,23 @@ pub const CheckpointManagerTool = struct {
         const checkpoint_id = getString(args, "checkpoint_id");
         const state = getString(args, "state");
 
-        const checkpoint_dir = try std.fmt.allocPrint(allocator, "{s}/.checkpoints", .{self.workspace_dir});
+        const checkpoint_dir = try allocator.print("{s}/.checkpoints", .{self.workspace_dir});
         defer allocator.free(checkpoint_dir);
         shared.cwdMakePath(checkpoint_dir) catch {};
 
         if (std.mem.eql(u8, action, "save")) {
             const cid = checkpoint_id orelse "default";
             const state_data = state orelse "{}";
-            const checkpoint_file = try std.fmt.allocPrint(allocator, "{s}/{s}.json", .{ checkpoint_dir, cid });
+            const checkpoint_file = try allocator.print("{s}/{s}.json", .{ checkpoint_dir, cid });
             defer allocator.free(checkpoint_file);
             shared.cwdWriteFile(checkpoint_file, state_data) catch return ToolResult.fail("Failed to save checkpoint");
-            const resp = try std.fmt.allocPrint(allocator, "{{\"success\":true,\"checkpoint_id\":\"{s}\",\"message\":\"Checkpoint saved\"}}", .{cid});
+            const resp = try allocator.print("{{\"success\":true,\"checkpoint_id\":\"{s}\",\"message\":\"Checkpoint saved\"}}", .{cid});
             return ToolResult.ok(resp);
         }
 
         if (std.mem.eql(u8, action, "load")) {
             const cid = checkpoint_id orelse return ToolResult.fail("checkpoint_id required for load");
-            const checkpoint_file = try std.fmt.allocPrint(allocator, "{s}/{s}.json", .{ checkpoint_dir, cid });
+            const checkpoint_file = try allocator.print("{s}/{s}.json", .{ checkpoint_dir, cid });
             defer allocator.free(checkpoint_file);
             const content = shared.cwdReadFileAlloc(allocator, checkpoint_file, 1024 * 1024) catch return ToolResult.fail("Checkpoint not found");
             return ToolResult.ok(content);
@@ -67,10 +67,10 @@ pub const CheckpointManagerTool = struct {
 
         if (std.mem.eql(u8, action, "delete")) {
             const cid = checkpoint_id orelse return ToolResult.fail("checkpoint_id required for delete");
-            const checkpoint_file = try std.fmt.allocPrint(allocator, "{s}/{s}.json", .{ checkpoint_dir, cid });
+            const checkpoint_file = try allocator.print("{s}/{s}.json", .{ checkpoint_dir, cid });
             defer allocator.free(checkpoint_file);
             shared.cwdDeleteFile(checkpoint_file) catch return ToolResult.fail("Checkpoint not found");
-            const resp = try std.fmt.allocPrint(allocator, "{{\"success\":true,\"checkpoint_id\":\"{s}\",\"message\":\"Checkpoint deleted\"}}", .{cid});
+            const resp = try allocator.print("{{\"success\":true,\"checkpoint_id\":\"{s}\",\"message\":\"Checkpoint deleted\"}}", .{cid});
             return ToolResult.ok(resp);
         }
 

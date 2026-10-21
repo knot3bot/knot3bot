@@ -78,8 +78,8 @@ fn benchmarkUsageStats() !void {
 }
 
 fn benchmarkReActStepJSON() !void {
-    var gpa = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa.deinit();
+    var gpa: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
+    defer if (gpa.deinit() != 0) @panic("memory leak");
     const allocator = gpa.allocator();
 
     const step = Agent.ReActStep{
@@ -144,8 +144,8 @@ fn benchmarkToolResultFail() !void {
 }
 
 fn benchmarkJSONParsing() !void {
-    var gpa = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa.deinit();
+    var gpa: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
+    defer if (gpa.deinit() != 0) @panic("memory leak");
     const allocator = gpa.allocator();
 
     const json_str = "{\"name\":\"test\",\"value\":42,\"enabled\":true}";
@@ -165,8 +165,8 @@ fn benchmarkJSONParsing() !void {
 }
 
 fn benchmarkToolRegistryInit() !void {
-    var gpa = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa.deinit();
+    var gpa: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
+    defer if (gpa.deinit() != 0) @panic("memory leak");
     const allocator = gpa.allocator();
 
     const start_ns = nowNs();
@@ -189,8 +189,8 @@ fn benchmarkToolRegistryInit() !void {
 // ============================================================================
 
 fn benchmarkStringDuplication() !void {
-    var gpa = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa.deinit();
+    var gpa: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
+    defer if (gpa.deinit() != 0) @panic("memory leak");
     const allocator = gpa.allocator();
 
     const source = "This is a test string for benchmarking purposes";
@@ -210,8 +210,8 @@ fn benchmarkStringDuplication() !void {
 }
 
 fn benchmarkArenaAllocation() !void {
-    var gpa = std.heap.DebugAllocator(.{}){};
-    defer _ = gpa.deinit();
+    var gpa: std.heap.SafeAllocator = .init(std.heap.page_allocator, .{});
+    defer if (gpa.deinit() != 0) @panic("memory leak");
     const allocator = gpa.allocator();
 
     const start_ns = nowNs();

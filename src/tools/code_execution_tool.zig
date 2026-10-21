@@ -79,25 +79,25 @@ fn executeInSandbox(allocator: std.mem.Allocator, code: []const u8, timeout_secs
 }
 
 fn executeFallback(allocator: std.mem.Allocator) !ToolResult {
-    var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-    defer buf.deinit();
+    var buf: std.ArrayList(u8) = .empty;
+    defer buf.deinit(allocator);
 
-    try buf.appendSlice("Code execution sandbox is not available in this build.\n\n");
-    try buf.appendSlice("Sandboxed tools that would be available:\n");
+    try buf.appendSlice(allocator, "Code execution sandbox is not available in this build.\n\n");
+    try buf.appendSlice(allocator, "Sandboxed tools that would be available:\n");
 
     for (SANDBOX_ALLOWED_TOOLS, 0..) |t, i| {
-        if (i > 0) try buf.appendSlice(", ");
-        const line = try std.fmt.allocPrint(allocator, "'{s}'", .{t});
+        if (i > 0) try buf.appendSlice(allocator, ", ");
+        const line = try allocator.print("'{s}'", .{t});
         defer allocator.free(line);
-        try buf.appendSlice(line);
+        try buf.appendSlice(allocator, line);
     }
 
-    try buf.appendSlice("\n\nExample code:\n");
-    try buf.appendSlice("  from hermes_tools import web_search, read_file\n");
-    try buf.appendSlice("  results = web_search(query='latest AI news', limit=5)\n");
-    try buf.appendSlice("  print(results)\n");
+    try buf.appendSlice(allocator, "\n\nExample code:\n");
+    try buf.appendSlice(allocator, "  from hermes_tools import web_search, read_file\n");
+    try buf.appendSlice(allocator, "  results = web_search(query='latest AI news', limit=5)\n");
+    try buf.appendSlice(allocator, "  print(results)\n");
 
-    return ToolResult{ .success = false, .output = try buf.toOwnedSlice() };
+    return ToolResult{ .success = false, .output = try buf.toOwnedSlice(allocator) };
 }
 
 fn readFileToString(allocator: std.mem.Allocator, path: []const u8) ![]const u8 {
@@ -115,8 +115,8 @@ fn detectDangerousCode(allocator: std.mem.Allocator, code: []const u8) ?[]const 
     };
 
     for (dangerous) |pattern| {
-        if (std.mem.indexOf(u8, code, pattern) != null) {
-            return std.fmt.allocPrint(allocator, "Blocked: code contains '{s}' which is not allowed in sandbox", .{pattern}) catch
+        if (std.mem.find(u8, code, pattern) != null) {
+            return allocator.print("Blocked: code contains '{s}' which is not allowed in sandbox", .{pattern}) catch
                 "Blocked: dangerous code pattern";
         }
     }

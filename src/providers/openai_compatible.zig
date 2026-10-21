@@ -481,7 +481,7 @@ pub const LLMClient = struct {
 
     fn extractStreamContent(self: *LLMClient, data: []const u8) ?[]const u8 {
         const content_key = "\"content\":\"";
-        if (std.mem.indexOf(u8, data, content_key)) |idx| {
+        if (std.mem.find(u8, data, content_key)) |idx| {
             const start = idx + content_key.len;
             var i: usize = start;
             var end: usize = start;
@@ -534,7 +534,7 @@ pub const LLMClient = struct {
         const body = try self.buildStreamRequestBody(messages);
         defer self.allocator.free(body);
 
-        const url = try std.fmt.allocPrint(self.allocator, "{s}/chat/completions", .{self.base_url});
+        const url = try self.allocator.print("{s}/chat/completions", .{self.base_url});
         defer self.allocator.free(url);
 
         const auth_file = try writeAuthHeaderFile(self.allocator, self.api_key);
@@ -646,7 +646,7 @@ pub const LLMClient = struct {
         const body = try self.buildRequestBody(messages);
         defer self.allocator.free(body);
 
-        const url = try std.fmt.allocPrint(self.allocator, "{s}/chat/completions", .{self.base_url});
+        const url = try self.allocator.print("{s}/chat/completions", .{self.base_url});
         defer self.allocator.free(url);
 
         const auth_file = try writeAuthHeaderFile(self.allocator, self.api_key);
@@ -655,7 +655,7 @@ pub const LLMClient = struct {
         const body_file = try writeBodyTempFile(self.allocator, body);
         defer cleanupAuthFile(self.allocator, body_file);
 
-        const data_arg = try std.fmt.allocPrint(self.allocator, "@{s}", .{body_file});
+        const data_arg = try self.allocator.print("@{s}", .{body_file});
         defer self.allocator.free(data_arg);
 
         const argv = &[_][]const u8{
@@ -771,7 +771,7 @@ pub const LLMClient = struct {
         const body = try body_list.toOwnedSlice(self.allocator);
         defer self.allocator.free(body);
 
-        const url = try std.fmt.allocPrint(self.allocator, "{s}/chat/completions", .{self.base_url});
+        const url = try self.allocator.print("{s}/chat/completions", .{self.base_url});
         defer self.allocator.free(url);
 
         const auth_file = try writeAuthHeaderFile(self.allocator, self.api_key);
@@ -780,7 +780,7 @@ pub const LLMClient = struct {
         const body_file = try writeBodyTempFile(self.allocator, body);
         defer cleanupAuthFile(self.allocator, body_file);
 
-        const data_arg = try std.fmt.allocPrint(self.allocator, "@{s}", .{body_file});
+        const data_arg = try self.allocator.print("@{s}", .{body_file});
         defer self.allocator.free(data_arg);
 
         const argv = &[_][]const u8{
@@ -966,9 +966,9 @@ var temp_file_counter: std.atomic.Value(u64) = std.atomic.Value(u64).init(0);
 /// Uses curl @file syntax: -H @/tmp/knot3bot_auth_XXXXXX
 fn writeAuthHeaderFile(allocator: std.mem.Allocator, api_key: []const u8) ![]const u8 {
     const seed = temp_file_counter.fetchAdd(1, .monotonic);
-    const path = try std.fmt.allocPrint(allocator, "/tmp/knot3bot_auth_{x}", .{seed});
+    const path = try allocator.print("/tmp/knot3bot_auth_{x}", .{seed});
     errdefer allocator.free(path);
-    const content = try std.fmt.allocPrint(allocator, "Authorization: Bearer {s}", .{api_key});
+    const content = try allocator.print("Authorization: Bearer {s}", .{api_key});
     defer allocator.free(content);
     shared.context.cwdWriteFile(path, content) catch return error.AuthFileWriteError;
     return path;
@@ -978,7 +978,7 @@ fn writeAuthHeaderFile(allocator: std.mem.Allocator, api_key: []const u8) ![]con
 /// Uses curl @file syntax. Avoids race condition from fixed paths.
 fn writeBodyTempFile(allocator: std.mem.Allocator, body: []const u8) ![]const u8 {
     const seed = temp_file_counter.fetchAdd(1, .monotonic);
-    const path = try std.fmt.allocPrint(allocator, "/tmp/knot3bot_body_{x}", .{seed});
+    const path = try allocator.print("/tmp/knot3bot_body_{x}", .{seed});
     errdefer allocator.free(path);
     shared.context.cwdWriteFile(path, body) catch return error.BodyFileWriteError;
     return path;
@@ -1027,6 +1027,6 @@ test "ChatRequest toJson" {
     };
     const json = try req.toJson(allocator);
     defer allocator.free(json);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"model\":\"gpt-4\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"Hello\"") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"model\":\"gpt-4\"") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"Hello\"") != null);
 }

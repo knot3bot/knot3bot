@@ -216,12 +216,12 @@ pub const ToolEntry = struct {
 
 pub const ToolRegistry = struct {
     allocator: std.mem.Allocator,
-    entries: std.array_list.AlignedManaged(ToolEntry, null),
+    entries: std.ArrayList(ToolEntry),
 
     pub fn init(allocator: std.mem.Allocator) !ToolRegistry {
         return .{
             .allocator = allocator,
-            .entries = try std.array_list.AlignedManaged(ToolEntry, null).initCapacity(allocator, 16),
+            .entries = try std.ArrayList(ToolEntry).initCapacity(allocator, 16),
         };
     }
 
@@ -229,7 +229,7 @@ pub const ToolRegistry = struct {
         for (self.entries.items) |entry| {
             entry.tool.deinit(self.allocator);
         }
-        self.entries.deinit();
+        self.entries.deinit(self.allocator);
     }
 
     pub fn count(self: *const ToolRegistry) usize {
@@ -241,12 +241,13 @@ pub const ToolRegistry = struct {
     }
 
     pub fn register(self: *ToolRegistry, tool: Tool) !void {
-        try self.entries.append(.{ .spec = tool.spec(), .tool = tool });
+        try self.entries.append(self.allocator, .{ .spec = tool.spec(), .tool = tool });
     }
 
     pub fn getToolDefs(self: *const ToolRegistry, allocator: std.mem.Allocator) ![]ToolDef {
         const http_client = @import("../providers/root.zig").openai_compatible;
-        var defs = std.array_list.AlignedManaged(http_client.ToolDef, null).initCapacity(allocator, self.entries.items.len);
+        var defs = try std.ArrayList(http_client.ToolDef).initCapacity(allocator, self.entries.items.len);
+        errdefer defs.deinit(allocator);
         for (self.entries.items) |entry| {
             const def = http_client.ToolDef{
                 .type = "function",
@@ -256,7 +257,7 @@ pub const ToolRegistry = struct {
                     .parameters = try allocator.dupe(u8, entry.spec.parameters_json),
                 },
             };
-            try defs.append(def);
+            try defs.append(allocator, def);
         }
         return try defs.toOwnedSlice(allocator);
     }

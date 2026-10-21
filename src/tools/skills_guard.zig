@@ -26,7 +26,7 @@ const ALLOWED_SUBDIRS = [_][]const u8{ "references", "templates", "scripts", "as
 
 fn scanForDangerousPatterns(content: []const u8) ?[]const u8 {
     inline for (DANGEROUS_PATTERNS) |pattern| {
-        if (std.mem.indexOf(u8, content, pattern) != null) {
+        if (std.mem.find(u8, content, pattern) != null) {
             return pattern;
         }
     }
@@ -38,15 +38,15 @@ fn validateFrontmatter(content: []const u8) ?[]const u8 {
         return "SKILL.md must start with YAML frontmatter (---)";
     }
     const rest = content[3..];
-    const end_idx = std.mem.indexOf(u8, rest, "---");
+    const end_idx = std.mem.find(u8, rest, "---");
     if (end_idx == null) {
         return "SKILL.md frontmatter is not closed";
     }
     const yaml_content = rest[0..end_idx.?];
-    if (std.mem.indexOf(u8, yaml_content, "name:") == null) {
+    if (std.mem.find(u8, yaml_content, "name:") == null) {
         return "Frontmatter must include 'name' field";
     }
-    if (std.mem.indexOf(u8, yaml_content, "description:") == null) {
+    if (std.mem.find(u8, yaml_content, "description:") == null) {
         return "Frontmatter must include 'description' field";
     }
     const body_start = 3 + end_idx.? + 3;
@@ -58,7 +58,7 @@ fn validateFrontmatter(content: []const u8) ?[]const u8 {
 
 fn validateSkillFilePath(file_path: []const u8) ?[]const u8 {
     if (file_path.len == 0) return "file_path is required";
-    if (std.mem.indexOf(u8, file_path, "..") != null) {
+    if (std.mem.find(u8, file_path, "..") != null) {
         return "Path traversal ('..') is not allowed";
     }
     var found = false;
@@ -121,7 +121,7 @@ pub const SkillsGuardTool = struct {
 
     fn scanContent(allocator: std.mem.Allocator, content: []const u8) !ToolResult {
         if (scanForDangerousPatterns(content)) |pattern| {
-            const json = try std.fmt.allocPrint(allocator, "{{\\\"dangerous\\\":true,\\\"pattern\\\":\\\"{s}\\\",\\\"severity\\\":\\\"critical\\\"}}", .{pattern});
+            const json = try allocator.print("{{\\\"dangerous\\\":true,\\\"pattern\\\":\\\"{s}\\\",\\\"severity\\\":\\\"critical\\\"}}", .{pattern});
             return ToolResult.ok(json);
         }
         return ToolResult.ok("{{\\\"dangerous\\\":false,\\\"pattern\\\":null,\\\"severity\\\":null}}");
@@ -129,7 +129,7 @@ pub const SkillsGuardTool = struct {
 
     fn validateFrontmatterResult(allocator: std.mem.Allocator, content: []const u8) !ToolResult {
         if (validateFrontmatter(content)) |err| {
-            const json = try std.fmt.allocPrint(allocator, "{{\\\"valid\\\":false,\\\"error\\\":\\\"{s}\\\"}}", .{err});
+            const json = try allocator.print("{{\\\"valid\\\":false,\\\"error\\\":\\\"{s}\\\"}}", .{err});
             return ToolResult.ok(json);
         }
         return ToolResult.ok("{{\\\"valid\\\":true,\\\"error\\\":null}}");
@@ -137,7 +137,7 @@ pub const SkillsGuardTool = struct {
 
     fn checkPathResult(allocator: std.mem.Allocator, file_path: []const u8) !ToolResult {
         if (validateSkillFilePath(file_path)) |err| {
-            const json = try std.fmt.allocPrint(allocator, "{{\\\"valid\\\":false,\\\"error\\\":\\\"{s}\\\"}}", .{err});
+            const json = try allocator.print("{{\\\"valid\\\":false,\\\"error\\\":\\\"{s}\\\"}}", .{err});
             return ToolResult.ok(json);
         }
         return ToolResult.ok("{{\\\"valid\\\":true,\\\"error\\\":null}}");
@@ -149,7 +149,7 @@ pub const SkillsGuardTool = struct {
 
         try output.appendSlice(allocator, "audit");
         try output.appendSlice(allocator, " patterns:");
-        try output.appendSlice(allocator, try std.fmt.allocPrint(allocator, " {d} dangerous patterns", .{DANGEROUS_PATTERNS.len}));
+        try output.appendSlice(allocator, try allocator.print(" {d} dangerous patterns", .{DANGEROUS_PATTERNS.len}));
 
         try output.appendSlice(allocator, ", allowed dirs: ");
         inline for (ALLOWED_SUBDIRS, 0..) |subdir, i| {

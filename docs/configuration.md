@@ -100,6 +100,8 @@ Options:
   --max-iterations <n>    Max ReAct iterations (default: 10)
   --server                Run in HTTP server mode
   --port <port>           Server port (default: 8080)
+  --enable-harness-rsi    Enable harness RSI (default: off)
+  --harness-tag <tag>     Harness task tag (default: general)
 ```
 
 ## Provider Configuration
@@ -166,17 +168,18 @@ knot3bot --db-path ~/.knot3bot/memory.db
 
 ## Harness RSI
 
-Off unless `AgentConfig.enable_harness_rsi` is set to `true`.
+Off unless `--enable-harness-rsi` is passed (or `AgentConfig.enable_harness_rsi` is set to `true`). `--harness-tag <tag>` sets the task tag; the default is `general`. The same flags apply to `--server`.
 
 | Field | Default | Meaning |
 |-------|---------|---------|
 | `enable_harness_rsi` | `false` | Run one baseline-versus-two-candidates comparison before the task |
 | `harness_task_tag` | `"general"` | Exact tag used to store and reuse winning patches |
 | `harness_rsi_k` | `1` | Reserved. Values above 1 still run a single round |
+| `harness_call_budget` | `5` | Executor calls for one RSI task. Below 4, the task runs once on the baseline |
 
-An enabled task does three probe executions, then one official execution of the winner. Probe executions skip the prompt cache. If neither candidate beats the baseline, the harness version does not change.
+An enabled task does three probe executions, then one official execution of the winner, unless `--harness-call-budget` is below 4. In that case the baseline runs once and is the answer. A patch that would push the prompt or checklist past 512 bytes is discarded and does not fail the task. The official run also skips the prompt cache when the harness changes the prompt, checklist, tool list, or retries. Candidate A can hide the first failing tool when other tools remain and the remaining list is at most 16 names. Fewer errors win a comparison. Equal errors are broken by fewer failed tools. If that still ties, the harness version does not change. If the official run loses that comparison to the baseline probe, the harness rolls back to its parent, including an older version stored in `harness_history`, that patch takes one loss, and the parent is run once more when the call budget still has room. That later run is the answer returned. The kept harness stays in memory for the next task in the same process. Every tool call in a step is recorded, not only the first.
 
-Saved patches live in `harness_patterns` and are reused only when `task_tag` matches exactly and `wins > losses`.
+Saved patches live in `harness_patterns` inside `--db-path` and are reused only when `task_tag` matches exactly and `wins > losses`. A patch already present in the loaded harness is not appended again. The kept harness itself is stored in `harness_snapshots` for the same tag, so a new process starts from that harness. Failed tool names from the kept run are stored in `harness_failures` and feed the next proposal when skill self-improve is off. Without `--db-path`, all of this stays in the current process only.
 
 ## Logging
 

@@ -22,18 +22,18 @@ pub const DelegateTool = struct {
         const prompt = getString(args, "prompt") orelse return ToolResult.fail("prompt is required");
         const timeout_secs: u32 = @intCast(getInt(args, "timeout") orelse 60);
 
-        const delegate_dir = try std.fmt.allocPrint(allocator, "{s}/.delegate", .{self.workspace_dir});
+        const delegate_dir = try allocator.print("{s}/.delegate", .{self.workspace_dir});
         shared.cwdMakePath(delegate_dir) catch {};
         allocator.free(delegate_dir);
 
-        const task_file = try std.fmt.allocPrint(allocator, "{s}/.delegate/{s}.json", .{ self.workspace_dir, task_id });
+        const task_file = try allocator.print("{s}/.delegate/{s}.json", .{ self.workspace_dir, task_id });
         defer allocator.free(task_file);
 
-        const task_record = try std.fmt.allocPrint(allocator, "{{\"task_id\":\"{s}\",\"prompt\":\"{s}\",\"status\":\"pending\",\"timeout\":{d}}}", .{ task_id, prompt, timeout_secs });
+        const task_record = try allocator.print("{{\"task_id\":\"{s}\",\"prompt\":\"{s}\",\"status\":\"pending\",\"timeout\":{d}}}", .{ task_id, prompt, timeout_secs });
         defer allocator.free(task_record);
         shared.cwdWriteFile(task_file, task_record) catch return ToolResult.fail("Failed to create delegation record");
 
-        const resp = try std.fmt.allocPrint(allocator, "{{\"success\":true,\"task_id\":\"{s}\",\"timeout\":{d},\"message\":\"Task delegated\",\"note\":\"Subagent execution requires async runtime\"}}", .{ task_id, timeout_secs });
+        const resp = try allocator.print("{{\"success\":true,\"task_id\":\"{s}\",\"timeout\":{d},\"message\":\"Task delegated\",\"note\":\"Subagent execution requires async runtime\"}}", .{ task_id, timeout_secs });
         return ToolResult.ok(resp);
     }
     pub const vtable = root.ToolVTable(@This());
@@ -50,7 +50,7 @@ pub const DelegateResultTool = struct {
 
     pub fn execute(self: *DelegateResultTool, allocator: std.mem.Allocator, args: JsonObjectMap) !ToolResult {
         const task_id = getString(args, "task_id") orelse return ToolResult.fail("task_id is required");
-        const task_file = try std.fmt.allocPrint(allocator, "{s}/.delegate/{s}.json", .{ self.workspace_dir, task_id });
+        const task_file = try allocator.print("{s}/.delegate/{s}.json", .{ self.workspace_dir, task_id });
         defer allocator.free(task_file);
         const content = shared.cwdReadFileAlloc(allocator, task_file, 1024 * 1024) catch return ToolResult.fail("Task not found or not yet completed");
         return ToolResult.ok(content);

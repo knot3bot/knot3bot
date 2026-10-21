@@ -347,7 +347,7 @@ pub const SqliteMemorySystem = struct {
                 try messages.appendSlice(allocator, "\",\"content\":\"");
                 try messages.appendSlice(allocator, content[0..content_len]);
                 try messages.appendSlice(allocator, "\",\"timestamp\":");
-                const ts_str = try std.fmt.allocPrint(allocator, "{d}", .{timestamp});
+                const ts_str = try allocator.print("{d}", .{timestamp});
                 defer allocator.free(ts_str);
                 try messages.appendSlice(allocator, ts_str);
                 try messages.appendSlice(allocator, "}");

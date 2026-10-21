@@ -183,75 +183,75 @@ pub const Config = struct {
     /// Save configuration to a JSON file
     pub fn saveToFile(self: Config, path: []const u8) !void {
         const allocator = self.allocator orelse return error.NoAllocator;
-        var buf = std.array_list.AlignedManaged(u8, null).init(allocator);
-        defer buf.deinit();
+        var buf: std.ArrayList(u8) = .empty;
+        defer buf.deinit(allocator);
 
-        try buf.appendSlice("{\n");
-        try buf.appendSlice("  \"provider\": \"");
-        try buf.appendSlice(self.provider.internalName());
-        try buf.appendSlice("\",\n");
+        try buf.appendSlice(allocator, "{\n");
+        try buf.appendSlice(allocator, "  \"provider\": \"");
+        try buf.appendSlice(allocator, self.provider.internalName());
+        try buf.appendSlice(allocator, "\",\n");
 
-        try buf.appendSlice("  \"api\": {\n");
+        try buf.appendSlice(allocator, "  \"api\": {\n");
         if (self.api_key) |key| {
-            try buf.appendSlice("    \"key\": \"");
+            try buf.appendSlice(allocator, "    \"key\": \"");
             // Mask API key: show only last 4 chars
             if (key.len > 4) {
-                try buf.appendSlice("sk-...");
-                try buf.appendSlice(key[key.len - 4 ..]);
+                try buf.appendSlice(allocator, "sk-...");
+                try buf.appendSlice(allocator, key[key.len - 4 ..]);
             } else {
-                try buf.appendSlice("***");
+                try buf.appendSlice(allocator, "***");
             }
-            try buf.appendSlice("\",\n");
+            try buf.appendSlice(allocator, "\",\n");
         }
-        try buf.appendSlice("    \"base\": \"");
-        try buf.appendSlice(self.api_base);
-        try buf.appendSlice("\",\n");
-        try buf.appendSlice("    \"model\": \"");
-        try buf.appendSlice(self.model);
-        try buf.appendSlice("\"\n");
-        try buf.appendSlice("  },\n");
+        try buf.appendSlice(allocator, "    \"base\": \"");
+        try buf.appendSlice(allocator, self.api_base);
+        try buf.appendSlice(allocator, "\",\n");
+        try buf.appendSlice(allocator, "    \"model\": \"");
+        try buf.appendSlice(allocator, self.model);
+        try buf.appendSlice(allocator, "\"\n");
+        try buf.appendSlice(allocator, "  },\n");
 
-        try buf.appendSlice("  \"memory\": {\n");
-        try buf.appendSlice("    \"backend\": \"");
-        try buf.appendSlice(self.memory_backend);
-        try buf.appendSlice("\",\n");
-        try buf.appendSlice("    \"db_path\": \"");
-        try buf.appendSlice(self.db_path);
-        try buf.appendSlice("\"\n");
-        try buf.appendSlice("  },\n");
+        try buf.appendSlice(allocator, "  \"memory\": {\n");
+        try buf.appendSlice(allocator, "    \"backend\": \"");
+        try buf.appendSlice(allocator, self.memory_backend);
+        try buf.appendSlice(allocator, "\",\n");
+        try buf.appendSlice(allocator, "    \"db_path\": \"");
+        try buf.appendSlice(allocator, self.db_path);
+        try buf.appendSlice(allocator, "\"\n");
+        try buf.appendSlice(allocator, "  },\n");
 
-        try buf.appendSlice("  \"server\": {\n");
-        const port_str = try std.fmt.allocPrint(allocator, "    \"port\": {}", .{self.server_port});
+        try buf.appendSlice(allocator, "  \"server\": {\n");
+        const port_str = try allocator.print("    \"port\": {}", .{self.server_port});
         defer allocator.free(port_str);
-        try buf.appendSlice(port_str);
-        try buf.appendSlice(",\n");
-        try buf.appendSlice("    \"host\": \"");
-        try buf.appendSlice(self.server_host);
-        try buf.appendSlice("\"\n");
-        try buf.appendSlice("  },\n");
+        try buf.appendSlice(allocator, port_str);
+        try buf.appendSlice(allocator, ",\n");
+        try buf.appendSlice(allocator, "    \"host\": \"");
+        try buf.appendSlice(allocator, self.server_host);
+        try buf.appendSlice(allocator, "\"\n");
+        try buf.appendSlice(allocator, "  },\n");
 
-        try buf.appendSlice("  \"logging\": {\n");
-        try buf.appendSlice("    \"level\": \"");
-        try buf.appendSlice(self.log_level);
-        try buf.appendSlice("\"");
+        try buf.appendSlice(allocator, "  \"logging\": {\n");
+        try buf.appendSlice(allocator, "    \"level\": \"");
+        try buf.appendSlice(allocator, self.log_level);
+        try buf.appendSlice(allocator, "\"");
         if (self.log_file) |log_file| {
-            try buf.appendSlice(",\n    \"file\": \"");
-            try buf.appendSlice(log_file);
-            try buf.appendSlice("\"");
+            try buf.appendSlice(allocator, ",\n    \"file\": \"");
+            try buf.appendSlice(allocator, log_file);
+            try buf.appendSlice(allocator, "\"");
         }
-        try buf.appendSlice("\n  },\n");
+        try buf.appendSlice(allocator, "\n  },\n");
 
-        try buf.appendSlice("  \"behavior\": {\n");
-        const max_iter_str = try std.fmt.allocPrint(allocator, "    \"max_iterations\": {}", .{self.max_iterations});
+        try buf.appendSlice(allocator, "  \"behavior\": {\n");
+        const max_iter_str = try allocator.print("    \"max_iterations\": {}", .{self.max_iterations});
         defer allocator.free(max_iter_str);
-        try buf.appendSlice(max_iter_str);
-        try buf.appendSlice(",\n");
-        const timeout_str = try std.fmt.allocPrint(allocator, "    \"timeout_seconds\": {}", .{self.timeout_seconds});
+        try buf.appendSlice(allocator, max_iter_str);
+        try buf.appendSlice(allocator, ",\n");
+        const timeout_str = try allocator.print("    \"timeout_seconds\": {}", .{self.timeout_seconds});
         defer allocator.free(timeout_str);
-        try buf.appendSlice(timeout_str);
-        try buf.appendSlice("\n  }\n");
+        try buf.appendSlice(allocator, timeout_str);
+        try buf.appendSlice(allocator, "\n  }\n");
 
-        try buf.appendSlice("}\n");
+        try buf.appendSlice(allocator, "}\n");
         try shared.cwdWriteFile(path, buf.items);
     }
 

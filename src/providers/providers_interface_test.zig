@@ -54,9 +54,9 @@ test "ChatRequest.toJson - serializes basic request" {
     const json = try request.toJson(allocator);
     defer allocator.free(json);
 
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"model\":\"gpt-4o\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"messages\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "You are helpful") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"model\":\"gpt-4o\"") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"messages\"") != null);
+    try std.testing.expect(std.mem.find(u8, json, "You are helpful") != null);
 }
 
 test "ChatRequest.toJson - serializes with temperature" {
@@ -70,7 +70,7 @@ test "ChatRequest.toJson - serializes with temperature" {
     const json = try request.toJson(allocator);
     defer allocator.free(json);
 
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"temperature\":0.7") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"temperature\":0.7") != null);
 }
 
 test "ChatRequest.toJson - serializes with max_tokens" {
@@ -84,7 +84,7 @@ test "ChatRequest.toJson - serializes with max_tokens" {
     const json = try request.toJson(allocator);
     defer allocator.free(json);
 
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"max_tokens\":100") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"max_tokens\":100") != null);
 }
 
 test "ChatRequest.toJson - serializes with tools" {
@@ -108,8 +108,8 @@ test "ChatRequest.toJson - serializes with tools" {
     const json = try request.toJson(allocator);
     defer allocator.free(json);
 
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"tools\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "get_weather") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"tools\"") != null);
+    try std.testing.expect(std.mem.find(u8, json, "get_weather") != null);
 }
 
 test "ChatRequest.toJson - escapes special characters" {
@@ -124,9 +124,9 @@ test "ChatRequest.toJson - escapes special characters" {
     const json = try request.toJson(allocator);
     defer allocator.free(json);
 
-    try std.testing.expect(std.mem.indexOf(u8, json, "\\\"") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\\n") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "\\t") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\\\"") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\\n") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\\t") != null);
 }
 
 test "ChatRequest.toJson - serializes tool_choice" {
@@ -140,7 +140,7 @@ test "ChatRequest.toJson - serializes tool_choice" {
     const json = try request.toJson(allocator);
     defer allocator.free(json);
 
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"tool_choice\":\"auto\"") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"tool_choice\":\"auto\"") != null);
 }
 
 test "ChatRequest.toJson - stream option" {
@@ -154,7 +154,7 @@ test "ChatRequest.toJson - stream option" {
     const json = try request.toJson(allocator);
     defer allocator.free(json);
 
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"stream\":true") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"stream\":true") != null);
 }
 
 // ============================================================================
@@ -547,7 +547,7 @@ test "Edge case - unicode in messages" {
     const json = try request.toJson(allocator);
     defer allocator.free(json);
 
-    try std.testing.expect(std.mem.indexOf(u8, json, "你好世界") != null);
+    try std.testing.expect(std.mem.find(u8, json, "你好世界") != null);
 }
 
 test "Edge case - empty messages array" {
@@ -560,5 +560,5 @@ test "Edge case - empty messages array" {
     const json = try request.toJson(allocator);
     defer allocator.free(json);
 
-    try std.testing.expect(std.mem.indexOf(u8, json, "\"messages\":[]") != null);
+    try std.testing.expect(std.mem.find(u8, json, "\"messages\":[]") != null);
 }

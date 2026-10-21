@@ -204,10 +204,10 @@ var temp_file_counter: std.atomic.Value(u64) = std.atomic.Value(u64).init(0);
 /// Caller must call cleanupAuthFile after curl exits.
 fn writeAuthHeaderFile(allocator: std.mem.Allocator, api_key: []const u8) ![]const u8 {
     const seed = temp_file_counter.fetchAdd(1, .monotonic);
-    const path = try std.fmt.allocPrint(allocator, "/tmp/knot3bot_auth_{x}", .{seed});
+    const path = try allocator.print("/tmp/knot3bot_auth_{x}", .{seed});
     errdefer allocator.free(path);
 
-    const content = try std.fmt.allocPrint(allocator, "x-api-key: {s}", .{api_key});
+    const content = try allocator.print("x-api-key: {s}", .{api_key});
     defer allocator.free(content);
 
     shared.context.cwdWriteFile(path, content) catch return error.AuthFileWriteError;

@@ -138,8 +138,8 @@ pub const SkillRegistry = struct {
 
     /// Find skills matching a query (simple substring match)
     pub fn findSkills(self: *const SkillRegistry, query: []const u8) []const Skill {
-        var results = std.array_list.AlignedManaged(Skill, null).init(self.allocator);
-        defer results.deinit();
+        var results: std.ArrayList(Skill) = .empty;
+        defer results.deinit(self.allocator);
 
         var it = self.skills.iterator();
         while (it.next()) |entry| {
@@ -147,10 +147,10 @@ pub const SkillRegistry = struct {
             if (std.ascii.findIgnoreCase(skill.name, query) != null or
                 std.ascii.findIgnoreCase(skill.description, query) != null)
             {
-                results.append(skill) catch continue;
+                results.append(self.allocator, skill) catch continue;
             }
         }
-        return results.toOwnedSlice();
+        return results.toOwnedSlice(self.allocator);
     }
 };
 

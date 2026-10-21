@@ -56,9 +56,9 @@ test "MemorySystem.getHistoryJSON - returns valid JSON" {
 
     try std.testing.expect(json != null);
     // Verify it's valid JSON with expected structure
-    try std.testing.expect(std.mem.indexOf(u8, json.?, "[") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json.?, "user") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json.?, "Test message") != null);
+    try std.testing.expect(std.mem.find(u8, json.?, "[") != null);
+    try std.testing.expect(std.mem.find(u8, json.?, "user") != null);
+    try std.testing.expect(std.mem.find(u8, json.?, "Test message") != null);
 }
 
 test "MemorySystem.getHistoryJSON - returns null for missing session" {
@@ -196,9 +196,9 @@ test "MemorySystem.searchJSON - returns valid JSON" {
     const json = try memory.searchJSON(allocator, "Searchable");
     defer allocator.free(json);
 
-    try std.testing.expect(std.mem.indexOf(u8, json, "results") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "count") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json, "json-search") != null);
+    try std.testing.expect(std.mem.find(u8, json, "results") != null);
+    try std.testing.expect(std.mem.find(u8, json, "count") != null);
+    try std.testing.expect(std.mem.find(u8, json, "json-search") != null);
 }
 
 test "MemorySystem.getRecent - returns sessions by update time" {

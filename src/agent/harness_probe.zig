@@ -36,11 +36,18 @@ pub fn probe(
     filled = 1;
 
     for (patches, 0..) |patch, i| {
-        const next = try harness_mod.applyPatch(allocator, base, patch);
-        defer harness_mod.freeHarness(allocator, next);
-        const summary = try exec(allocator, next, task, ctx);
-        summaries[i + 1] = try ownSummary(allocator, summary, task_tag);
-        filled += 1;
+        if (harness_mod.applyPatch(allocator, base, patch)) |next| {
+            defer harness_mod.freeHarness(allocator, next);
+            const summary = try exec(allocator, next, task, ctx);
+            summaries[i + 1] = try ownSummary(allocator, summary, task_tag);
+            filled += 1;
+        } else |err| switch (err) {
+            error.HarnessTooLarge => {
+                summaries[i + 1] = try ownSummary(allocator, summaries[0], task_tag);
+                filled += 1;
+            },
+            else => return err,
+        }
     }
 
     return .{ .summaries = summaries };
@@ -119,8 +126,8 @@ fn run(_: std.mem.Allocator, h: Harness, task: []const u8, ctx: *anyopaque) anye
     if (box.calls == 0 and std.mem.eql(u8, h.prompt_section, "be careful") and h.version == 1) {
         box.saw_baseline = true;
     }
-    if (std.mem.indexOf(u8, h.prompt_section, " patch-a") != null) box.saw_patch_a = true;
-    if (std.mem.indexOf(u8, h.prompt_section, " patch-b") != null) box.saw_patch_b = true;
+    if (std.mem.find(u8, h.prompt_section, " patch-a") != null) box.saw_patch_a = true;
+    if (std.mem.find(u8, h.prompt_section, " patch-b") != null) box.saw_patch_b = true;
     const version = h.version;
     box.calls += 1;
     return sampleSummary(version);
@@ -154,6 +161,29 @@ test "probe runs baseline plus two candidates and skips cache" {
     try std.testing.expectEqual(@as(u32, 1), out.summaries[0].harness_version);
     try std.testing.expectEqual(@as(u32, 2), out.summaries[1].harness_version);
     try std.testing.expectEqual(@as(u32, 2), out.summaries[2].harness_version);
+}
+
+test "probe discards an oversized patch and copies the baseline summary" {
+    var box = ProbeBox{};
+    const baseline_prompt: [400]u8 = @splat('x');
+    const overflow: [200]u8 = @splat('y');
+    const base = Harness{
+        .version = 1,
+        .parent = null,
+        .prompt_section = &baseline_prompt,
+        .tool_order = &.{},
+        .max_retries = 0,
+        .checklist = "",
+    };
+    const patches = [_]harness_mod.HarnessPatch{
+        .{ .prompt_append = &overflow, .retry_delta = 0, .checklist_append = "" },
+        .{ .prompt_append = " ok", .retry_delta = 0, .checklist_append = "" },
+    };
+    const out = try probe(std.testing.allocator, base, &patches, "code", "fix the test", run, @ptrCast(&box));
+    defer freeProbe(std.testing.allocator, out);
+    try std.testing.expectEqual(@as(usize, 2), box.calls);
+    try std.testing.expectEqual(@as(usize, 3), out.summaries.len);
+    try std.testing.expectEqual(out.summaries[0].error_count, out.summaries[1].error_count);
 }
 
 test "probe frees summaries when the executor fails" {

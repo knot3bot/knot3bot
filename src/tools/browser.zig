@@ -59,7 +59,7 @@ pub const BrowserTool = struct {
             return ToolResult.fail("Invalid or blocked URL (SSRF protection)");
         };
 
-        const script = try std.fmt.allocPrint(allocator, "osascript -e 'tell application \"Safari\" to open location \"{s}\"'", .{url});
+        const script = try allocator.print("osascript -e 'tell application \"Safari\" to open location \"{s}\"'", .{url});
         defer allocator.free(script);
 
         var child = std.process.spawn(shared.context.io(), .{
@@ -73,7 +73,7 @@ pub const BrowserTool = struct {
 
         _ = child.wait(shared.context.io()) catch {};
 
-        const response = try std.fmt.allocPrint(allocator, "Navigated to {s}", .{url});
+        const response = try allocator.print("Navigated to {s}", .{url});
         return ToolResult.ok(response);
     }
 
@@ -91,7 +91,7 @@ pub const BrowserTool = struct {
 
         _ = child.wait(shared.context.io()) catch {};
 
-        return ToolResult.ok(try std.fmt.allocPrint(allocator, "Screenshot saved to {s}", .{screenshot_path}));
+        return ToolResult.ok(try allocator.print("Screenshot saved to {s}", .{screenshot_path}));
     }
 
     fn browserUrl(allocator: std.mem.Allocator) !ToolResult {
@@ -151,7 +151,7 @@ pub const BrowserTool = struct {
     }
 
     fn browserClick(allocator: std.mem.Allocator, selector: []const u8) !ToolResult {
-        const script = try std.fmt.allocPrint(allocator, "osascript -e 'tell application \"Safari\" to do JavaScript \"document.querySelector('{s}').click()\" in front window'", .{selector});
+        const script = try allocator.print("osascript -e 'tell application \"Safari\" to do JavaScript \"document.querySelector('{s}').click()\" in front window'", .{selector});
         defer allocator.free(script);
 
         var child = std.process.spawn(shared.context.io(), .{
@@ -165,11 +165,11 @@ pub const BrowserTool = struct {
 
         _ = child.wait(shared.context.io()) catch {};
 
-        return ToolResult.ok(try std.fmt.allocPrint(allocator, "Clicked element: {s}", .{selector}));
+        return ToolResult.ok(try allocator.print("Clicked element: {s}", .{selector}));
     }
 
     fn browserFill(allocator: std.mem.Allocator, selector: []const u8, value: []const u8) !ToolResult {
-        const script = try std.fmt.allocPrint(allocator, "osascript -e 'tell application \"Safari\" to do JavaScript \"document.querySelector('{s}').value='{s}'\" in front window'", .{ selector, value });
+        const script = try allocator.print("osascript -e 'tell application \"Safari\" to do JavaScript \"document.querySelector('{s}').value='{s}'\" in front window'", .{ selector, value });
         defer allocator.free(script);
 
         var child = std.process.spawn(shared.context.io(), .{
@@ -183,7 +183,7 @@ pub const BrowserTool = struct {
 
         _ = child.wait(shared.context.io()) catch {};
 
-        return ToolResult.ok(try std.fmt.allocPrint(allocator, "Filled element: {s} = {s}", .{ selector, value }));
+        return ToolResult.ok(try allocator.print("Filled element: {s} = {s}", .{ selector, value }));
     }
 
     pub const vtable = root.ToolVTable(@This());

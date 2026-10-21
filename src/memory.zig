@@ -99,7 +99,7 @@ pub const MemorySystem = struct {
             try jsonEscape(&list, allocator, msg.role);
             try list.appendSlice(allocator, "\",\"content\":\"");
             try jsonEscape(&list, allocator, msg.content);
-            const ts_str = try std.fmt.allocPrint(allocator, "\",\"timestamp\":{}", .{msg.timestamp});
+            const ts_str = try allocator.print("\",\"timestamp\":{}", .{msg.timestamp});
             defer allocator.free(ts_str);
             try list.appendSlice(allocator, ts_str);
             try list.appendSlice(allocator, "}");
@@ -188,7 +188,7 @@ pub const MemorySystem = struct {
                 defer allocator.free(content_lower);
                 for (content_lower) |*byte| byte.* = std.ascii.toLower(byte.*);
 
-                if (std.mem.indexOf(u8, content_lower, query_lower) != null) {
+                if (std.mem.find(u8, content_lower, query_lower) != null) {
                     match_count += 1;
                 }
                 last_msg = msg.content;
@@ -289,9 +289,9 @@ pub const MemorySystem = struct {
         try output.appendSlice(allocator, "{\"results\":[");
         for (results, 0..) |r, i| {
             if (i > 0) try output.appendSlice(allocator, ",");
-            const score_str = try std.fmt.allocPrint(allocator, "{d}", .{r.relevance_score});
+            const score_str = try allocator.print("{d}", .{r.relevance_score});
             defer allocator.free(score_str);
-            const match_str = try std.fmt.allocPrint(allocator, "{}", .{r.match_count});
+            const match_str = try allocator.print("{}", .{r.match_count});
             defer allocator.free(match_str);
             try output.appendSlice(allocator, "{\"session_id\":\"");
             try output.appendSlice(allocator, r.session_id);
@@ -303,7 +303,7 @@ pub const MemorySystem = struct {
             try output.appendSlice(allocator, r.last_message);
             try output.appendSlice(allocator, "\"}");
         }
-        const count_str = try std.fmt.allocPrint(allocator, "{}", .{results.len});
+        const count_str = try allocator.print("{}", .{results.len});
         defer allocator.free(count_str);
         try output.appendSlice(allocator, "],\"count\":");
         try output.appendSlice(allocator, count_str);

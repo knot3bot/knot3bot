@@ -66,7 +66,7 @@ const CalculatorTool = struct {
 
         const result = if (std.mem.eql(u8, op, "add")) a + b else if (std.mem.eql(u8, op, "subtract")) a - b else if (std.mem.eql(u8, op, "multiply")) a * b else return ToolResult.fail("Unknown operation");
 
-        return ToolResult.ok(try std.fmt.allocPrint(allocator, "{d}", .{result}));
+        return ToolResult.ok(try allocator.print("{d}", .{result}));
     }
 };
 
@@ -188,12 +188,12 @@ test "Agent with ToolRegistry - calculator tool execution" {
     // Test addition
     const add_result = try registry.call(allocator, "calculate", "{\"a\":5,\"b\":3,\"operation\":\"add\"}");
     try std.testing.expect(add_result.success);
-    try std.testing.expect(std.mem.indexOf(u8, add_result.output, "8") != null);
+    try std.testing.expect(std.mem.find(u8, add_result.output, "8") != null);
 
     // Test multiplication
     const mul_result = try registry.call(allocator, "calculate", "{\"a\":4,\"b\":7,\"operation\":\"multiply\"}");
     try std.testing.expect(mul_result.success);
-    try std.testing.expect(std.mem.indexOf(u8, mul_result.output, "28") != null);
+    try std.testing.expect(std.mem.find(u8, mul_result.output, "28") != null);
 }
 
 test "Agent with ToolRegistry - tool not found returns error" {
@@ -264,8 +264,8 @@ test "Agent + Memory - history retrieval as JSON" {
 
     try std.testing.expect(json != null);
     // Verify JSON contains expected content
-    try std.testing.expect(std.mem.indexOf(u8, json.?, "user") != null);
-    try std.testing.expect(std.mem.indexOf(u8, json.?, "weather") != null);
+    try std.testing.expect(std.mem.find(u8, json.?, "user") != null);
+    try std.testing.expect(std.mem.find(u8, json.?, "weather") != null);
 }
 
 test "Agent + Memory - search across conversations" {
@@ -349,7 +349,7 @@ test "Tool + Memory - read memory tool integration" {
     // Use the read_memory tool
     const result = try registry.call(allocator, "read_memory", "{\"session_id\":\"chat-123\"}");
     try std.testing.expect(result.success);
-    try std.testing.expect(std.mem.indexOf(u8, result.output, "Hello there") != null);
+    try std.testing.expect(std.mem.find(u8, result.output, "Hello there") != null);
 }
 
 test "Tool + Memory - read memory with empty session" {
@@ -532,7 +532,7 @@ test "Complex scenario - multi-session agent workflow" {
     defer if (history) |h| allocator.free(h);
 
     try std.testing.expect(history != null);
-    try std.testing.expect(std.mem.indexOf(u8, history.?, "Zig") != null);
+    try std.testing.expect(std.mem.find(u8, history.?, "Zig") != null);
 }
 
 test "Complex scenario - agent with tool and memory" {
@@ -554,7 +554,7 @@ test "Complex scenario - agent with tool and memory" {
     // Use tool to read memory
     const result = try registry.call(allocator, "read_memory", "{\"session_id\":\"current-session\"}");
     try std.testing.expect(result.success);
-    try std.testing.expect(std.mem.indexOf(u8, result.output, "history") != null);
+    try std.testing.expect(std.mem.find(u8, result.output, "history") != null);
 
     // Add the tool result as assistant message
     try memory.addMessage("current-session", "assistant", result.output);

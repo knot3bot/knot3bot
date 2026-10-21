@@ -152,10 +152,10 @@ pub const ContextCompressor = struct {
         const summary = try self.generateSummary(arena_alloc, turns_to_summarize);
 
         // Phase 4: Assemble compressed message list
-        var result_list = std.array_list.AlignedManaged(Message, null).init(self.allocator);
+        var result_list: std.ArrayList(Message) = .empty;
         errdefer {
             for (result_list.items) |m| self.allocator.free(m.content);
-            result_list.deinit();
+            result_list.deinit(self.allocator);
         }
 
         // Append head
@@ -164,11 +164,11 @@ pub const ContextCompressor = struct {
             var content = try self.allocator.dupe(u8, msg.content);
             if (i == 0 and msg.role == .system and self.compression_count == 0) {
                 const note = "\n\n[Note: Some earlier conversation turns have been compacted into a handoff summary to preserve context space. The current session state may still reflect earlier work, so build on that summary and state rather than re-doing work.]";
-                const new_content = try std.fmt.allocPrint(self.allocator, "{s}{s}", .{ content, note });
+                const new_content = try self.allocator.print("{s}{s}", .{ content, note });
                 self.allocator.free(content);
                 content = new_content;
             }
-            try result_list.append(.{ .role = msg.role, .content = content });
+            try result_list.append(self.allocator, .{ .role = msg.role, .content = content });
         }
 
         // Insert summary
@@ -188,8 +188,8 @@ pub const ContextCompressor = struct {
             }
 
             if (!merge_summary_into_tail) {
-                const prefixed = try std.fmt.allocPrint(self.allocator, "{s}\n{s}", .{ SUMMARY_PREFIX, s });
-                try result_list.append(.{ .role = summary_role, .content = prefixed });
+                const prefixed = try self.allocator.print("{s}\n{s}", .{ SUMMARY_PREFIX, s });
+                try result_list.append(self.allocator, .{ .role = summary_role, .content = prefixed });
             }
         } else if (!self.quiet_mode) {
             std.log.debug("No summary generated — middle turns dropped without summary", .{});
@@ -201,17 +201,17 @@ pub const ContextCompressor = struct {
             var content = try self.allocator.dupe(u8, msg.content);
             if (merge_summary_into_tail and i == compress_end) {
                 if (summary) |s| {
-                    const merged = try std.fmt.allocPrint(self.allocator, "{s}\n\n{s}", .{ s, content });
+                    const merged = try self.allocator.print("{s}\n\n{s}", .{ s, content });
                     self.allocator.free(content);
                     content = merged;
                 }
             }
-            try result_list.append(.{ .role = msg.role, .content = content });
+            try result_list.append(self.allocator, .{ .role = msg.role, .content = content });
         }
 
         self.compression_count += 1;
 
-        var result_messages = try result_list.toOwnedSlice();
+        var result_messages = try result_list.toOwnedSlice(self.allocator);
         result_messages = try sanitizeToolPairs(self.allocator, result_messages);
 
         const new_estimate = estimateTokens(result_messages);
@@ -447,7 +447,7 @@ pub fn serializeForSummary(arena_alloc: std.mem.Allocator, turns: []const Messag
         if (parts.items.len > 0) try allocating.writer.writeAll("\n\n");
         var content = msg.content;
         if (content.len > 3000) {
-            const truncated = try std.fmt.allocPrint(arena_alloc, "{s}\n...[truncated]...\n{s}", .{
+            const truncated = try arena_alloc.print("{s}\n...[truncated]...\n{s}", .{
                 content[0..2000],
                 content[content.len - 800 ..],
             });

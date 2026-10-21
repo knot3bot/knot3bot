@@ -40,13 +40,13 @@ const THREAT_PATTERNS = [_]struct { pattern: []const u8, name: []const u8 }{
 fn scanMemoryContent(allocator: std.mem.Allocator, content: []const u8) ?[]const u8 {
     for (INVISIBLE_CHARS) |char| {
         const char_str = [_]u8{ @truncate(char), @truncate(char >> 8) };
-        if (std.mem.indexOf(u8, content, &char_str) != null) {
+        if (std.mem.find(u8, content, &char_str) != null) {
             return "Blocked: content contains invisible unicode character (possible injection)";
         }
     }
     for (THREAT_PATTERNS) |threat| {
-        if (std.mem.indexOf(u8, content, threat.pattern) != null) {
-            return std.fmt.allocPrint(allocator, "Blocked: content matches threat pattern '{s}'", .{threat.name}) catch
+        if (std.mem.find(u8, content, threat.pattern) != null) {
+            return allocator.print("Blocked: content matches threat pattern '{s}'", .{threat.name}) catch
                 "Blocked: content matches threat pattern";
         }
     }
@@ -54,23 +54,23 @@ fn scanMemoryContent(allocator: std.mem.Allocator, content: []const u8) ?[]const
 }
 
 pub const MemoryStore = struct {
-    memory_entries: std.array_list.AlignedManaged([]const u8, null),
-    user_entries: std.array_list.AlignedManaged([]const u8, null),
+    memory_entries: std.ArrayList([]const u8),
+    user_entries: std.ArrayList([]const u8),
     memory_char_limit: usize = DEFAULT_MEMORY_CHAR_LIMIT,
     user_char_limit: usize = DEFAULT_USER_CHAR_LIMIT,
     allocator: std.mem.Allocator,
 
     pub fn init(allocator: std.mem.Allocator) MemoryStore {
         return .{
-            .memory_entries = std.array_list.AlignedManaged([]const u8, null).init(allocator),
-            .user_entries = std.array_list.AlignedManaged([]const u8, null).init(allocator),
+            .memory_entries = .empty,
+            .user_entries = .empty,
             .allocator = allocator,
         };
     }
 
     pub fn deinit(self: *MemoryStore) void {
-        self.memory_entries.deinit();
-        self.user_entries.deinit();
+        self.memory_entries.deinit(self.allocator);
+        self.user_entries.deinit(self.allocator);
     }
 
     fn getMemoryDir(self: *MemoryStore) []const u8 {
@@ -78,7 +78,7 @@ pub const MemoryStore = struct {
         return std.fs.path.join(self.allocator, &.{ home, ".hermes", "memories" }) catch "/tmp/.hermes/memories";
     }
 
-    fn getEntries(self: *MemoryStore, target: []const u8) *std.array_list.AlignedManaged([]const u8, null) {
+    fn getEntries(self: *MemoryStore, target: []const u8) *std.ArrayList([]const u8) {
         if (std.mem.eql(u8, target, "user")) return &self.user_entries;
         return &self.memory_entries;
     }
@@ -104,36 +104,36 @@ pub const MemoryStore = struct {
     }
 
     fn readEntries(allocator: std.mem.Allocator, path: []const u8) ![][]const u8 {
-        var entries = std.array_list.AlignedManaged([]const u8, null).init(allocator);
-        errdefer entries.deinit();
+        var entries: std.ArrayList([]const u8) = .empty;
+        errdefer entries.deinit(allocator);
 
         const content = shared.cwdReadFileAlloc(allocator, path, 1024 * 1024) catch |err| {
-            if (err == error.FileNotFound) return entries.toOwnedSlice();
+            if (err == error.FileNotFound) return entries.toOwnedSlice(allocator);
             return err;
         };
         defer allocator.free(content);
 
-        if (content.len == 0) return entries.toOwnedSlice();
+        if (content.len == 0) return entries.toOwnedSlice(allocator);
 
-        var parts = std.mem.split(u8, content, ENTRY_DELIMITER);
+        var parts = std.mem.splitSequence(u8, content, ENTRY_DELIMITER);
         while (parts.next()) |entry| {
             const trimmed = std.mem.trim(u8, entry, " \t\n");
             if (trimmed.len > 0) {
                 const copy = try allocator.dupe(u8, trimmed);
                 errdefer allocator.free(copy);
-                try entries.append(copy);
+                try entries.append(allocator, copy);
             }
         }
-        return entries.toOwnedSlice();
+        return entries.toOwnedSlice(allocator);
     }
 
     fn writeEntries(allocator: std.mem.Allocator, path: []const u8, entries: []const []const u8) !void {
-        var content = std.array_list.AlignedManaged(u8, null).init(allocator);
-        defer content.deinit();
+        var content: std.ArrayList(u8) = .empty;
+        defer content.deinit(allocator);
 
         for (entries, 0..) |entry, i| {
-            if (i > 0) try content.appendSlice(ENTRY_DELIMITER);
-            try content.appendSlice(entry);
+            if (i > 0) try content.appendSlice(allocator, ENTRY_DELIMITER);
+            try content.appendSlice(allocator, entry);
         }
 
         const dir = std.fs.path.dirname(path) orelse ".";
@@ -152,7 +152,7 @@ pub const MemoryStore = struct {
         const limit = self.getCharLimit(target);
         const pct = @min(100, (current * 100) / @max(1, limit));
 
-        return std.fmt.allocPrint(self.allocator, "{{\"success\":true,\"target\":\"{s}\",\"usage\":\"{}% — {}/{}\",\"entry_count\":{}}}", .{ target, pct, current, limit, entries.items.len }) catch "{}";
+        return self.allocator.print("{{\"success\":true,\"target\":\"{s}\",\"usage\":\"{}% — {}/{}\",\"entry_count\":{}}}", .{ target, pct, current, limit, entries.items.len }) catch "{}";
     }
 
     pub fn add(self: *MemoryStore, target: []const u8, content: []const u8) !ToolResult {
@@ -172,13 +172,13 @@ pub const MemoryStore = struct {
             }
         }
 
-        try entries.append(try self.allocator.dupe(u8, trimmed));
+        try entries.append(self.allocator, try self.allocator.dupe(u8, trimmed));
 
         const new_count = MemoryStore.calcCharCount(entries.items);
         if (new_count > limit) {
             _ = entries.pop();
             const current = MemoryStore.calcCharCount(entries.items);
-            const msg = std.fmt.allocPrint(self.allocator, "Memory at {}/{} chars. Adding this entry ({} chars) would exceed the limit. Replace or remove existing entries first.", .{ current, limit, trimmed.len }) catch "Memory limit exceeded";
+            const msg = self.allocator.print("Memory at {}/{} chars. Adding this entry ({} chars) would exceed the limit. Replace or remove existing entries first.", .{ current, limit, trimmed.len }) catch "Memory limit exceeded";
             return ToolResult.fail(msg);
         }
 
@@ -205,14 +205,14 @@ pub const MemoryStore = struct {
 
         var match_idx: ?usize = null;
         for (entries.items, 0..) |entry, i| {
-            if (std.mem.indexOf(u8, entry, trimmed_old) != null) {
+            if (std.mem.find(u8, entry, trimmed_old) != null) {
                 match_idx = i;
                 break;
             }
         }
 
         if (match_idx == null) {
-            const msg = std.fmt.allocPrint(self.allocator, "No entry matched '{s}'", .{trimmed_old}) catch "No entry matched";
+            const msg = self.allocator.print("No entry matched '{s}'", .{trimmed_old}) catch "No entry matched";
             return ToolResult.fail(msg);
         }
 
@@ -222,7 +222,7 @@ pub const MemoryStore = struct {
 
         const new_count = MemoryStore.calcCharCount(test_entries);
         if (new_count > limit) {
-            const msg = std.fmt.allocPrint(self.allocator, "Replacement would put memory at {}/{} chars. Shorten the new content or remove other entries first.", .{ new_count, limit }) catch "Memory limit exceeded";
+            const msg = self.allocator.print("Replacement would put memory at {}/{} chars. Shorten the new content or remove other entries first.", .{ new_count, limit }) catch "Memory limit exceeded";
             return ToolResult.fail(msg);
         }
 
@@ -244,14 +244,14 @@ pub const MemoryStore = struct {
 
         var match_idx: ?usize = null;
         for (entries.items, 0..) |entry, i| {
-            if (std.mem.indexOf(u8, entry, trimmed) != null) {
+            if (std.mem.find(u8, entry, trimmed) != null) {
                 match_idx = i;
                 break;
             }
         }
 
         if (match_idx == null) {
-            const msg = std.fmt.allocPrint(self.allocator, "No entry matched '{s}'", .{trimmed}) catch "No entry matched";
+            const msg = self.allocator.print("No entry matched '{s}'", .{trimmed}) catch "No entry matched";
             return ToolResult.fail(msg);
         }
 
@@ -321,7 +321,7 @@ pub const MemoryTool = struct {
             return self.store.remove(target, old_text);
         }
 
-        const msg = std.fmt.allocPrint(allocator, "Unknown action '{s}'. Use: add, replace, remove", .{action}) catch "Unknown action";
+        const msg = allocator.print("Unknown action '{s}'. Use: add, replace, remove", .{action}) catch "Unknown action";
         return ToolResult.fail(msg);
     }
 
