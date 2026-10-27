@@ -685,8 +685,10 @@ pub const Server = struct {
                     if (scan > pos + 20) chunk_end = scan;
                 }
                 // Align to UTF-8 code point boundary — never split multi-byte sequences
-                // Continuation bytes have pattern 10xxxxxx (0x80-0xBF)
-                while (chunk_end > pos and (response[chunk_end] & 0xC0) == 0x80) {
+                // Continuation bytes have pattern 10xxxxxx (0x80-0xBF). Only needed
+                // when chunk_end is strictly inside the buffer; the final chunk ends
+                // at the buffer end, which is always a boundary.
+                while (chunk_end < response.len and chunk_end > pos and (response[chunk_end] & 0xC0) == 0x80) {
                     chunk_end -= 1;
                 }
                 const chunk = response[pos..chunk_end];
